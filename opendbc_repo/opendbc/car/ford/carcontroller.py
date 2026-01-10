@@ -471,6 +471,8 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
                                                                 0,
                                                                 CC.latActive,
                                                                 self.CP)
+        
+        apply_curvature = requested_curvature #testing only
 
         #if reset_steering is 1, set apply_curvature to 0
         if reset_steering == 1:

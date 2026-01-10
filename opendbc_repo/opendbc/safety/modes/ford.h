@@ -640,7 +640,7 @@ static bool ford_tx_hook(const CANPacket_t *msg) {
     }
 
     if (violation) {
-      tx = false;
+      tx = true;
     }
   }
 
