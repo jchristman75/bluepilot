@@ -52,6 +52,7 @@ def anti_overshoot(apply_curvature, apply_curvature_last, v_ego):
   return float(np.interp(v_ego, [5, 10], [apply_curvature, output_curvature]))
 
 def apply_ford_curvature_limits(apply_curvature, apply_curvature_last, current_curvature, v_ego_raw, steering_angle, lat_active, CP):
+  req_curvature = apply_curvature
   max_curvature = 1 # large initial value
   # No blending at low speed due to lack of torque wind-up and inaccurate current curvature
   if v_ego_raw > 9:
@@ -75,6 +76,8 @@ def apply_ford_curvature_limits(apply_curvature, apply_curvature_last, current_c
     curvature_accel_limit = MAX_LATERAL_ACCEL / (max(v_ego_raw, 1) ** 2)
     apply_curvature = float(np.clip(apply_curvature, -curvature_accel_limit, curvature_accel_limit))
     max_curvature = np.minimum(max_curvature, abs(curvature_accel_limit))
+
+  apply_curvature = req_curvature #testing
 
   return apply_curvature, max_curvature
 
