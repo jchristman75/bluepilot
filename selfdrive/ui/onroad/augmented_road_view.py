@@ -71,14 +71,6 @@ class AugmentedRoadView(CameraView):
 
     # Update calibration before rendering
     self._update_calibration()
-
-    # Create inner content area with border padding
-    # self._content_rect = rl.Rectangle(
-    #   rect.x + UI_BORDER_SIZE,
-    #   rect.y + UI_BORDER_SIZE,
-    #   rect.width - 2 * UI_BORDER_SIZE,
-    #   rect.height - 2 * UI_BORDER_SIZE,
-    # )
     self._content_rect = rect
 
     # Enable scissor mode to clip all rendering within content rectangle boundaries
