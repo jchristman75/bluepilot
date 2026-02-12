@@ -42,6 +42,7 @@ class BluePilotLayoutMici(NavWidget):
     self.hide_fade = BigParamControl("hide onroad fade", "mici_hide_onroad_fade")
     self.hide_border = BigParamControl("hide screen border", "mici_hide_onroad_border")
     self.disable_BP_lat = BigParamControl("disable BP lateral control", "disable_BP_lat_UI")
+    self.disable_BP_long = BigParamControl("bypass BP longitudinal control", "disable_BP_long_UI")
     self.vbatt_pause_charging = BigParamFloatControl("12V battery limit", "vbatt_pause_charging", min=11.0, max=14.0, step=0.1)
     self.min_coasting_ttc = BigParamFloatControl("min coasting TTC (s)", "MIN_COASTING_TTC", min=5.0, max=30.0, step=1.0)
     self.max_coasting_ttc = BigParamFloatControl("max coasting TTC (s)", "MAX_COASTING_TTC", min=15.0, max=60.0, step=1.0)
@@ -87,6 +88,7 @@ class BluePilotLayoutMici(NavWidget):
       self.hide_border,
       self.vbatt_pause_charging,
       self.disable_BP_lat,
+      self.disable_BP_long,
     ], snap_items=False)
 
     # Toggle lists
@@ -102,6 +104,7 @@ class BluePilotLayoutMici(NavWidget):
       ("enable_lane_full_mode", self.enable_lane_full_mode),
       ("custom_profile", self.custom_profile),
       ("disable_BP_lat_UI", self.disable_BP_lat),
+      ("disable_BP_long_UI", self.disable_BP_long),
       ("mici_hide_onroad_fade", self.hide_fade),
       ("mici_hide_onroad_border", self.hide_border),
     )

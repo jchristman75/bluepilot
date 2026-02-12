@@ -38,6 +38,7 @@ class BluePilotLayout(Widget):
       ("enable_lane_full_mode", self._enable_lane_full_mode),
       ("custom_profile", self._custom_profile),
       ("disable_BP_lat_UI", self._disable_BP_lat),
+      ("disable_BP_long_UI", self._disable_BP_long),
     )
 
     ui_state.add_offroad_transition_callback(self._update_toggles)
@@ -277,6 +278,15 @@ class BluePilotLayout(Widget):
       icon="chffr_wheel.png"
     )
 
+    # Bypass BP longitudinal control toggle (use stock long logic)
+    self._disable_BP_long = toggle_item(
+      lambda: tr("Bypass BP Longitudinal Control"),
+      lambda: tr("Use stock longitudinal logic instead of BluePilot TTC/coasting tuning."),
+      initial_state=self._params.get_bool("disable_BP_long_UI"),
+      callback=lambda state: self._toggle_callback(state, "disable_BP_long_UI"),
+      icon="chffr_wheel.png"
+    )
+
     return [
       self._enable_web_routes,
       self._show_web_routes_qr,
@@ -301,6 +311,7 @@ class BluePilotLayout(Widget):
       self._lc_pid_gain,
       self._vbatt_pause_charging,
       self._disable_BP_lat,
+      self._disable_BP_long,
     ]
 
   def _get_float_param(self, param: str, default: float) -> float:
