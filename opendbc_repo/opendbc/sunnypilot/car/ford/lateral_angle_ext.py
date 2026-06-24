@@ -15,15 +15,29 @@ avoid the c0/c1 sign-conflict failure mode). The trim is built from model y at
 (rad, default 0.3) so it can never dominate the κ-derived command. Toggled by the
 ``FordPrefAnglePathOffsetEnable`` param (UI label TBD-renamed in a follow-up cleanup).
 """
-import time
-
 import numpy as np
 from numpy import clip, interp
 
 from opendbc.car import DT_CTRL
 from opendbc.car.ford.values import CAR
+from opendbc.sunnypilot.car.ford.lateral_autotune import LateralAutoTuner
 from opendbc.sunnypilot.car.ford.lateral_curv_ext import LateralResult
 from selfdrive.modeld.constants import ModelConstants
+
+
+def _read_factor_param(params, key: str, default: float) -> float:
+  """Read a float factor from params, clamp to [0.5, 1.5], fallback to default on any error."""
+  try:
+    raw = params.get(key, return_default=True)
+    if raw is not None and raw != b"":
+      return float(clip(
+        float(raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw),
+        0.5, 1.5,
+      ))
+  except Exception:
+    pass
+  return default
+
 
 # Hard-coded per-platform gain defaults (not user-tunable).
 # CAN vehicles (Escape MK4, Bronco Sport, Explorer, Maverick, Edge)
@@ -43,66 +57,6 @@ _CANFD_SUV_CARS = frozenset({
   CAR.FORD_MUSTANG_MACH_E_MK1,
   CAR.FORD_ESCAPE_MK4_5,
 })
-
-
-class _AutoTuner:
-  """Per-speed-regime auto-tune state (low / high).
-
-  Encapsulates smoothed error, integral accumulator, frame counter, and dirty-tracking
-  so that the ~70-line duplicated low/high block in ``_update_auto_tune`` collapses
-  into a single parameterised loop.
-  """
-  __slots__ = ("error_smooth", "integral", "frames_since_adj", "dirty",
-               "factor_name", "ts_name", "count_name",
-               "bp_integral_attr")
-
-  def __init__(self, factor_name: str, ts_name: str, count_name: str,
-               bp_integral_attr: str):
-    self.error_smooth = 0.0
-    self.integral = 0.0
-    self.frames_since_adj = 0
-    self.dirty = False
-    self.factor_name = factor_name
-    self.ts_name = ts_name
-    self.count_name = count_name
-    self.bp_integral_attr = bp_integral_attr
-
-  def step(self, raw_error: float, alpha: float, int_thresh: float,
-           int_clamp: float, min_frames: int, parent) -> None:
-    self.frames_since_adj += 1
-    self.error_smooth = alpha * raw_error + (1 - alpha) * self.error_smooth
-    self.integral += clip(raw_error, -int_clamp, int_clamp)
-
-    if self.frames_since_adj >= min_frames:
-      if self.integral > int_thresh:
-        parent._adjust_factor(self.factor_name, parent._AT_STEP,
-                             self.ts_name, self.count_name)
-        self._post_adjust()
-      elif self.integral < -int_thresh:
-        parent._adjust_factor(self.factor_name, -parent._AT_STEP,
-                             self.ts_name, self.count_name)
-        self._post_adjust()
-
-  def _post_adjust(self):
-    self.dirty = True
-    self.integral = 0.0
-    self.frames_since_adj = 0
-
-  def flush(self, params) -> None:
-    """Persist timestamp and counter for dirty regime (idempotent)."""
-    if not self.dirty:
-      return
-    try:
-      params.put_non_atomic(self.ts_name, str(int(time.time())))
-      try:
-        cnt_raw = params.get(self.count_name, return_default=True)
-        cnt = int(cnt_raw) if cnt_raw and cnt_raw != b"" else 0
-        params.put_non_atomic(self.count_name, str(cnt + 1))
-      except Exception:
-        pass
-    except Exception:
-      pass
-    self.dirty = False
 
 
 # DBC ``LatCtlPath_An_Actl`` (rad) — panda safety uses the same in ``ford.h``; PSCM enforces in firmware.
@@ -238,24 +192,9 @@ class LateralAngleExt:
     self.angle_trim_enable = True
     # High-curvature gain scale floor — reduces gain in tight turns to prevent sustained over-steer.
     self.high_curv_gain_scale = 0.825
-    # Auto-tune state: gradually adjust low/high speed factors based on requested vs actual angle error.
-    self.angle_auto_tune_enable = False
-    # Regime objects encapsulate smoothed error, integral, frame counter, and dirty flag.
-    self._at_regime_low = _AutoTuner(
-      "FordAngleLowSpeedFactor",
-      "FordAngleAutoTuneLastAdjustedLow",
-      "FordAngleAutoTuneAdjustmentsLow",
-      "bp_at_integral_low",
-    )
-    self._at_regime_high = _AutoTuner(
-      "FordAngleHighSpeedFactor",
-      "FordAngleAutoTuneLastAdjustedHigh",
-      "FordAngleAutoTuneAdjustmentsHigh",
-      "bp_at_integral_high",
-    )
-    self._at_last_flush_ts = 0.0
-    self._at_flush_interval = 30.0  # seconds between forced persistence
-    # Telemetry exposed for UI / debugging.
+    # Auto-tune: integrating controller that nudges low/high speed factors toward zero tracking error.
+    self._auto_tuner = LateralAutoTuner()
+    # Telemetry mirrors exposed for UI / debugging.
     self.bp_at_actual_curvature = 0.0
     self.bp_at_curvature_error = 0.0
     self.bp_at_integral_low = 0.0
@@ -274,20 +213,15 @@ class LateralAngleExt:
     self.path_angle_gain_lowC_highV = low
     self.path_angle_gain_highC_highV = high
     if params is not None and hasattr(params, "get"):
-      for attr, key in (("low_speed_curv_factor", "FordAngleLowSpeedFactor"),
-                        ("high_speed_curv_factor", "FordAngleHighSpeedFactor")):
-        try:
-          raw = params.get(key, return_default=True)
-          if raw is not None and raw != b"":
-            setattr(self, attr, float(clip(
-              float(raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw), 0.5, 1.5)))
-        except Exception:
-          pass
-      # Auto-tune enable flag
+      low_factor = _read_factor_param(params, "FordAngleLowSpeedFactor", self._auto_tuner.low_factor)
+      high_factor = _read_factor_param(params, "FordAngleHighSpeedFactor", self._auto_tuner.high_factor)
       try:
-        self.angle_auto_tune_enable = params.get_bool("FordAngleAutoTuneEnable")
+        enabled = params.get_bool("FordAngleAutoTuneEnable")
       except Exception:
-        self.angle_auto_tune_enable = False
+        enabled = False
+      self._auto_tuner.configure(params, enabled, low_factor, high_factor)
+      self.low_speed_curv_factor = self._auto_tuner.low_factor
+      self.high_speed_curv_factor = self._auto_tuner.high_factor
 
   def update_angle_strategy(self, CC, CS, actuators, CP):
     """
@@ -337,13 +271,8 @@ class LateralAngleExt:
       self.LC_path_angle_reset_counter = 0
       self.precision_type = 1
       # Reset auto-tune accumulators on disengage and persist any dirty factors.
-      self._flush_auto_tune()
-      self._at_regime_low.error_smooth = 0.0
-      self._at_regime_low.integral = 0.0
-      self._at_regime_high.error_smooth = 0.0
-      self._at_regime_high.integral = 0.0
-      self._at_regime_low.frames_since_adj = 0
-      self._at_regime_high.frames_since_adj = 0
+      self._auto_tuner.flush()
+      self._auto_tuner.reset()
       self.bp_at_actual_curvature = 0.0
       self.bp_at_curvature_error = 0.0
       return LateralResult(
@@ -450,7 +379,17 @@ class LateralAngleExt:
 
     # Auto-tune: compare requested curvature against actual vehicle curvature,
     # gradually adjust low/high speed factors to minimize tracking error.
-    self._update_auto_tune(kappa_cmd, v_ego, CS)
+    # Skip if driver is applying torque — their input corrupts the error signal.
+    if not CS.out.steeringPressed:
+      self._auto_tuner.update(kappa_cmd, v_ego, CS)
+    # Mirror tuner's factor values — an adjustment this frame takes effect next frame's gain calc.
+    self.low_speed_curv_factor = self._auto_tuner.low_factor
+    self.high_speed_curv_factor = self._auto_tuner.high_factor
+    # Mirror telemetry
+    self.bp_at_actual_curvature = self._auto_tuner.actual_curvature
+    self.bp_at_curvature_error = self._auto_tuner.curvature_error
+    self.bp_at_integral_low = self._auto_tuner.integral_low
+    self.bp_at_integral_high = self._auto_tuner.integral_high
 
     # Apply trim, then DBC clip.
     path_angle = path_angle_calc
@@ -510,116 +449,3 @@ class LateralAngleExt:
       lateralUncertainty=lateral_uncertainty,
     )
 
-  # Auto-tune constants ----------------------------------------------------------
-  # Exponential smoothing alpha for curvature error (0.1 = ~10 frame window at 10Hz steer).
-  _AT_ALPHA = 0.1
-  # Integration threshold (rad/m-frames) — must accumulate this much error before adjusting.
-  _AT_INT_THRESH = 0.0008
-  # Per-frame integration clamp — prevents a single bad frame from triggering an adjustment.
-  _AT_INT_CLAMP = 0.0002
-  # Minimum frames between adjustments (at 10 Hz steer loop: 150 frames = 15 s).
-  _AT_MIN_FRAMES = 150
-  # Adjustment step size — how much to nudge the factor per trigger.
-  _AT_STEP = 0.01
-  # Speed boundary: below = low-speed regime, above = high-speed regime (m/s).
-  _AT_SPEED_BOUNDARY = 20.0
-  # Minimum curvature to trust the error signal (ignore straight-line noise).
-  _AT_KAPPA_MIN = 0.003
-  # Maximum curvature to trust (beyond this PSCM limits dominate, error is meaningless).
-  _AT_KAPPA_MAX = 0.025
-  # Minimum speed for meaningful yaw-rate signal.
-  _AT_V_MIN = 5.0
-
-  def _update_auto_tune(self, kappa_cmd: float, v_ego: float, CS):
-    """
-    Gradually adjust low/high speed curvature factors to minimize the gap between
-    requested curvature (kappa_cmd) and actual vehicle curvature (yawRate / vEgo).
-
-    Algorithm:
-      1. Compute actual curvature from yawRate / vEgo.
-      2. Error = kappa_cmd - actual_kappa (positive = understeering, negative = oversteering).
-      3. Smooth error with exponential filter.
-      4. Integrate smoothed error (clamped per-frame) until threshold crossed.
-      5. When threshold crossed: nudge the relevant factor up/down by _AT_STEP.
-      6. Separate accumulators for low-speed (< 20 m/s) and high-speed (>= 20 m/s) regimes.
-      7. Persistence to Params is deferred: flushed on disengage or every _at_flush_interval seconds.
-    """
-    if not self.angle_auto_tune_enable:
-      return
-
-    actual_kappa = 0.0
-    try:
-      actual_yaw = float(CS.out.yawRate)
-      actual_v = float(CS.out.vEgoRaw)
-      if actual_v > self._AT_V_MIN:
-        actual_kappa = actual_yaw / actual_v
-    except Exception:
-      return
-
-    abs_kappa = abs(kappa_cmd)
-    if abs_kappa < self._AT_KAPPA_MIN or abs_kappa > self._AT_KAPPA_MAX:
-      self._at_regime_low.frames_since_adj += 1
-      self._at_regime_high.frames_since_adj += 1
-      return
-
-    raw_error = kappa_cmd - actual_kappa
-    active = self._at_regime_low if v_ego < self._AT_SPEED_BOUNDARY else self._at_regime_high
-
-    # Always advance both frame counters so the idle regime also ages.
-    self._at_regime_low.frames_since_adj += 1
-    self._at_regime_high.frames_since_adj += 1
-
-    # Smooth + integrate (uses smoothed error, not raw, to avoid impulse triggers).
-    active.error_smooth = (self._AT_ALPHA * raw_error
-                           + (1 - self._AT_ALPHA) * active.error_smooth)
-    active.integral += clip(active.error_smooth, -self._AT_INT_CLAMP, self._AT_INT_CLAMP)
-
-    if active.frames_since_adj >= self._AT_MIN_FRAMES:
-      if active.integral > self._AT_INT_THRESH:
-        self._adjust_factor(active.factor_name, self._AT_STEP)
-        active._post_adjust()
-      elif active.integral < -self._AT_INT_THRESH:
-        self._adjust_factor(active.factor_name, -self._AT_STEP)
-        active._post_adjust()
-
-    # Telemetry
-    self.bp_at_actual_curvature = actual_kappa
-    self.bp_at_curvature_error = raw_error
-    if v_ego < self._AT_SPEED_BOUNDARY:
-      self.bp_at_integral_low = active.integral
-    else:
-      self.bp_at_integral_high = active.integral
-
-    # Periodic persistence flush (avoids blocking steer loop on every adjustment).
-    now = time.monotonic()
-    if (self._at_regime_low.dirty or self._at_regime_high.dirty):
-      if now - self._at_last_flush_ts >= self._at_flush_interval:
-        self._flush_auto_tune()
-
-  def _adjust_factor(self, param_name: str, step: float):
-    """Read current factor from Params, apply step, clamp, update in-memory."""
-    try:
-      raw = self.params.get(param_name, return_default=True)
-      if raw is None or raw == b"":
-        current = 1.0
-      else:
-        current = (float(raw.decode("utf-8", errors="replace"))
-                   if isinstance(raw, bytes) else float(raw))
-      new_val = clip(current + step, 0.5, 1.5)
-      self.params.put(param_name, str(new_val))
-      # Update in-memory factor so the next steer frame uses the new value.
-      if param_name == "FordAngleLowSpeedFactor":
-        self.low_speed_curv_factor = new_val
-      else:
-        self.high_speed_curv_factor = new_val
-    except Exception:
-      pass
-
-  def _flush_auto_tune(self):
-    """Persist timestamp and counter for any dirty regime (idempotent)."""
-    try:
-      self._at_regime_low.flush(self.params)
-      self._at_regime_high.flush(self.params)
-    except Exception:
-      pass
-    self._at_last_flush_ts = time.monotonic()

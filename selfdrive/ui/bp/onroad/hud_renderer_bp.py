@@ -5,13 +5,14 @@ from openpilot.selfdrive.ui.sunnypilot.onroad.hud_renderer import HudRendererSP
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.selfdrive.ui.bp.lib.ui_debug_logger import bp_ui_log
+from openpilot.selfdrive.ui.bp.lib.autotune_display_mixin import AutotuneDisplayMixin
 
 # BluePilot: Y center for speed display (matching upstream hardcoded values)
 SPEED_CENTER_Y = 180
 SPEED_UNIT_CENTER_Y = 290
 
 
-class HudRendererBP(HudRendererSP):
+class HudRendererBP(AutotuneDisplayMixin, HudRendererSP):
   """BluePilot HudRenderer with brake status display.
 
   Note: Torque bar is rendered by TorqueBarRendererBP in AugmentedRoadViewBP,
@@ -30,9 +31,7 @@ class HudRendererBP(HudRendererSP):
     self._param_counter = 0
     self._show_brake_status = self._bp_params.get_bool("ShowBrakeStatus")
     self._hide_v_ego_ui = self._bp_params.get_bool("HideVEgoUI")
-    self._autotune_enable = self._bp_params.get_bool("FordAngleAutoTuneEnable")
-    self._at_low_factor = 1.0
-    self._at_high_factor = 1.0
+    self._init_autotune_display()
 
   def set_gradient_rect(self, rect: rl.Rectangle):
     """Set full-width rect for header gradient (when HUD renders offset for confidence ball)."""
@@ -50,12 +49,7 @@ class HudRendererBP(HudRendererSP):
       self._param_counter = 0
       self._show_brake_status = self._bp_params.get_bool("ShowBrakeStatus")
       self._hide_v_ego_ui = self._bp_params.get_bool("HideVEgoUI")
-      self._autotune_enable = self._bp_params.get_bool("FordAngleAutoTuneEnable")
-      try:
-        self._at_low_factor = float(self._bp_params.get("FordAngleLowSpeedFactor", return_default=True))
-        self._at_high_factor = float(self._bp_params.get("FordAngleHighSpeedFactor", return_default=True))
-      except (TypeError, ValueError):
-        pass
+      self._refresh_autotune_display()
 
     # Check brake status if enabled
     if self._show_brake_status:
