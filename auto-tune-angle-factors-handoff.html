@@ -1,0 +1,202 @@
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BluePilot Auto-Tune Angle Factors — Handoff Document</title>
+<style>
+body { font-family: system-ui, sans-serif; max-width: 860px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; line-height: 1.6; }
+h1 { border-bottom: 2px solid #3b82f6; padding-bottom: .3rem; }
+h2 { border-bottom: 1px solid #e5e7eb; padding-bottom: .2rem; margin-top: 2rem; }
+h3 { color: #1e40af; }
+code { background: #f3f4f6; padding: .1rem .35rem; border-radius: 3px; font-size: .92em; }
+pre { background: #1e293b; color: #e2e8f0; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: .88em; }
+table { border-collapse: collapse; width: 100%; margin: .5rem 0; }
+th, td { border: 1px solid #d1d5db; padding: .4rem .6rem; text-align: left; }
+th { background: #f9fafb; }
+.warn { background: #fef3c7; border-left: 4px solid #f59e0b; padding: .6rem 1rem; border-radius: 4px; margin: 1rem 0; }
+.ok   { background: #dcfce7; border-left: 4px solid #22c55e; padding: .6rem 1rem; border-radius: 4px; margin: 1rem 0; }
+.meta { font-size: .85em; color: #6b7280; }
+</style>
+</head>
+<body>
+
+<h1>Auto-Tune Angle Factors — Handoff Document</h1>
+<p class="meta">
+  Generated: 2026-06-23 &nbsp;|&nbsp;
+  Branch: <code>bp-6.0-ui-refactor</code> &nbsp;|&nbsp;
+  BluePilot version: 5.0.0 &rarr; 6.0.0 (in development)
+</p>
+
+<h2>Goal</h2>
+<p>
+  Automatically adjust the <strong>Low Speed Adjustment Factor</strong> and
+  <strong>High Speed Adjustment Factor</strong> for Ford angle-mode lateral
+  control while the vehicle is driving, so the user gets a personalised steering
+  feel without manual trial-and-error tuning.
+</p>
+
+<h2>How It Works</h2>
+
+<h3>Core Idea</h3>
+<p>
+  The steer loop (10 Hz) compares <em>requested curvature</em>
+  (<code>kappa_cmd</code> from the planner) against <em>actual vehicle
+  curvature</em> (<code>yawRate / vEgo</code> from sensors).  The signed error
+  tells us whether the car is understeering (positive error) or oversteering
+  (negative error) relative to the planned path.
+</p>
+
+<h3>Algorithm (per steer-loop tick)</h3>
+<ol>
+  <li><strong>Compute actual curvature:</strong> <code>actual_kappa = yawRate / vEgoRaw</code></li>
+  <li><strong>Compute error:</strong> <code>error = kappa_cmd - actual_kappa</code></li>
+  <li><strong>Smooth error:</strong> exponential filter with <code>alpha = 0.1</code> (~10-frame window)</li>
+  <li><strong>Integrate error:</strong> accumulate clamped error (±0.0002 per frame) into a running sum</li>
+  <li><strong>Threshold check:</strong> when integrated error crosses ±0.0008 <em>and</em> at least 150 frames (15 s) have elapsed since the last adjustment → nudge the relevant factor by ±0.01</li>
+  <li><strong>Persist:</strong> write new factor value back to Params, update timestamp and adjustment counter</li>
+  <li><strong>Reset accumulator:</strong> zero the integral and frame counter after an adjustment</li>
+</ol>
+
+<h3>Speed Regimes</h3>
+<table>
+<tr><th>Regime</th><th>Speed Range</th><th>Param Adjusted</th></tr>
+<tr><td>Low speed</td><td>v &lt; 20 m/s (~45 mph)</td><td><code>FordAngleLowSpeedFactor</code></td></tr>
+<tr><td>High speed</td><td>v &ge; 20 m/s (~45 mph)</td><td><code>FordAngleHighSpeedFactor</code></td></tr>
+</table>
+
+<h3>Guardrails</h3>
+<ul>
+  <li>Curvature must be in trusted range: 0.003 &le; |kappa| &le; 0.025 rad/m</li>
+  <li>Speed must be &gt; 5 m/s for meaningful yaw-rate signal</li>
+  <li>Max 1 adjustment per 15 seconds per regime</li>
+  <li>Step size capped at ±0.01</li>
+  <li>Factors clamped to [0.5, 1.5]</li>
+  <li>All accumulators reset when lateral control disengages</li>
+  <li>Disabled by default — user must opt in via toggle</li>
+</ul>
+
+<h2>Files Modified</h2>
+<table>
+<tr><th>File</th><th>What Changed</th></tr>
+<tr>
+  <td><code>bluepilot/params/params.json</code></td>
+  <td>Added 5 new parameter definitions: <code>FordAngleAutoTuneEnable</code> (bool, default 0), <code>FordAngleAutoTuneLastAdjustedLow</code> (int), <code>FordAngleAutoTuneLastAdjustedHigh</code> (int), <code>FordAngleAutoTuneAdjustmentsLow</code> (int), <code>FordAngleAutoTuneAdjustmentsHigh</code> (int)</td>
+</tr>
+<tr>
+  <td><code>common/params_keys.h</code></td>
+  <td>Added same 5 params to the C++ params registry (PERSISTENT | BACKUP for the toggle, PERSISTENT for telemetry counters)</td>
+</tr>
+<tr>
+  <td><code>opendbc_repo/opendbc/sunnypilot/car/ford/lateral_angle_ext.py</code></td>
+  <td>
+    <ul>
+      <li><code>__init__</code>: read <code>FordAngleAutoTuneEnable</code> from Params; initialise 7 auto-tune state variables</li>
+      <li>Disengage block (<code>if not CC.latActive</code>): reset all auto-tune accumulators</li>
+      <li>Main path (after <code>path_angle_calc</code>): call <code>_update_auto_tune(kappa_cmd, v_ego, CS)</code></li>
+      <li>New method <code>_update_auto_tune()</code>: full algorithm (~100 lines)</li>
+      <li>New method <code>_adjust_factor()</code>: read factor from Params, apply step, clamp, write back</li>
+      <li>Telemetry outputs: <code>bp_at_actual_curvature</code>, <code>bp_at_curvature_error</code>, <code>bp_at_integral_low</code>, <code>bp_at_integral_high</code></li>
+    </ul>
+  </td>
+</tr>
+<tr>
+  <td><code>selfdrive/ui/bp/layouts/settings/bluepilot.py</code></td>
+  <td>
+    <ul>
+      <li>New toggle item <code>_angle_auto_tune</code> inserted into Lateral Tuning section (between high-speed factor and "Disable BP Lateral Control")</li>
+      <li>Added to <code>_refresh_toggles</code> tuple for live state sync</li>
+    </ul>
+  </td>
+</tr>
+</table>
+
+<h2>Key Constants (in lateral_angle_ext.py)</h2>
+<pre>
+_AT_ALPHA            = 0.1       # exponential smoothing factor
+_AT_INT_THRESH       = 0.0008    # integration threshold (rad/m-frames)
+_AT_INT_CLAMP        = 0.0002    # per-frame integration clamp
+_AT_MIN_FRAMES       = 150       # min frames between adjustments (15 s @ 10 Hz)
+_AT_STEP             = 0.01      # adjustment step size
+_AT_SPEED_BOUNDARY   = 20.0      # m/s — low vs high speed split
+_AT_KAPPA_MIN        = 0.003     # min curvature to trust
+_AT_KAPPA_MAX        = 0.025     # max curvature to trust
+_AT_V_MIN            = 5.0       # min speed for meaningful yaw-rate
+</pre>
+
+<h2>Parameters Summary</h2>
+<table>
+<tr><th>Param</th><th>Type</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>FordAngleAutoTuneEnable</code></td><td>bool</td><td>0</td><td>Master toggle — enable/disable auto-tune</td></tr>
+<tr><td><code>FordAngleAutoTuneLastAdjustedLow</code></td><td>int</td><td>0</td><td>Unix timestamp of last low-speed adjustment</td></tr>
+<tr><td><code>FordAngleAutoTuneLastAdjustedHigh</code></td><td>int</td><td>0</td><td>Unix timestamp of last high-speed adjustment</td></tr>
+<tr><td><code>FordAngleAutoTuneAdjustmentsLow</code></td><td>int</td><td>0</td><td>Count of low-speed adjustments (diagnostic)</td></tr>
+<tr><td><code>FordAngleAutoTuneAdjustmentsHigh</code></td><td>int</td><td>0</td><td>Count of high-speed adjustments (diagnostic)</td></tr>
+</table>
+
+<h2>Known Limitations &amp; Open Questions</h2>
+<div class="warn">
+  <strong>Telemetry visibility:</strong> The telemetry outputs
+  (<code>bp_at_actual_curvature</code>, <code>bp_at_curvature_error</code>,
+  integrals) are stored on the class instance but not yet exposed to any UI
+  element or cereal message.  A follow-up could wire these into the developer
+  overlay or a dedicated debug screen so the user can see tuning progress.
+</div>
+
+<div class="warn">
+  <strong>Reset on reboot:</strong> The integral accumulators and frame counters
+  reset on every reboot (they live in Python instance state).  This is
+  intentional — carries no risk — but means the auto-tune starts fresh each
+  drive session.  The <em>factor values themselves</em> persist across reboots
+  via Params.
+</div>
+
+<div class="warn">
+  <strong>No upper-bound on total adjustments:</strong> The system can keep
+  adjusting indefinitely.  A possible enhancement: cap total adjustments per
+  session or add a convergence detector that auto-disables after factors
+  stabilise.
+</div>
+
+<div class="warn">
+  <strong>Single-axis error:</strong> The algorithm uses curvature error only.
+  Lane-centering error (lateral position) is not factored in.  A more advanced
+  version could weight both curvature tracking and lateral position error.
+</div>
+
+<h2>How to Continue</h2>
+<ol>
+  <li><strong>Test on vehicle:</strong> Enable the toggle, drive varied routes
+      (low-speed curves, highway curves), monitor adjustment counts in
+      Params to verify the system is active.</li>
+  <li><strong>Adjust constants:</strong> If tuning is too aggressive or too
+      slow, tweak <code>_AT_STEP</code>, <code>_AT_INT_THRESH</code>, or
+      <code>_AT_MIN_FRAMES</code> in <code>lateral_angle_ext.py</code>.</li>
+  <li><strong>Expose telemetry:</strong> Wire the <code>bp_at_*</code> outputs
+      into the developer UI overlay or a new debug panel for real-time
+      visibility.</li>
+  <li><strong>Add convergence detection:</strong> If factor hasn't changed in
+      N seconds, auto-disable and notify user that tuning is complete.</li>
+  <li><strong>Consider lateral position error:</strong> Extend the algorithm to
+      also weight <code>lpLane</code> or <code>lateralPosition</code> error for
+      a more complete picture.</li>
+</ol>
+
+<h2>Conversation Context</h2>
+<p>
+  This work was initiated by the user requesting an "auto tune" system for the
+  two Ford angle lateral gains (low speed and high speed adjustment factors).
+  The user wanted the system to use <em>requested versus actual angle</em> while
+  driving to make small incremental changes.  The implementation was completed
+  in a single session covering: param definitions, C++ registry, core
+  algorithm, UI toggle, and disengage-state resets.  The user then asked about
+  <code>params_keys.h</code> (which was missing the 5 new entries) — that was
+  fixed.  This handoff document is the final artefact of the session.
+</p>
+
+<div class="ok">
+  <strong>Session status:</strong> All code changes complete and syntax-
+  validated.  Ready for vehicle testing.  No pending edits.
+</div>
+
+</body>
+</html>

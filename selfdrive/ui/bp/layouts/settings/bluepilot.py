@@ -77,6 +77,7 @@ class BluePilotLayout(Widget):
       ("disable_ford_radar_UI", self._disable_ford_radar),
       ("BpShowLateralControl", self._show_lateral_control),
       ("BPUIDebugLog", self._ui_debug_log),
+      ("FordAngleAutoTuneEnable", self._angle_auto_tune),
     )
 
     ui_state.add_offroad_transition_callback(self._update_toggles)
@@ -394,6 +395,17 @@ class BluePilotLayout(Widget):
       step=0.01,
       icon="chffr_wheel.png"
     )
+
+    # Auto-tune toggle — automatically adjusts low/high speed factors while driving
+    self._angle_auto_tune = toggle_item(
+      lambda: tr("Auto-Tune Angle Factors"),
+      lambda: tr("Automatically adjusts low and high speed factors while driving to minimize steering tracking error. "
+                 "Disable before manual tuning. Requires active lateral control and steady curves to engage."),
+      initial_state=self._safe_get_bool(self._params, "FordAngleAutoTuneEnable"),
+      callback=lambda state: self._toggle_callback(state, "FordAngleAutoTuneEnable"),
+      icon="chffr_wheel.png"
+    )
+
     # Disable BP lateral control toggle
     self._disable_BP_lat = toggle_item(
       lambda: tr("Disable BP Lateral Control"),
@@ -506,6 +518,7 @@ class BluePilotLayout(Widget):
         self._primary_lateral_control_btn,
         self._low_speed_curv_factor,
         self._high_speed_curv_factor,
+        self._angle_auto_tune,
         self._disable_BP_lat,
         # BluePilot: hidden during angle tuning — restore when curvature mode is active
         # self._enable_human_turn_detection,

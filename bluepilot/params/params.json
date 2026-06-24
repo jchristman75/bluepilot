@@ -200,6 +200,47 @@
       "enabled": true
     },
     {
+      "name": "FordAngleAutoTuneEnable",
+      "default": false,
+      "type": "bool",
+      "flags": ["PERSISTENT", "BACKUP"],
+      "ccProp": "angle_auto_tune_enable",
+      "create_default": true,
+      "enabled": true
+    },
+    {
+      "name": "FordAngleAutoTuneLastAdjustedLow",
+      "default": 0,
+      "type": "int",
+      "flags": ["PERSISTENT"],
+      "create_default": false,
+      "enabled": true
+    },
+    {
+      "name": "FordAngleAutoTuneLastAdjustedHigh",
+      "default": 0,
+      "type": "int",
+      "flags": ["PERSISTENT"],
+      "create_default": false,
+      "enabled": true
+    },
+    {
+      "name": "FordAngleAutoTuneAdjustmentsLow",
+      "default": 0,
+      "type": "int",
+      "flags": ["PERSISTENT"],
+      "create_default": false,
+      "enabled": true
+    },
+    {
+      "name": "FordAngleAutoTuneAdjustmentsHigh",
+      "default": 0,
+      "type": "int",
+      "flags": ["PERSISTENT"],
+      "create_default": false,
+      "enabled": true
+    },
+    {
       "name": "FordLatTuningPCBlendRatio_high_C",
       "default": 0.4,
       "min": 0.0,

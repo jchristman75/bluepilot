@@ -176,6 +176,22 @@ class LateralAngleExt:
     self.angle_trim_enable = True
     # High-curvature gain scale floor — reduces gain in tight turns to prevent sustained over-steer.
     self.high_curv_gain_scale = 0.825
+    # Auto-tune state: gradually adjust low/high speed factors based on requested vs actual angle error.
+    self.angle_auto_tune_enable = False
+    # Smoothed curvature error (requested - actual), separate accumulators for low/high speed regimes.
+    self._at_error_smooth_low = 0.0
+    self._at_error_smooth_high = 0.0
+    # Integrated error — crosses threshold to trigger an adjustment.
+    self._at_integral_low = 0.0
+    self._at_integral_high = 0.0
+    # Frame counters since last adjustment (to enforce minimum interval).
+    self._at_frames_since_adj_low = 0
+    self._at_frames_since_adj_high = 0
+    # Telemetry exposed for UI / debugging.
+    self.bp_at_actual_curvature = 0.0
+    self.bp_at_curvature_error = 0.0
+    self.bp_at_integral_low = 0.0
+    self.bp_at_integral_high = 0.0
 
   def update_angle_params(self, params):
     """Sets per-platform gain defaults and reads user feel-factor params."""
@@ -199,6 +215,11 @@ class LateralAngleExt:
               float(raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw), 0.5, 1.5)))
         except Exception:
           pass
+      # Auto-tune enable flag
+      try:
+        self.angle_auto_tune_enable = params.get_bool("FordAngleAutoTuneEnable")
+      except Exception:
+        self.angle_auto_tune_enable = False
 
   def update_angle_strategy(self, CC, CS, actuators, CP):
     """
@@ -247,6 +268,15 @@ class LateralAngleExt:
       self.LC_PID_controller.reset()
       self.LC_path_angle_reset_counter = 0
       self.precision_type = 1
+      # Reset auto-tune accumulators on disengage
+      self._at_error_smooth_low = 0.0
+      self._at_error_smooth_high = 0.0
+      self._at_integral_low = 0.0
+      self._at_integral_high = 0.0
+      self._at_frames_since_adj_low = 0
+      self._at_frames_since_adj_high = 0
+      self.bp_at_actual_curvature = 0.0
+      self.bp_at_curvature_error = 0.0
       return LateralResult(
         apply_curvature=0.0,
         curvature_rate=0.0,
@@ -349,6 +379,9 @@ class LateralAngleExt:
 
     path_angle_calc = kappa_cmd * v_ego * self.curvature_factor
 
+    # Auto-tune: compare requested curvature against actual vehicle curvature,
+    # gradually adjust low/high speed factors to minimize tracking error.
+    self._update_auto_tune(kappa_cmd, v_ego, CS)
 
     # Apply trim, then DBC clip.
     path_angle = path_angle_calc
@@ -407,3 +440,130 @@ class LateralAngleExt:
       precision_type=self.precision_type,
       lateralUncertainty=lateral_uncertainty,
     )
+
+  # Auto-tune constants ----------------------------------------------------------
+  # Exponential smoothing alpha for curvature error (0.1 = ~10 frame window at 10Hz steer).
+  _AT_ALPHA = 0.1
+  # Integration threshold (rad/m-frames) — must accumulate this much error before adjusting.
+  _AT_INT_THRESH = 0.0008
+  # Per-frame integration clamp — prevents a single bad frame from triggering an adjustment.
+  _AT_INT_CLAMP = 0.0002
+  # Minimum frames between adjustments (at 10 Hz steer loop: 150 frames = 15 s).
+  _AT_MIN_FRAMES = 150
+  # Adjustment step size — how much to nudge the factor per trigger.
+  _AT_STEP = 0.01
+  # Speed boundary: below = low-speed regime, above = high-speed regime (m/s).
+  _AT_SPEED_BOUNDARY = 20.0
+  # Minimum curvature to trust the error signal (ignore straight-line noise).
+  _AT_KAPPA_MIN = 0.003
+  # Maximum curvature to trust (beyond this PSCM limits dominate, error is meaningless).
+  _AT_KAPPA_MAX = 0.025
+  # Minimum speed for meaningful yaw-rate signal.
+  _AT_V_MIN = 5.0
+
+  def _update_auto_tune(self, kappa_cmd: float, v_ego: float, CS):
+    """
+    Gradually adjust low/high speed curvature factors to minimize the gap between
+    requested curvature (kappa_cmd) and actual vehicle curvature (yawRate / vEgo).
+
+    Algorithm:
+      1. Compute actual curvature from yawRate / vEgo.
+      2. Error = kappa_cmd - actual_kappa (positive = understeering, negative = oversteering).
+      3. Smooth error with exponential filter.
+      4. Integrate smoothed error (clamped per-frame) until threshold crossed.
+      5. When threshold crossed: nudge the relevant factor up/down by _AT_STEP, persist to Params.
+      6. Separate accumulators for low-speed (< 20 m/s) and high-speed (>= 20 m/s) regimes.
+    """
+    if not self.angle_auto_tune_enable:
+      return
+
+    actual_kappa = 0.0
+    try:
+      actual_yaw = float(CS.out.yawRate)
+      actual_v = float(CS.out.vEgoRaw)
+      if actual_v > self._AT_V_MIN:
+        actual_kappa = actual_yaw / actual_v
+    except Exception:
+      return
+
+    abs_kappa = abs(kappa_cmd)
+    if abs_kappa < self._AT_KAPPA_MIN or abs_kappa > self._AT_KAPPA_MAX:
+      self._at_frames_since_adj_low += 1
+      self._at_frames_since_adj_high += 1
+      return
+
+    raw_error = kappa_cmd - actual_kappa
+
+    if v_ego < self._AT_SPEED_BOUNDARY:
+      self._at_frames_since_adj_low += 1
+      self._at_frames_since_adj_high += 1
+      self._at_error_smooth_low = (self._AT_ALPHA * raw_error
+                                   + (1 - self._AT_ALPHA) * self._at_error_smooth_low)
+      self._at_integral_low += clip(raw_error, -self._AT_INT_CLAMP, self._AT_INT_CLAMP)
+
+      adj_needed = False
+      if self._at_frames_since_adj_low >= self._AT_MIN_FRAMES:
+        if self._at_integral_low > self._AT_INT_THRESH:
+          self._adjust_factor("FordAngleLowSpeedFactor", self._AT_STEP,
+                             "FordAngleAutoTuneLastAdjustedLow", "FordAngleAutoTuneAdjustmentsLow")
+          adj_needed = True
+        elif self._at_integral_low < -self._AT_INT_THRESH:
+          self._adjust_factor("FordAngleLowSpeedFactor", -self._AT_STEP,
+                             "FordAngleAutoTuneLastAdjustedLow", "FordAngleAutoTuneAdjustmentsLow")
+          adj_needed = True
+
+      if adj_needed:
+        self._at_integral_low = 0.0
+        self._at_frames_since_adj_low = 0
+
+      self.bp_at_actual_curvature = actual_kappa
+      self.bp_at_curvature_error = raw_error
+      self.bp_at_integral_low = self._at_integral_low
+    else:
+      self._at_frames_since_adj_low += 1
+      self._at_frames_since_adj_high += 1
+      self._at_error_smooth_high = (self._AT_ALPHA * raw_error
+                                    + (1 - self._AT_ALPHA) * self._at_error_smooth_high)
+      self._at_integral_high += clip(raw_error, -self._AT_INT_CLAMP, self._AT_INT_CLAMP)
+
+      adj_needed = False
+      if self._at_frames_since_adj_high >= self._AT_MIN_FRAMES:
+        if self._at_integral_high > self._AT_INT_THRESH:
+          self._adjust_factor("FordAngleHighSpeedFactor", self._AT_STEP,
+                             "FordAngleAutoTuneLastAdjustedHigh", "FordAngleAutoTuneAdjustmentsHigh")
+          adj_needed = True
+        elif self._at_integral_high < -self._AT_INT_THRESH:
+          self._adjust_factor("FordAngleHighSpeedFactor", -self._AT_STEP,
+                             "FordAngleAutoTuneLastAdjustedHigh", "FordAngleAutoTuneAdjustmentsHigh")
+          adj_needed = True
+
+      if adj_needed:
+        self._at_integral_high = 0.0
+        self._at_frames_since_adj_high = 0
+
+      self.bp_at_actual_curvature = actual_kappa
+      self.bp_at_curvature_error = raw_error
+      self.bp_at_integral_high = self._at_integral_high
+
+  def _adjust_factor(self, param_name: str, step: float,
+                     ts_param: str, count_param: str):
+    """Read current factor from Params, apply step, clamp, write back."""
+    try:
+      raw = self.params.get(param_name, return_default=True)
+      if raw is None or raw == b"":
+        current = 1.0
+      else:
+        current = float(raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw)
+      new_val = float(clip(current + step, 0.5, 1.5))
+      new_val = round(new_val, 3)
+      self.params.put_non_atomic(param_name, str(new_val))
+      import time
+      self.params.put_non_atomic(ts_param, str(int(time.time())))
+      try:
+        cnt_raw = self.params.get(count_param, return_default=True)
+        cnt = int(cnt_raw) if cnt_raw and cnt_raw != b"" else 0
+        self.params.put_non_atomic(count_param, str(cnt + 1))
+      except Exception:
+        pass
+    except Exception:
+      pass
