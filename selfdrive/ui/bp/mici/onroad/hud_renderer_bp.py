@@ -20,6 +20,9 @@ class MiciHudRendererBP(HudRenderer):
     self.show_lateral_control = False
     self.disable_bp_lat = True
     self.primary_control = PrimaryLateralControl.curvature
+    self._autotune_enable = self._bp_params.get_bool("FordAngleAutoTuneEnable")
+    self._at_low_factor = 1.0
+    self._at_high_factor = 1.0
     # BluePilot: Track overlay hit-area for click-to-toggle
     self._overlay_center_x = 0
     self._overlay_center_y = 0
@@ -40,6 +43,12 @@ class MiciHudRendererBP(HudRenderer):
       self._brakes_on = False
 
     self.show_lateral_control = self._bp_params.get_bool("BpShowLateralControl")
+    self._autotune_enable = self._bp_params.get_bool("FordAngleAutoTuneEnable")
+    try:
+      self._at_low_factor = float(self._bp_params.get("FordAngleLowSpeedFactor", return_default=True))
+      self._at_high_factor = float(self._bp_params.get("FordAngleHighSpeedFactor", return_default=True))
+    except (TypeError, ValueError):
+      pass
     if(self.show_lateral_control):
       self.disable_bp_lat = self._bp_params.get_bool("disable_BP_lat_UI")
       self.primary_control = PrimaryLateralControl(self._bp_params.get("FordPrefLateralControl") or 0)
@@ -117,6 +126,10 @@ class MiciHudRendererBP(HudRenderer):
     self._power_flow.set_wheel_rect(power_rect)
     self._power_flow.render(rect)
 
+    # BluePilot: Show autotune speed factors when active
+    if self._autotune_enable:
+      self._draw_autotune_factors(rect)
+
   def _draw_lateral_control_overlay(self, center_x: int, center_y: int, wheel_size: int) -> None:
     """Draw a letter overlay indicating current lateral control mode (only when wheel is visible)."""
     if not self.show_lateral_control or self._wheel_alpha_filter.x <= 0:
@@ -162,3 +175,25 @@ class MiciHudRendererBP(HudRenderer):
       current = PrimaryLateralControl(self._bp_params.get("FordPrefLateralControl") or 0)
       new_value = PrimaryLateralControl.curvature if current == PrimaryLateralControl.angle else PrimaryLateralControl.angle
       self._bp_params.put("FordPrefLateralControl", int(new_value))
+
+  def _draw_autotune_factors(self, rect: rl.Rectangle) -> None:
+    """Display current autotune speed factors."""
+    low_text = f"Low: {self._at_low_factor:.2f}"
+    high_text = f"High: {self._at_high_factor:.2f}"
+    font_size = 14
+    text_color = rl.Color(200, 220, 255, 220)
+    shadow_color = rl.Color(0, 0, 0, 180)
+
+    x = int(rect.x + rect.width / 2)
+    y = int(rect.y + rect.height - 60)
+
+    low_size = measure_text_cached(self._font_bold, low_text, font_size)
+    high_size = measure_text_cached(self._font_bold, high_text, font_size)
+    total_width = low_size.x + high_size.x + 12
+    start_x = x - total_width // 2
+
+    rl.draw_text_ex(self._font_bold, low_text, (start_x + 1, y + 1), font_size, 0, shadow_color)
+    rl.draw_text_ex(self._font_bold, low_text, (start_x, y), font_size, 0, text_color)
+
+    rl.draw_text_ex(self._font_bold, high_text, (start_x + low_size.x + 12 + 1, y + 1), font_size, 0, shadow_color)
+    rl.draw_text_ex(self._font_bold, high_text, (start_x + low_size.x + 12, y), font_size, 0, text_color)

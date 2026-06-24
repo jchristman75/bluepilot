@@ -30,6 +30,9 @@ class HudRendererBP(HudRendererSP):
     self._param_counter = 0
     self._show_brake_status = self._bp_params.get_bool("ShowBrakeStatus")
     self._hide_v_ego_ui = self._bp_params.get_bool("HideVEgoUI")
+    self._autotune_enable = self._bp_params.get_bool("FordAngleAutoTuneEnable")
+    self._at_low_factor = 1.0
+    self._at_high_factor = 1.0
 
   def set_gradient_rect(self, rect: rl.Rectangle):
     """Set full-width rect for header gradient (when HUD renders offset for confidence ball)."""
@@ -47,6 +50,12 @@ class HudRendererBP(HudRendererSP):
       self._param_counter = 0
       self._show_brake_status = self._bp_params.get_bool("ShowBrakeStatus")
       self._hide_v_ego_ui = self._bp_params.get_bool("HideVEgoUI")
+      self._autotune_enable = self._bp_params.get_bool("FordAngleAutoTuneEnable")
+      try:
+        self._at_low_factor = float(self._bp_params.get("FordAngleLowSpeedFactor", return_default=True))
+        self._at_high_factor = float(self._bp_params.get("FordAngleHighSpeedFactor", return_default=True))
+      except (TypeError, ValueError):
+        pass
 
     # Check brake status if enabled
     if self._show_brake_status:
@@ -92,6 +101,10 @@ class HudRendererBP(HudRendererSP):
     self.circular_alerts_renderer.render(rect)
     self.rocket_fuel.render(rect, ui_state.sm)
 
+    # BluePilot: Show autotune speed factors when active
+    if self._autotune_enable:
+      self._draw_autotune_factors(rect)
+
   def _draw_current_speed(self, rect: rl.Rectangle) -> None:
     """Override to add brake status red coloring and track speed_right."""
     # BluePilot: Respect "Speedometer: Hide from Onroad Screen" (HideVEgoUI) from Visuals.
@@ -118,3 +131,22 @@ class HudRendererBP(HudRendererSP):
     shadow_pos = rl.Vector2(unit_pos.x + shadow_offset, unit_pos.y + shadow_offset)
     rl.draw_text_ex(self._font_medium, unit_text, shadow_pos, FONT_SIZES.speed_unit, 0, rl.Color(0, 0, 0, 150))
     rl.draw_text_ex(self._font_medium, unit_text, unit_pos, FONT_SIZES.speed_unit, 0, COLORS.WHITE_TRANSLUCENT)
+
+  def _draw_autotune_factors(self, rect: rl.Rectangle) -> None:
+    """Display current autotune speed factors."""
+    low_text = f"Low: {self._at_low_factor:.2f}"
+    high_text = f"High: {self._at_high_factor:.2f}"
+    font_size = 18
+    text_color = rl.Color(200, 220, 255, 220)
+    shadow_color = rl.Color(0, 0, 0, 180)
+
+    x = rect.x + UI_CONFIG.border_size + 10
+    y = rect.y + UI_CONFIG.header_height + 8
+
+    low_size = measure_text_cached(self._font_medium, low_text, font_size)
+    rl.draw_text_ex(self._font_medium, low_text, (x + 2, y + 2), font_size, 0, shadow_color)
+    rl.draw_text_ex(self._font_medium, low_text, (x, y), font_size, 0, text_color)
+
+    high_size = measure_text_cached(self._font_medium, high_text, font_size)
+    rl.draw_text_ex(self._font_medium, high_text, (x + low_size.x + 20 + 2, y + 2), font_size, 0, shadow_color)
+    rl.draw_text_ex(self._font_medium, high_text, (x + low_size.x + 20, y), font_size, 0, text_color)

@@ -26,6 +26,7 @@ class LateralLayoutMici(NavScroller):
     self.high_speed_factor = BigParamFloatControl(
       "High Speed Adjustment Factor", "FordAngleHighSpeedFactor", min=0.5, max=1.5, step=0.01,
     )
+    self.angle_auto_tune_enable = BigParamControlBP("Angle Auto-Tune", "FordAngleAutoTuneEnable")
     self.disable_BP_lat = BigParamControlBP("Disable BP Lateral Control", "disable_BP_lat_UI")
     self.disable_lane_change_under_speed = BigParamControlBP(
       "Disable Auto Lane Change Under Speed", "BlinkerPauseLaneChange",
@@ -42,6 +43,7 @@ class LateralLayoutMici(NavScroller):
       self.primary_lateral_control,
       self.low_speed_factor,
       self.high_speed_factor,
+      self.angle_auto_tune_enable,
       self.disable_BP_lat,
       self.disable_lane_change_under_speed,
       self.lane_change_factor_high,
@@ -50,6 +52,7 @@ class LateralLayoutMici(NavScroller):
     ])
 
     self._refresh_toggles = (
+      ("FordAngleAutoTuneEnable", self.angle_auto_tune_enable),
       ("disable_BP_lat_UI", self.disable_BP_lat),
       ("BlinkerPauseLaneChange", self.disable_lane_change_under_speed),
       ("BpShowLateralControl", self.show_lateral_control),
