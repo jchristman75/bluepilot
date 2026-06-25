@@ -7,16 +7,13 @@ from numpy import clip
 
 
 class _AutoTuner:
-  __slots__ = ("error_smooth_curve", "integral_curve",
-               "error_smooth_straight", "integral_straight",
+  __slots__ = ("error_smooth", "integral",
                "frames_since_adj", "dirty",
                "factor_name", "ts_name", "count_name")
 
   def __init__(self, factor_name: str, ts_name: str, count_name: str):
-    self.error_smooth_curve = 0.0
-    self.integral_curve = 0.0
-    self.error_smooth_straight = 0.0
-    self.integral_straight = 0.0
+    self.error_smooth = 0.0
+    self.integral = 0.0
     self.frames_since_adj = 0
     self.dirty = False
     self.factor_name = factor_name
@@ -24,10 +21,8 @@ class _AutoTuner:
     self.count_name = count_name
 
   def reset(self):
-    self.error_smooth_curve = 0.0
-    self.integral_curve = 0.0
-    self.error_smooth_straight = 0.0
-    self.integral_straight = 0.0
+    self.error_smooth = 0.0
+    self.integral = 0.0
     self.frames_since_adj = 0
 
   def _post_adjust(self):
@@ -53,23 +48,20 @@ class _AutoTuner:
 class LateralAutoTuner:
   """Integrating auto-tuner for Ford angle-mode low/high speed curvature factors.
 
+  Only active during curves (_AT_KAPPA_MIN <= |kappa_cmd| <= _AT_KAPPA_MAX).
+  Straight-line frames are ignored entirely — straight driving cannot pull the
+  factor down.
+
   Adjustments are weighted blends rather than fixed steps:
     new_factor = current + _AT_BLEND_ALPHA * (proportional_step)
 
   where proportional_step scales with how far the integral overshot the threshold
-  (capped at _AT_MAX_RATIO * _AT_STEP). The current factor always gets the higher
-  weight (1 - _AT_BLEND_ALPHA), so equal UP/DOWN signals cancel toward a stable
-  middle rather than bouncing.
-
-  Curve and straight integrals are tracked separately:
-  - Curve drives both UP and DOWN (primary signal).
-  - Straight drives DOWN only at a higher threshold (_AT_INT_THRESH_STRAIGHT),
-    requiring sustained oscillation rather than ordinary sensor noise.
+  (capped at _AT_MAX_RATIO * _AT_STEP). Equal UP/DOWN signals cancel toward a
+  stable middle rather than bouncing.
   """
 
   _AT_ALPHA = 0.1
   _AT_INT_THRESH = 0.0008
-  _AT_INT_THRESH_STRAIGHT = 0.005
   _AT_INT_CLAMP = 0.0002
   _AT_MIN_FRAMES = 150
   # Base step size (the "full target distance" before blending).
@@ -81,7 +73,6 @@ class LateralAutoTuner:
   _AT_SPEED_BOUNDARY = 20.0
   _AT_KAPPA_MIN = 0.003
   _AT_KAPPA_MAX = 0.040
-  _AT_KAPPA_STRAIGHT = 0.001
   _AT_ACTUAL_KAPPA_MIN = 0.0001
   _AT_V_MIN = 5.0
 
@@ -148,53 +139,34 @@ class LateralAutoTuner:
     abs_kappa = abs(kappa_cmd)
     active = self._at_regime_low if v_ego < self._AT_SPEED_BOUNDARY else self._at_regime_high
 
-    is_straight = abs_kappa < self._AT_KAPPA_STRAIGHT
+    # Only learn during curves — skip straight frames entirely.
+    if abs_kappa < self._AT_KAPPA_MIN or abs_kappa > self._AT_KAPPA_MAX:
+      active.frames_since_adj += 1
+      return
 
-    if is_straight:
-      if abs(actual_kappa) < self._AT_ACTUAL_KAPPA_MIN:
-        self._at_regime_low.frames_since_adj += 1
-        self._at_regime_high.frames_since_adj += 1
-        return
-    else:
-      if abs_kappa < self._AT_KAPPA_MIN or abs_kappa > self._AT_KAPPA_MAX:
-        self._at_regime_low.frames_since_adj += 1
-        self._at_regime_high.frames_since_adj += 1
-        return
+    active.frames_since_adj += 1
 
-    self._at_regime_low.frames_since_adj += 1
-    self._at_regime_high.frames_since_adj += 1
-
-    raw_error = -abs(actual_kappa) if is_straight else kappa_cmd - actual_kappa
-
-    if is_straight:
-      active.error_smooth_straight = (self._AT_ALPHA * raw_error
-                                      + (1 - self._AT_ALPHA) * active.error_smooth_straight)
-      active.integral_straight += clip(active.error_smooth_straight, -self._AT_INT_CLAMP, self._AT_INT_CLAMP)
-    else:
-      active.error_smooth_curve = (self._AT_ALPHA * raw_error
-                                   + (1 - self._AT_ALPHA) * active.error_smooth_curve)
-      active.integral_curve += clip(active.error_smooth_curve, -self._AT_INT_CLAMP, self._AT_INT_CLAMP)
+    raw_error = kappa_cmd - actual_kappa
+    active.error_smooth = (self._AT_ALPHA * raw_error
+                           + (1 - self._AT_ALPHA) * active.error_smooth)
+    active.integral += clip(active.error_smooth, -self._AT_INT_CLAMP, self._AT_INT_CLAMP)
 
     if active.frames_since_adj >= self._AT_MIN_FRAMES:
-      if active.integral_curve > self._AT_INT_THRESH:
-        ratio = min(active.integral_curve / self._AT_INT_THRESH, self._AT_MAX_RATIO)
+      if active.integral > self._AT_INT_THRESH:
+        ratio = min(active.integral / self._AT_INT_THRESH, self._AT_MAX_RATIO)
         self._adjust_factor(active.factor_name, self._AT_STEP * ratio)
         active._post_adjust()
-      elif active.integral_curve < -self._AT_INT_THRESH:
-        ratio = min(abs(active.integral_curve) / self._AT_INT_THRESH, self._AT_MAX_RATIO)
-        self._adjust_factor(active.factor_name, -self._AT_STEP * ratio)
-        active._post_adjust()
-      elif active.integral_straight < -self._AT_INT_THRESH_STRAIGHT:
-        ratio = min(abs(active.integral_straight) / self._AT_INT_THRESH_STRAIGHT, self._AT_MAX_RATIO)
+      elif active.integral < -self._AT_INT_THRESH:
+        ratio = min(abs(active.integral) / self._AT_INT_THRESH, self._AT_MAX_RATIO)
         self._adjust_factor(active.factor_name, -self._AT_STEP * ratio)
         active._post_adjust()
 
     self.actual_curvature = actual_kappa
     self.curvature_error = raw_error
     if v_ego < self._AT_SPEED_BOUNDARY:
-      self.integral_low = active.integral_curve
+      self.integral_low = active.integral
     else:
-      self.integral_high = active.integral_curve
+      self.integral_high = active.integral
 
     now = time.monotonic()
     if self._at_regime_low.dirty or self._at_regime_high.dirty:
