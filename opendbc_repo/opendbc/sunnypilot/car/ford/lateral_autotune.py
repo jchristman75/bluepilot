@@ -53,21 +53,31 @@ class _AutoTuner:
 class LateralAutoTuner:
   """Integrating auto-tuner for Ford angle-mode low/high speed curvature factors.
 
-  Curve and straight tracking are integrated separately:
-  - Curve integral drives the factor both UP and DOWN (primary signal).
-  - Straight integral only drives DOWN, and only at a higher threshold so that
-    ordinary road camber / sensor noise cannot pull the factor down on its own;
-    only sustained, noticeable oscillation on a commanded-straight path triggers it.
+  Adjustments are weighted blends rather than fixed steps:
+    new_factor = current + _AT_BLEND_ALPHA * (proportional_step)
+
+  where proportional_step scales with how far the integral overshot the threshold
+  (capped at _AT_MAX_RATIO * _AT_STEP). The current factor always gets the higher
+  weight (1 - _AT_BLEND_ALPHA), so equal UP/DOWN signals cancel toward a stable
+  middle rather than bouncing.
+
+  Curve and straight integrals are tracked separately:
+  - Curve drives both UP and DOWN (primary signal).
+  - Straight drives DOWN only at a higher threshold (_AT_INT_THRESH_STRAIGHT),
+    requiring sustained oscillation rather than ordinary sensor noise.
   """
 
   _AT_ALPHA = 0.1
-  # Curve threshold — normal sensitivity.
   _AT_INT_THRESH = 0.0008
-  # Straight threshold — requires much more sustained oscillation to trigger.
   _AT_INT_THRESH_STRAIGHT = 0.005
   _AT_INT_CLAMP = 0.0002
   _AT_MIN_FRAMES = 150
+  # Base step size (the "full target distance" before blending).
   _AT_STEP = 0.01
+  # Integral can scale the step up to this multiple before capping.
+  _AT_MAX_RATIO = 3.0
+  # Weight of the new suggested value; current factor gets (1 - _AT_BLEND_ALPHA).
+  _AT_BLEND_ALPHA = 0.4
   _AT_SPEED_BOUNDARY = 20.0
   _AT_KAPPA_MIN = 0.003
   _AT_KAPPA_MAX = 0.040
@@ -167,13 +177,16 @@ class LateralAutoTuner:
 
     if active.frames_since_adj >= self._AT_MIN_FRAMES:
       if active.integral_curve > self._AT_INT_THRESH:
-        self._adjust_factor(active.factor_name, self._AT_STEP)
+        ratio = min(active.integral_curve / self._AT_INT_THRESH, self._AT_MAX_RATIO)
+        self._adjust_factor(active.factor_name, self._AT_STEP * ratio)
         active._post_adjust()
       elif active.integral_curve < -self._AT_INT_THRESH:
-        self._adjust_factor(active.factor_name, -self._AT_STEP)
+        ratio = min(abs(active.integral_curve) / self._AT_INT_THRESH, self._AT_MAX_RATIO)
+        self._adjust_factor(active.factor_name, -self._AT_STEP * ratio)
         active._post_adjust()
       elif active.integral_straight < -self._AT_INT_THRESH_STRAIGHT:
-        self._adjust_factor(active.factor_name, -self._AT_STEP)
+        ratio = min(abs(active.integral_straight) / self._AT_INT_THRESH_STRAIGHT, self._AT_MAX_RATIO)
+        self._adjust_factor(active.factor_name, -self._AT_STEP * ratio)
         active._post_adjust()
 
     self.actual_curvature = actual_kappa
@@ -190,7 +203,9 @@ class LateralAutoTuner:
 
   def _adjust_factor(self, param_name: str, step: float) -> None:
     current = self.low_factor if param_name == "FordAngleLowSpeedFactor" else self.high_factor
-    new_val = float(clip(current + step, 0.5, 1.5))
+    # Weighted blend: current keeps (1 - alpha) weight, suggested gets alpha weight.
+    # Equivalent to current + alpha * step, so equal UP/DOWN triggers cancel.
+    new_val = float(clip(current + self._AT_BLEND_ALPHA * step, 0.5, 1.5))
     try:
       self._params.put(param_name, new_val)
     except Exception:
