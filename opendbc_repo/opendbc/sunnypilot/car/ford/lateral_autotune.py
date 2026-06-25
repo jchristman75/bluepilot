@@ -1,5 +1,13 @@
 """Ford angle auto-tune: integrating controller that adjusts low/high speed curvature factors
 based on the tracking error between commanded and actual curvature (yawRate / vEgo).
+
+Convergence strategy:
+  1. Curve-entry counting — require N distinct curve entries before each adjustment,
+     so the integral reflects diverse real-world turns rather than one long curve.
+  2. Oscillation detection — when recent adjustments alternate direction the factor
+     is near optimal; switch to a finer alpha to zoom in rather than bounce.
+  3. Decaying learning rate — alpha shrinks as lifetime adjustment count grows,
+     locking the value in over many drives while keeping a floor for gradual drift.
 """
 import time
 
@@ -8,13 +16,18 @@ from numpy import clip
 
 class _AutoTuner:
   __slots__ = ("error_smooth", "integral",
-               "frames_since_adj", "dirty",
+               "curve_count", "in_curve",
+               "adj_history", "adj_count",
+               "dirty",
                "factor_name", "ts_name", "count_name")
 
   def __init__(self, factor_name: str, ts_name: str, count_name: str):
     self.error_smooth = 0.0
     self.integral = 0.0
-    self.frames_since_adj = 0
+    self.curve_count = 0
+    self.in_curve = False
+    self.adj_history = []   # recent adjustment directions: +1 or -1
+    self.adj_count = 0      # lifetime total, loaded from params on first configure
     self.dirty = False
     self.factor_name = factor_name
     self.ts_name = ts_name
@@ -23,7 +36,9 @@ class _AutoTuner:
   def reset(self):
     self.error_smooth = 0.0
     self.integral = 0.0
-    self.frames_since_adj = 0
+    self.curve_count = 0
+    self.in_curve = False
+    # adj_history and adj_count persist across adjustments intentionally
 
   def _post_adjust(self):
     self.dirty = True
@@ -46,34 +61,26 @@ class _AutoTuner:
 
 
 class LateralAutoTuner:
-  """Integrating auto-tuner for Ford angle-mode low/high speed curvature factors.
-
-  Only active during curves (_AT_KAPPA_MIN <= |kappa_cmd| <= _AT_KAPPA_MAX).
-  Straight-line frames are ignored entirely — straight driving cannot pull the
-  factor down.
-
-  Adjustments are weighted blends rather than fixed steps:
-    new_factor = current + _AT_BLEND_ALPHA * (proportional_step)
-
-  where proportional_step scales with how far the integral overshot the threshold
-  (capped at _AT_MAX_RATIO * _AT_STEP). Equal UP/DOWN signals cancel toward a
-  stable middle rather than bouncing.
-  """
-
   _AT_ALPHA = 0.1
   _AT_INT_THRESH = 0.0008
   _AT_INT_CLAMP = 0.0002
-  _AT_MIN_FRAMES = 150
-  # Base step size (the "full target distance" before blending).
+  # Require this many distinct curve entries before each adjustment.
+  _AT_MIN_CURVES = 3
   _AT_STEP = 0.01
-  # Integral can scale the step up to this multiple before capping.
   _AT_MAX_RATIO = 3.0
-  # Weight of the new suggested value; current factor gets (1 - _AT_BLEND_ALPHA).
+  # Coarse alpha: factor is far from optimum, adjustments are consistent direction.
   _AT_BLEND_ALPHA = 0.4
+  # Fine alpha: adjustments are oscillating — zoom in on the midpoint.
+  _AT_BLEND_ALPHA_FINE = 0.08
+  # Floor: never go below this so the system stays responsive to genuine drift.
+  _AT_BLEND_ALPHA_MIN = 0.05
+  # How fast alpha decays per lifetime adjustment (applied after coarse/fine pick).
+  _AT_DECAY_RATE = 0.15
+  # How many recent adjustment directions to inspect for oscillation.
+  _AT_ADJ_HISTORY_LEN = 4
   _AT_SPEED_BOUNDARY = 20.0
   _AT_KAPPA_MIN = 0.003
   _AT_KAPPA_MAX = 0.040
-  _AT_ACTUAL_KAPPA_MIN = 0.0001
   _AT_V_MIN = 5.0
 
   def __init__(self):
@@ -99,12 +106,25 @@ class LateralAutoTuner:
     self.integral_high = 0.0
 
   def configure(self, params, enabled: bool, param_low: float, param_high: float) -> None:
+    is_first = self._params is None
+    was_enabled = self.enabled
     self._params = params
     self.enabled = enabled
     if not self._at_regime_low.dirty:
       self.low_factor = param_low
     if not self._at_regime_high.dirty:
       self.high_factor = param_high
+    # Clear stale integral/curve state when re-enabling so we start fresh.
+    if enabled and not was_enabled:
+      self.reset()
+    # Load lifetime adjustment counts once so decay persists across sessions.
+    if is_first:
+      for tuner in (self._at_regime_low, self._at_regime_high):
+        try:
+          cnt = params.get(tuner.count_name, return_default=True)
+          tuner.adj_count = cnt if isinstance(cnt, int) else 0
+        except Exception:
+          tuner.adj_count = 0
 
   def reset(self) -> None:
     self._at_regime_low.reset()
@@ -139,26 +159,29 @@ class LateralAutoTuner:
     abs_kappa = abs(kappa_cmd)
     active = self._at_regime_low if v_ego < self._AT_SPEED_BOUNDARY else self._at_regime_high
 
-    # Only learn during curves — skip straight frames entirely.
-    if abs_kappa < self._AT_KAPPA_MIN or abs_kappa > self._AT_KAPPA_MAX:
-      active.frames_since_adj += 1
-      return
+    is_curve = self._AT_KAPPA_MIN <= abs_kappa <= self._AT_KAPPA_MAX
 
-    active.frames_since_adj += 1
+    # Detect rising edge of curve entry and count it.
+    if is_curve and not active.in_curve:
+      active.curve_count += 1
+    active.in_curve = is_curve
+
+    if not is_curve:
+      return
 
     raw_error = kappa_cmd - actual_kappa
     active.error_smooth = (self._AT_ALPHA * raw_error
                            + (1 - self._AT_ALPHA) * active.error_smooth)
     active.integral += clip(active.error_smooth, -self._AT_INT_CLAMP, self._AT_INT_CLAMP)
 
-    if active.frames_since_adj >= self._AT_MIN_FRAMES:
+    if active.curve_count >= self._AT_MIN_CURVES:
       if active.integral > self._AT_INT_THRESH:
         ratio = min(active.integral / self._AT_INT_THRESH, self._AT_MAX_RATIO)
-        self._adjust_factor(active.factor_name, self._AT_STEP * ratio)
+        self._adjust_factor(active, self._AT_STEP * ratio)
         active._post_adjust()
       elif active.integral < -self._AT_INT_THRESH:
         ratio = min(abs(active.integral) / self._AT_INT_THRESH, self._AT_MAX_RATIO)
-        self._adjust_factor(active.factor_name, -self._AT_STEP * ratio)
+        self._adjust_factor(active, -self._AT_STEP * ratio)
         active._post_adjust()
 
     self.actual_curvature = actual_kappa
@@ -173,16 +196,31 @@ class LateralAutoTuner:
       if now - self._at_last_flush_ts >= self._at_flush_interval:
         self.flush()
 
-  def _adjust_factor(self, param_name: str, step: float) -> None:
-    current = self.low_factor if param_name == "FordAngleLowSpeedFactor" else self.high_factor
-    # Weighted blend: current keeps (1 - alpha) weight, suggested gets alpha weight.
-    # Equivalent to current + alpha * step, so equal UP/DOWN triggers cancel.
-    new_val = float(clip(current + self._AT_BLEND_ALPHA * step, 0.5, 1.5))
+  def _adjust_factor(self, tuner: _AutoTuner, step: float) -> None:
+    current = self.low_factor if tuner.factor_name == "FordAngleLowSpeedFactor" else self.high_factor
+
+    direction = 1 if step > 0 else -1
+
+    # Oscillation: last adjustment was the opposite direction — we're near optimal.
+    oscillating = len(tuner.adj_history) >= 2 and tuner.adj_history[-1] != direction
+
+    # Pick coarse or fine base alpha, then decay by lifetime adjustment count.
+    base_alpha = self._AT_BLEND_ALPHA_FINE if oscillating else self._AT_BLEND_ALPHA
+    effective_alpha = max(self._AT_BLEND_ALPHA_MIN,
+                          base_alpha / (1.0 + tuner.adj_count * self._AT_DECAY_RATE))
+
+    new_val = float(clip(current + effective_alpha * step, 0.5, 1.5))
     try:
-      self._params.put(param_name, new_val)
+      self._params.put(tuner.factor_name, new_val)
     except Exception:
       return
-    if param_name == "FordAngleLowSpeedFactor":
+
+    if tuner.factor_name == "FordAngleLowSpeedFactor":
       self.low_factor = new_val
     else:
       self.high_factor = new_val
+
+    tuner.adj_history.append(direction)
+    if len(tuner.adj_history) > self._AT_ADJ_HISTORY_LEN:
+      tuner.adj_history.pop(0)
+    tuner.adj_count += 1
