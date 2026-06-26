@@ -127,8 +127,10 @@ class LateralAutoTuner:
           tuner.adj_count = 0
 
   def reset(self) -> None:
-    self._at_regime_low.reset()
-    self._at_regime_high.reset()
+    for tuner in (self._at_regime_low, self._at_regime_high):
+      tuner.reset()
+      tuner.adj_history = []
+      tuner.adj_count = 0
     self.actual_curvature = 0.0
     self.curvature_error = 0.0
 
