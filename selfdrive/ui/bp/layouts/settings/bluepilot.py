@@ -260,17 +260,14 @@ class BluePilotLayout(Widget):
       icon="speed_limit.png"
     )
 
-    # Disable lane change under speed toggle (BlinkerPauseLaneChange)
     self._disable_lane_change_under_speed = toggle_item(
       lambda: tr("Disable Lane Change Under Speed"),
       lambda: tr("Pause lateral control when blinker is on and below minimum speed."),
       initial_state=self._safe_get_bool(self._params, "BlinkerPauseLaneChange"),
-      callback=lambda state: (self._toggle_callback(state, "BlinkerPauseLaneChange"),
-                              self._blinker_min_speed.action_item.set_enabled(state)),
+      callback=self._on_blinker_pause_changed,
       icon="chffr_wheel.png"
     )
 
-    # Minimum speed below which lane change is paused (conditional on BlinkerPauseLaneChange)
     self._blinker_min_speed = float_control_item(
       lambda: tr("Minimum Speed to Pause Lane Change"),
       lambda: tr("Below this speed, lateral control is paused when the blinker is active."),
@@ -515,7 +512,6 @@ class BluePilotLayout(Widget):
       self._disable_BP_lat,
     ]
     lateral_section = _section(tr("Lateral Tuning"), lateral_items)
-    # Store the header so _update_toggles can control per-item visibility by mode
     self._lateral_header = lateral_section[0]
 
     return (
@@ -567,6 +563,10 @@ class BluePilotLayout(Widget):
     except UnknownKeyName:
       pass  # Param not available in dev environment
     self._update_toggles(just_toggled={param: state})
+
+  def _on_blinker_pause_changed(self, state: bool) -> None:
+    self._toggle_callback(state, "BlinkerPauseLaneChange")
+    self._blinker_min_speed.action_item.set_enabled(state)
 
   def _update_toggles(self, just_toggled: dict | None = None):
     """Update toggle states from params. just_toggled: {param: value} for params we just wrote (avoids refresh race)."""

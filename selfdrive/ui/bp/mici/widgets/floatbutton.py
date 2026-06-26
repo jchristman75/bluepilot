@@ -1,11 +1,16 @@
 
+import math
 import pyray as rl
 from collections.abc import Callable
 from openpilot.selfdrive.ui.bp.mici.widgets.button_bp import BigButtonBP
-from openpilot.selfdrive.ui.bp.mici.widgets.big_input_dialog_bp import BigInputDialogBP
 from openpilot.common.params import Params
 from openpilot.system.ui.lib.application import gui_app, MousePos, FontWeight
 from openpilot.system.ui.lib.text_measure import measure_text_cached
+
+def _step_decimals(step: float) -> int:
+  """Number of decimal places needed to represent one step."""
+  return max(0, -math.floor(math.log10(abs(step)))) if step else 4
+
 
 CONTENT_MARGIN = 20
 LINE_L = 40
@@ -66,9 +71,13 @@ def _draw_adjust_overlay(widget, last_adjust_time, last_rect_x):
 
   return last_adjust_time, last_rect_x
 
-class BigParamFloatControl(BigButtonBP):
+
+class BigParamStepControl(BigButtonBP):
+  """Shared +/- stepper for a numeric param. Tapping minus/plus adjusts the value by
+  `step`; tapping the body of the button does nothing (no keyboard value entry)."""
+
   def __init__(self, text: str, param: str, is_active_param: str = None, is_active: Callable[[], bool] = None,
-               min: float = None, max: float = None, step: float = 0.05, tint: rl.Color = rl.WHITE):
+               min=None, max=None, step=1, tint: rl.Color = rl.WHITE):
     active_fn = is_active
     if active_fn is None and is_active_param is not None:
       active_fn = lambda: Params().get_bool(is_active_param)
@@ -84,58 +93,32 @@ class BigParamFloatControl(BigButtonBP):
 
     self.param = param
     self.params = Params()
-    self.set_click_callback(self._on_click)
     self.update_label()
 
     self._last_adjust_time: float | None = None
     self._last_rect_x: float | None = None
 
-  def _on_click(self):
-    if self.min is not None or self.max is not None:
-      message = f"({self.min}-{self.max})"
-    else:
-      message = "enter a numberic value..."
+  def get_param(self):
+    raise NotImplementedError
 
-    def _wrapped_callback(val):
-      self._callback(val)
-      gui_app.pop_widget()
+  def set_param(self, value):
+    raise NotImplementedError
 
-    dlg = BigInputDialogBP(message, str(self.get_param()),
-                         confirm_callback=_wrapped_callback, show_special_keys=True, minimum_length=0)
-    gui_app.push_widget(dlg)
+  def _format_value(self, value) -> str:
+    raise NotImplementedError
 
-  def _callback(self, password: str):
-    if password:
-      try:
-        float_value = float(password)
-        self.set_param(float_value)
-      except ValueError:
-        pass
-    else:
-      #revert to default
-      self.params.remove(self.param)
-      self.update_label()
-    self._last_adjust_time = rl.get_time()
-
-  def get_param(self) -> float:
-    try:
-      return float(self.params.get(self.param, return_default=True))
-    except (TypeError, ValueError):
-      return 0.0
-
-  def set_param(self, value: float):
-    if self.min is not None and value < self.min:
-      value = self.min
-    elif self.max is not None and value > self.max:
-      value = self.max
-
-    self.params.put(self.param, value, block=False)
-    self.update_label(value)
-
-  def update_label(self, value: float = None):
+  def update_label(self, value=None):
     if value is None:
       value = self.get_param()
-    self.set_value(f"{round(value,4)}")
+    self.set_value(self._format_value(value))
+
+  def _update_state(self):
+    super()._update_state()
+    # Re-read the param each frame so values changed elsewhere (e.g. remotely via sunnylink)
+    # appear on device. Skipped while the user is actively adjusting (_last_adjust_time set) to
+    # avoid clobbering a local edit / flicker before the async (block=False) write lands.
+    if self._last_adjust_time is None:
+      self.update_label()
 
   def _get_label_font_size(self):
     font_size = super()._get_label_font_size()
@@ -160,9 +143,6 @@ class BigParamFloatControl(BigButtonBP):
     self.plus_hit_rect = rl.Rectangle(
       self.right - self.rect_size / 2 - CONTENT_MARGIN, self.top - self.rect_size / 2, self.rect_size, self.rect_size
     )
-
-    #rl.draw_rectangle_lines_ex(self.minus_hit_rect, 1, rl.RED)
-    #rl.draw_rectangle_lines_ex(self.plus_hit_rect, 1, rl.GREEN)
 
     rl.draw_line_ex((self.left,self.top), (self.left+LINE_L, self.top), LINE_W, rl.WHITE)
 
@@ -182,69 +162,25 @@ class BigParamFloatControl(BigButtonBP):
     self._last_adjust_time = rl.get_time()
 
   def _handle_mouse_release(self, mouse_pos: MousePos):
+    # Only the +/- hit areas do anything — tapping the body no longer opens a keyboard dialog.
     if rl.check_collision_point_rec(mouse_pos, self.minus_hit_rect):
       self.minus_clicked()
     elif rl.check_collision_point_rec(mouse_pos, self.plus_hit_rect):
       self.plus_clicked()
-    else:
-      super()._handle_mouse_release(mouse_pos)
 
 
-class BigParamIntControl(BigButtonBP):
-  def __init__(self, text: str, param: str, is_active_param: str = None, min: int = None, max: int = None, step: int = 1, tint: rl.Color = rl.WHITE):
-    super().__init__(text, "", tint=tint, is_active=(lambda: Params().get_bool(is_active_param)) if is_active_param is not None else None)
-    self.min = min
-    self.max = max
-    self.step = step
+class BigParamFloatControl(BigParamStepControl):
+  def __init__(self, text: str, param: str, is_active_param: str = None, is_active: Callable[[], bool] = None,
+               min: float = None, max: float = None, step: float = 0.05, tint: rl.Color = rl.WHITE):
+    super().__init__(text, param, is_active_param, is_active, min, max, step, tint)
 
-    self._sub_label.set_font_size(30)
-
-    self.margin = self._rect.width * 0.1
-    self.rect_size = LINE_L + 2 * CONTENT_MARGIN
-
-    self.param = param
-    self.params = Params()
-    self.set_click_callback(self._on_click)
-    self.update_label()
-
-    self._last_adjust_time: float | None = None
-    self._last_rect_x: float | None = None
-
-  def _on_click(self):
-    if self.min is not None or self.max is not None:
-      message = f"({self.min}-{self.max})"
-    else:
-      message = "enter a numberic value..."
-
-    def _wrapped_callback(val):
-      self._callback(val)
-      gui_app.pop_widget()
-
-    dlg = BigInputDialogBP(message, str(self.get_param()),
-                         confirm_callback=_wrapped_callback, show_special_keys=True, minimum_length=0)
-    gui_app.push_widget(dlg)
-
-  def _callback(self, password: str):
-    if password:
-      try:
-        int_value = int(password)
-        self.set_param(int_value)
-      except ValueError:
-        pass
-    else:
-      #revert to default
-      self.params.remove(self.param)
-      self.update_label()
-    self._last_adjust_time = rl.get_time()
-
-  def get_param(self) -> int:
+  def get_param(self) -> float:
     try:
-      return int(self.params.get(self.param, return_default=True))
+      return float(self.params.get(self.param, return_default=True))
     except (TypeError, ValueError):
-      return 0
+      return 0.0
 
-  def set_param(self, value: int):
-    value=int(value)
+  def set_param(self, value: float):
     if self.min is not None and value < self.min:
       value = self.min
     elif self.max is not None and value > self.max:
@@ -253,50 +189,52 @@ class BigParamIntControl(BigButtonBP):
     self.params.put(self.param, value, block=False)
     self.update_label(value)
 
-  def update_label(self, value: int = None):
-    if value is None:
-      value = self.get_param()
-    self.set_value(f"{value}")
+  def _format_value(self, value: float) -> str:
+    decimals = _step_decimals(self.step)
+    return f"{value:.{decimals}f}"
 
-  def _get_label_font_size(self):
-    font_size = super()._get_label_font_size()
-    return font_size - 10
+  def _snap_to_grid(self, value: float) -> float:
+    # round(v/step, 10) absorbs float noise before floor so that values already
+    # on the grid (e.g. 2.9999... instead of 3.0) don't snap one step too low.
+    decimals = _step_decimals(self.step)
+    return round(math.floor(round(value / self.step, 10)) * self.step, decimals)
 
-  def _draw_content(self, btn_y: float):
-    offset = self.rect_size / 3
-    self.rect.height -= offset
-    super()._draw_content(btn_y + offset)
-    self.rect.height += offset
+  def minus_clicked(self):
+    self.set_param(self._snap_to_grid(self.get_param() - self.step))
+    self._last_adjust_time = rl.get_time()
 
-  def _render(self, _):
-    super()._render(_)
+  def plus_clicked(self):
+    self.set_param(self._snap_to_grid(self.get_param() + self.step))
+    self._last_adjust_time = rl.get_time()
 
-    self.left = self._rect.x + self.margin
-    self.right = self._rect.x + self._rect.width - self.margin
-    self.top = self._rect.y + self.margin
 
-    self.minus_hit_rect = rl.Rectangle(
-      self.left - CONTENT_MARGIN, self.top - self.rect_size / 2, self.rect_size, self.rect_size
-    )
-    self.plus_hit_rect = rl.Rectangle(
-      self.right - self.rect_size / 2 - CONTENT_MARGIN, self.top - self.rect_size / 2, self.rect_size, self.rect_size
-    )
+class BigParamIntControl(BigParamStepControl):
+  def __init__(self, text: str, param: str, is_active_param: str = None, min: int = None, max: int = None,
+               step: int = 1, tint: rl.Color = rl.WHITE):
+    super().__init__(text, param, is_active_param, None, min, max, step, tint)
 
-    #rl.draw_rectangle_lines_ex(self.minus_hit_rect, 1, rl.RED)
-    #rl.draw_rectangle_lines_ex(self.plus_hit_rect, 1, rl.GREEN)
+  def get_param(self) -> int:
+    try:
+      return int(self.params.get(self.param, return_default=True))
+    except (TypeError, ValueError):
+      return 0
 
-    rl.draw_line_ex((self.left,self.top), (self.left+LINE_L, self.top), LINE_W, rl.WHITE)
+  def set_param(self, value: int):
+    value = int(value)
+    if self.min is not None and value < self.min:
+      value = self.min
+    elif self.max is not None and value > self.max:
+      value = self.max
 
-    rl.draw_line_ex((self.right-LINE_L,self.top), (self.right, self.top), LINE_W, rl.WHITE)
-    m = self.right - LINE_L/2
-    rl.draw_line_ex((m,self.top-LINE_L/2), (m, self.top+LINE_L/2), LINE_W, rl.WHITE)
+    self.params.put(self.param, value, block=False)
+    self.update_label(value)
 
-    self._last_adjust_time, self._last_rect_x = _draw_adjust_overlay(
-      self, self._last_adjust_time, self._last_rect_x)
+  def _format_value(self, value: int) -> str:
+    return f"{value}"
 
   def set_step(self, value: int):
-     value -= value % self.step
-     self.set_param(value)
+    value -= value % self.step
+    self.set_param(value)
 
   def minus_clicked(self):
     self.set_step(self.get_param() - self.step)
@@ -305,11 +243,3 @@ class BigParamIntControl(BigButtonBP):
   def plus_clicked(self):
     self.set_step(self.get_param() + self.step)
     self._last_adjust_time = rl.get_time()
-
-  def _handle_mouse_release(self, mouse_pos: MousePos):
-    if rl.check_collision_point_rec(mouse_pos, self.minus_hit_rect):
-      self.minus_clicked()
-    elif rl.check_collision_point_rec(mouse_pos, self.plus_hit_rect):
-      self.plus_clicked()
-    else:
-      super()._handle_mouse_release(mouse_pos)
