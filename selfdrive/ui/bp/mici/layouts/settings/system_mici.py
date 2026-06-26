@@ -68,11 +68,11 @@ class SystemLayoutMici(NavScroller):
     self.ui_debug_log.set_click_callback(lambda: self._toggle_bool("BPUIDebugLog"))
 
     self._scroller.add_widgets([
-      self.preferred_network_btn,
       self.enable_web_routes,
       self.show_qr_btn,
-      self.clear_model_btn,
+      self.preferred_network_btn,
       self.ui_debug_log,
+      self.clear_model_btn,
     ])
 
     ui_state.add_offroad_transition_callback(self._update_buttons)

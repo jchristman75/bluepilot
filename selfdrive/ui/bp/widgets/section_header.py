@@ -52,6 +52,7 @@ class CollapsibleSectionHeader(Widget):
     self._title = title
     self._expanded = initially_expanded
     self._managed_items: list[Widget] = []
+    self._item_visible: dict[int, bool] = {}
     self.set_rect(rl.Rectangle(0, 0, SECTION_HEADER_WIDTH, COLLAPSIBLE_HEADER_HEIGHT))
     self.set_click_callback(self._toggle)
 
@@ -60,13 +61,19 @@ class CollapsibleSectionHeader(Widget):
     self._managed_items = list(items)
     self._apply_visibility()
 
+  def set_item_visible(self, item: Widget, visible: bool) -> None:
+    """Control whether a managed item is allowed to show when the section is expanded."""
+    self._item_visible[id(item)] = visible
+    if self._expanded:
+      item.set_visible(visible)
+
   def _toggle(self) -> None:
     self._expanded = not self._expanded
     self._apply_visibility()
 
   def _apply_visibility(self) -> None:
     for item in self._managed_items:
-      item.set_visible(self._expanded)
+      item.set_visible(self._expanded and self._item_visible.get(id(item), True))
 
   def collapse(self) -> None:
     self._expanded = False

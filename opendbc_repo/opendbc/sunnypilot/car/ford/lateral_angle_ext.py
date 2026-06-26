@@ -69,8 +69,7 @@ _PSCM_DREF_SPEEDS_MS = (0.0, 4.17, 27.78, 41.67, 50.0, 55.56)
 _PSCM_DREF_M = (0.5, 0.95, 1.4, 2.075, 2.75, 3.875)
 
 # Default blend ratio validated on F-150 fleet data (0.5s lookup time).
-# _FORD_PATH_ANGLE_BLEND_RATIO_DEFAULT = 0.50
-_FORD_PATH_ANGLE_BLEND_RATIO_DEFAULT = 0.00
+_FORD_PATH_ANGLE_BLEND_RATIO_DEFAULT = 0.50
 
 # Variable lookup time (VLT): curvature_lookup_time adapts to speed and curvature magnitude.
 # t_lookup = t_base + t_extra_max × speed_factor(v) × kappa_factor(|κ|)

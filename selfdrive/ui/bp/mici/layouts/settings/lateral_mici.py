@@ -2,13 +2,11 @@
 
 from collections.abc import Callable
 
-from openpilot.selfdrive.ui.bp.mici.widgets.button_bp import (
-  BigParamControlBP,
-  BigMultiParamToggleBP,
-)
+from openpilot.selfdrive.ui.bp.mici.widgets.button_bp import BigParamControlBP
 from openpilot.selfdrive.ui.bp.mici.widgets.floatbutton import BigParamFloatControl
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.widgets.scroller import NavScroller
+from opendbc.sunnypilot.car.ford.lateral_curv_ext import PrimaryLateralControl
 
 
 class LateralLayoutMici(NavScroller):
@@ -17,9 +15,7 @@ class LateralLayoutMici(NavScroller):
     if back_callback is not None:
       self.set_back_callback(back_callback)
 
-    self.primary_lateral_control = BigMultiParamToggleBP(
-      "Primary Control Variable", "FordPrefLateralControl", ["curvature", "angle"],
-    )
+    # --- Angle-mode-only items ---
     self.low_speed_factor = BigParamFloatControl(
       "Low Speed Adjustment Factor", "FordAngleLowSpeedFactor", min=0.5, max=1.5, step=0.01,
     )
@@ -27,9 +23,15 @@ class LateralLayoutMici(NavScroller):
       "High Speed Adjustment Factor", "FordAngleHighSpeedFactor", min=0.5, max=1.5, step=0.01,
     )
     self.angle_auto_tune_enable = BigParamControlBP("Angle Auto-Tune", "FordAngleAutoTuneEnable")
+
+    # --- Always-visible items ---
     self.disable_BP_lat = BigParamControlBP("Disable BP Lateral Control", "disable_BP_lat_UI")
     self.disable_lane_change_under_speed = BigParamControlBP(
       "Disable Auto Lane Change Under Speed", "BlinkerPauseLaneChange",
+      toggle_callback=lambda state: self.blinker_min_speed.set_enabled(state),
+    )
+    self.blinker_min_speed = BigParamFloatControl(
+      "Minimum Speed to Pause Lane Change", "BlinkerMinLateralControlSpeed", min=5, max=50, step=5,
     )
     self.lane_change_factor_high = BigParamFloatControl(
       "Lane Change Factor High", "lane_change_factor_high", min=0.5, max=2.0,
@@ -39,30 +41,60 @@ class LateralLayoutMici(NavScroller):
     )
     self.show_lateral_control = BigParamControlBP("Show Lateral Control Mode", "BpShowLateralControl")
 
+    # --- Curvature-mode-only items ---
+    self.enable_human_turn_detection = BigParamControlBP(
+      "Enable Human Turn Detection", "enable_human_turn_detection",
+    )
+    self.enable_lane_positioning = BigParamControlBP(
+      "Enable Lane Positioning", "enable_lane_positioning",
+    )
+    self.enable_lane_full_mode = BigParamControlBP(
+      "Enable Lanefull Mode", "enable_lane_full_mode",
+    )
+    self.custom_profile = BigParamControlBP(
+      "Use Custom Tuning Profile", "custom_profile",
+    )
+    self.pc_blend_ratio_high_C = BigParamFloatControl(
+      "Predicted Curvature Blend Ratio High", "pc_blend_ratio_high_C_UI", min=0.0, max=1.0, step=0.05,
+    )
+    self.pc_blend_ratio_low_C = BigParamFloatControl(
+      "Predicted Curvature Blend Ratio Low", "pc_blend_ratio_low_C_UI", min=0.0, max=1.0, step=0.05,
+    )
+    self.lc_pid_gain = BigParamFloatControl(
+      "Centering PID Gain", "LC_PID_gain_UI", min=0.0, max=50.0, step=0.5,
+    )
+
     self._scroller.add_widgets([
-      self.primary_lateral_control,
       self.low_speed_factor,
       self.high_speed_factor,
       self.angle_auto_tune_enable,
-      self.disable_BP_lat,
       self.disable_lane_change_under_speed,
+      self.blinker_min_speed,
       self.lane_change_factor_high,
+      self.enable_human_turn_detection,
       self.custom_path_offset,
+      self.enable_lane_positioning,
+      self.enable_lane_full_mode,
+      self.custom_profile,
+      self.pc_blend_ratio_high_C,
+      self.pc_blend_ratio_low_C,
+      self.lc_pid_gain,
       self.show_lateral_control,
+      self.disable_BP_lat,
     ])
 
     self._refresh_toggles = (
       ("FordAngleAutoTuneEnable", self.angle_auto_tune_enable),
       ("disable_BP_lat_UI", self.disable_BP_lat),
       ("BlinkerPauseLaneChange", self.disable_lane_change_under_speed),
+      ("enable_human_turn_detection", self.enable_human_turn_detection),
+      ("enable_lane_positioning", self.enable_lane_positioning),
+      ("enable_lane_full_mode", self.enable_lane_full_mode),
+      ("custom_profile", self.custom_profile),
       ("BpShowLateralControl", self.show_lateral_control),
     )
 
     ui_state.add_offroad_transition_callback(self._update_toggles)
-
-  def _update_state(self):
-    super()._update_state()
-    self.primary_lateral_control._load_value()
 
   def show_event(self):
     super().show_event()
@@ -72,3 +104,19 @@ class LateralLayoutMici(NavScroller):
     ui_state.update_params()
     for key, item in self._refresh_toggles:
       item.set_checked(ui_state.params.get_bool(key))
+    plat_idx = PrimaryLateralControl(ui_state.params.get("FordPrefLateralControl", return_default=True) or 0)
+    is_angle = (plat_idx == PrimaryLateralControl.angle)
+    is_curv = not is_angle
+    self.low_speed_factor.set_visible(is_angle)
+    self.high_speed_factor.set_visible(is_angle)
+    self.blinker_min_speed.set_enabled(ui_state.params.get_bool("BlinkerPauseLaneChange"))
+    for item in (
+      self.enable_human_turn_detection,
+      self.enable_lane_positioning,
+      self.enable_lane_full_mode,
+      self.custom_profile,
+      self.pc_blend_ratio_high_C,
+      self.pc_blend_ratio_low_C,
+      self.lc_pid_gain,
+    ):
+      item.set_visible(is_curv)

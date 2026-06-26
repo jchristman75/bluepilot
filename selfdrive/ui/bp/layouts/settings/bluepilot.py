@@ -265,7 +265,19 @@ class BluePilotLayout(Widget):
       lambda: tr("Disable Lane Change Under Speed"),
       lambda: tr("Pause lateral control when blinker is on and below minimum speed."),
       initial_state=self._safe_get_bool(self._params, "BlinkerPauseLaneChange"),
-      callback=lambda state: self._toggle_callback(state, "BlinkerPauseLaneChange"),
+      callback=lambda state: (self._toggle_callback(state, "BlinkerPauseLaneChange"),
+                              self._blinker_min_speed.action_item.set_enabled(state)),
+      icon="chffr_wheel.png"
+    )
+
+    # Minimum speed below which lane change is paused (conditional on BlinkerPauseLaneChange)
+    self._blinker_min_speed = float_control_item(
+      lambda: tr("Minimum Speed to Pause Lane Change"),
+      lambda: tr("Below this speed, lateral control is paused when the blinker is active."),
+      param="BlinkerMinLateralControlSpeed",
+      min_value=5,
+      max_value=50,
+      step=5,
       icon="chffr_wheel.png"
     )
 
@@ -484,12 +496,34 @@ class BluePilotLayout(Widget):
       header.set_items(items)
       return [header] + items
 
+    lateral_items = [
+      self._low_speed_curv_factor,
+      self._high_speed_curv_factor,
+      self._angle_auto_tune,
+      self._enable_human_turn_detection,
+      self._disable_lane_change_under_speed,
+      self._blinker_min_speed,
+      self._lane_change_factor_high,
+      self._enable_lane_positioning,
+      self._custom_path_offset,
+      self._enable_lane_full_mode,
+      self._custom_profile,
+      self._pc_blend_ratio_high_C,
+      self._pc_blend_ratio_low_C,
+      self._lc_pid_gain,
+      self._show_lateral_control,
+      self._disable_BP_lat,
+    ]
+    lateral_section = _section(tr("Lateral Tuning"), lateral_items)
+    # Store the header so _update_toggles can control per-item visibility by mode
+    self._lateral_header = lateral_section[0]
+
     return (
       _section(tr("System"), [
         self._preferred_network_btn,
-        self._reset_menu_btn,
         self._clear_model_cache_btn,
         self._ui_debug_log,
+        self._reset_menu_btn,
       ]) +
       _section(tr("Vehicle"), [
         self._show_hands_free_ui,
@@ -514,27 +548,8 @@ class BluePilotLayout(Widget):
         self._disable_dowhill_comp,
         self._disable_ford_radar,
       ]) +
-      _section(tr("Lateral Tuning"), [
-        self._primary_lateral_control_btn,
-        self._low_speed_curv_factor,
-        self._high_speed_curv_factor,
-        self._angle_auto_tune,
-        self._disable_BP_lat,
-        # BluePilot: hidden during angle tuning — restore when curvature mode is active
-        # self._enable_human_turn_detection,
-        # End BluePilot
-        self._disable_lane_change_under_speed,
-        self._lane_change_factor_high,
-        self._custom_path_offset,
-        # BluePilot: hidden during angle tuning — restore when curvature mode is active
-        # self._enable_lane_positioning,
-        # self._enable_lane_full_mode,
-        # self._custom_profile,
-        # self._pc_blend_ratio_high_C,
-        # self._pc_blend_ratio_low_C,
-        # End BluePilot
-        self._show_lateral_control,
-      ])
+      [self._primary_lateral_control_btn] +
+      lateral_section
     )
     # End BluePilot
 
@@ -590,17 +605,33 @@ class BluePilotLayout(Widget):
     self._hybrid_gauge_style_btn.action_item.set_selected_button(style_idx)
     plat_idx = PrimaryLateralControl(ui_state.params.get("FordPrefLateralControl", return_default=True) or 0)
     self._primary_lateral_control_btn.action_item.set_selected_button(plat_idx)
-    # Use just_toggled for params we just wrote to avoid update_params refresh race
     custom_prof = fresh.get("custom_profile") if "custom_profile" in fresh else self._safe_get_bool(ui_state.params, "custom_profile")
-    # BluePilot: in angle mode, in-lane offset is always available (no enable_lane_positioning gate)
-    self._custom_path_offset.action_item.set_enabled(True)
-    # self._enable_lane_full_mode.action_item.set_enabled(lane_pos)  # hidden during angle tuning
-    # End BluePilot
-    # BluePilot: hidden during angle tuning — restore when curvature mode is active
-    # self._pc_blend_ratio_high_C.action_item.set_enabled(custom_prof)
-    # self._pc_blend_ratio_low_C.action_item.set_enabled(custom_prof)
-    # self._lc_pid_gain.action_item.set_enabled(lane_pos and custom_prof)
-    # End BluePilot
+    lane_pos = fresh.get("enable_lane_positioning") if "enable_lane_positioning" in fresh else self._safe_get_bool(ui_state.params, "enable_lane_positioning")
+    pause_lc = fresh.get("BlinkerPauseLaneChange") if "BlinkerPauseLaneChange" in fresh else self._safe_get_bool(ui_state.params, "BlinkerPauseLaneChange")
+    is_angle = (plat_idx == PrimaryLateralControl.angle)
+    is_curv = not is_angle
+    # Angle-mode-only items
+    self._lateral_header.set_item_visible(self._low_speed_curv_factor, is_angle)
+    self._lateral_header.set_item_visible(self._high_speed_curv_factor, is_angle)
+    # Conditional on BlinkerPauseLaneChange
+    self._blinker_min_speed.action_item.set_enabled(pause_lc)
+    # Curvature-mode-only items
+    self._lateral_header.set_item_visible(self._enable_human_turn_detection, is_curv)
+    self._lateral_header.set_item_visible(self._enable_lane_positioning, is_curv)
+    self._lateral_header.set_item_visible(self._enable_lane_full_mode, is_curv)
+    self._lateral_header.set_item_visible(self._custom_profile, is_curv)
+    self._lateral_header.set_item_visible(self._pc_blend_ratio_high_C, is_curv)
+    self._lateral_header.set_item_visible(self._pc_blend_ratio_low_C, is_curv)
+    self._lateral_header.set_item_visible(self._lc_pid_gain, is_curv)
+    # Enabled states depend on mode
+    if is_curv:
+      self._custom_path_offset.action_item.set_enabled(lane_pos)
+      self._enable_lane_full_mode.action_item.set_enabled(lane_pos)
+      self._pc_blend_ratio_high_C.action_item.set_enabled(custom_prof)
+      self._pc_blend_ratio_low_C.action_item.set_enabled(custom_prof)
+      self._lc_pid_gain.action_item.set_enabled(lane_pos and custom_prof)
+    else:
+      self._custom_path_offset.action_item.set_enabled(True)
 
   def show_event(self):
     super().show_event()
@@ -746,6 +777,7 @@ class BluePilotLayout(Widget):
       self._params.put("FordPrefLateralControl", int(PrimaryLateralControl(button_index)))
     except UnknownKeyName:
       pass
+    self._update_toggles()
 
   def _render(self, rect):
     # Process WiFi manager callbacks
