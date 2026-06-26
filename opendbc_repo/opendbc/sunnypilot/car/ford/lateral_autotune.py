@@ -4,28 +4,30 @@ based on the tracking error between commanded and actual curvature (yawRate / vE
 Convergence strategy:
   1. Curve-entry counting — require N distinct curve entries before each adjustment,
      so the integral reflects diverse real-world turns rather than one long curve.
-  2. Oscillation detection — when recent adjustments alternate direction the factor
+  2. Blended attribution — at any speed, error is distributed between both factors
+     proportionally to how much each contributes to the gain at that speed.  This
+     mirrors the gain interpolation in lateral_angle_ext.py and lets both factors
+     converge regardless of which speed range the driver favours.
+  3. Oscillation detection — when recent adjustments alternate direction the factor
      is near optimal; switch to a finer alpha to zoom in rather than bounce.
-  3. Decaying learning rate — alpha shrinks as lifetime adjustment count grows,
+  4. Decaying learning rate — alpha shrinks as lifetime adjustment count grows,
      locking the value in over many drives while keeping a floor for gradual drift.
 """
 import time
 
-from numpy import clip
+from numpy import clip, interp
 
 
 class _AutoTuner:
-  __slots__ = ("error_smooth", "integral",
-               "curve_count", "in_curve",
+  __slots__ = ("integral",
+               "curve_count",
                "adj_history", "adj_count",
                "dirty",
                "factor_name", "ts_name", "count_name")
 
   def __init__(self, factor_name: str, ts_name: str, count_name: str):
-    self.error_smooth = 0.0
     self.integral = 0.0
     self.curve_count = 0
-    self.in_curve = False
     self.adj_history = []   # recent adjustment directions: +1 or -1
     self.adj_count = 0      # lifetime total, loaded from params on first configure
     self.dirty = False
@@ -34,10 +36,8 @@ class _AutoTuner:
     self.count_name = count_name
 
   def reset(self):
-    self.error_smooth = 0.0
     self.integral = 0.0
     self.curve_count = 0
-    self.in_curve = False
     # adj_history and adj_count persist across adjustments intentionally
 
   def _post_adjust(self):
@@ -78,7 +78,13 @@ class LateralAutoTuner:
   _AT_DECAY_RATE = 0.15
   # How many recent adjustment directions to inspect for oscillation.
   _AT_ADJ_HISTORY_LEN = 4
-  _AT_SPEED_BOUNDARY = 20.0
+  # Speed breakpoints matching the high_gain_calc interpolation in lateral_angle_ext.py.
+  # low_factor has full weight at or below _AT_V_LOW; high_factor at or above _AT_V_HIGH.
+  # Between them, each factor's share of the error is proportional to its gain contribution.
+  _AT_V_LOW  = 13.5    # m/s (~30 mph)
+  _AT_V_HIGH = 26.82   # m/s (~60 mph)
+  # Skip firing an adjustment for a factor whose weight is negligible at current speed.
+  _AT_MIN_WEIGHT = 0.05
   _AT_KAPPA_MIN = 0.003
   _AT_KAPPA_MAX = 0.040
   _AT_V_MIN = 5.0
@@ -104,6 +110,9 @@ class LateralAutoTuner:
     self.curvature_error = 0.0
     self.integral_low = 0.0
     self.integral_high = 0.0
+    # Shared error smoothing and curve-entry detection (both factors see the same road).
+    self._error_smooth = 0.0
+    self._in_curve = False
 
   def configure(self, params, enabled: bool, param_low: float, param_high: float) -> None:
     is_first = self._params is None
@@ -131,6 +140,8 @@ class LateralAutoTuner:
       tuner.reset()
       tuner.adj_history = []
       tuner.adj_count = 0
+    self._error_smooth = 0.0
+    self._in_curve = False
     self.actual_curvature = 0.0
     self.curvature_error = 0.0
 
@@ -159,39 +170,50 @@ class LateralAutoTuner:
       return
 
     abs_kappa = abs(kappa_cmd)
-    active = self._at_regime_low if v_ego < self._AT_SPEED_BOUNDARY else self._at_regime_high
-
     is_curve = self._AT_KAPPA_MIN <= abs_kappa <= self._AT_KAPPA_MAX
 
-    # Detect rising edge of curve entry and count it.
-    if is_curve and not active.in_curve:
-      active.curve_count += 1
-    active.in_curve = is_curve
+    # Blended weights: how much each factor contributes to the gain at current speed.
+    # Mirrors the high_gain_calc interp breakpoints in lateral_angle_ext.py so attribution
+    # of the tracking error matches the actual gain structure at every speed.
+    t = float(clip(interp(v_ego, [self._AT_V_LOW, self._AT_V_HIGH], [0.0, 1.0]), 0.0, 1.0))
+    w_low  = 1.0 - t
+    w_high = t
+
+    # Detect rising edge of curve entry; both tuners see the same road.
+    if is_curve and not self._in_curve:
+      self._at_regime_low.curve_count  += 1
+      self._at_regime_high.curve_count += 1
+    self._in_curve = is_curve
 
     if not is_curve:
       return
 
     raw_error = kappa_cmd - actual_kappa
-    active.error_smooth = (self._AT_ALPHA * raw_error
-                           + (1 - self._AT_ALPHA) * active.error_smooth)
-    active.integral += clip(active.error_smooth, -self._AT_INT_CLAMP, self._AT_INT_CLAMP)
+    self._error_smooth = (self._AT_ALPHA * raw_error
+                          + (1 - self._AT_ALPHA) * self._error_smooth)
+    clipped = float(clip(self._error_smooth, -self._AT_INT_CLAMP, self._AT_INT_CLAMP))
 
-    if active.curve_count >= self._AT_MIN_CURVES:
-      if active.integral > self._AT_INT_THRESH:
-        ratio = min(active.integral / self._AT_INT_THRESH, self._AT_MAX_RATIO)
-        self._adjust_factor(active, self._AT_STEP * ratio)
-        active._post_adjust()
-      elif active.integral < -self._AT_INT_THRESH:
-        ratio = min(abs(active.integral) / self._AT_INT_THRESH, self._AT_MAX_RATIO)
-        self._adjust_factor(active, -self._AT_STEP * ratio)
-        active._post_adjust()
+    # Each factor's integral accumulates only the fraction of error attributable to it.
+    self._at_regime_low.integral  += clipped * w_low
+    self._at_regime_high.integral += clipped * w_high
+
+    for tuner, weight in ((self._at_regime_low, w_low), (self._at_regime_high, w_high)):
+      if weight < self._AT_MIN_WEIGHT:
+        continue
+      if tuner.curve_count >= self._AT_MIN_CURVES:
+        if tuner.integral > self._AT_INT_THRESH:
+          ratio = min(tuner.integral / self._AT_INT_THRESH, self._AT_MAX_RATIO)
+          self._adjust_factor(tuner, self._AT_STEP * ratio)
+          tuner._post_adjust()
+        elif tuner.integral < -self._AT_INT_THRESH:
+          ratio = min(abs(tuner.integral) / self._AT_INT_THRESH, self._AT_MAX_RATIO)
+          self._adjust_factor(tuner, -self._AT_STEP * ratio)
+          tuner._post_adjust()
 
     self.actual_curvature = actual_kappa
     self.curvature_error = raw_error
-    if v_ego < self._AT_SPEED_BOUNDARY:
-      self.integral_low = active.integral
-    else:
-      self.integral_high = active.integral
+    self.integral_low  = self._at_regime_low.integral
+    self.integral_high = self._at_regime_high.integral
 
     now = time.monotonic()
     if self._at_regime_low.dirty or self._at_regime_high.dirty:
