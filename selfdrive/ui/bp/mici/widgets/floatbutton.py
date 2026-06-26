@@ -112,6 +112,11 @@ class BigParamStepControl(BigButtonBP):
       value = self.get_param()
     self.set_value(self._format_value(value))
 
+  def show_event(self):
+    super().show_event()
+    self._last_adjust_time = None
+    self.update_label()
+
   def _update_state(self):
     super()._update_state()
     # Re-read the param each frame so values changed elsewhere (e.g. remotely via sunnylink)
