@@ -18,19 +18,22 @@ import time
 from numpy import clip, interp
 
 
-class _AutoTuner:
+class AutoTuner:
   __slots__ = ("integral",
-               "curve_count",
-               "adj_history", "adj_count",
-               "dirty",
-               "factor_name", "ts_name", "count_name")
+                "curve_count",
+                "adj_history", "adj_count",
+                "dirty", "factor_dirty",
+                "factor",
+                "factor_name", "ts_name", "count_name")
 
-  def __init__(self, factor_name: str, ts_name: str, count_name: str):
+  def __init__(self, factor_name: str, ts_name: str, count_name: str, factor: float = 1.0):
     self.integral = 0.0
     self.curve_count = 0
     self.adj_history = []   # recent adjustment directions: +1 or -1
     self.adj_count = 0      # lifetime total, loaded from params on first configure
     self.dirty = False
+    self.factor_dirty = False
+    self.factor = factor
     self.factor_name = factor_name
     self.ts_name = ts_name
     self.count_name = count_name
@@ -42,6 +45,7 @@ class _AutoTuner:
 
   def _post_adjust(self):
     self.dirty = True
+    self.factor_dirty = True
     self.reset()
 
   def flush(self, params) -> None:
@@ -88,24 +92,25 @@ class LateralAutoTuner:
   _AT_KAPPA_MIN = 0.003
   _AT_KAPPA_MAX = 0.040
   _AT_V_MIN = 5.0
+  # Debounce factor writes to params — max once per second.
+  _AT_FACTOR_WRITE_INTERVAL = 1.0
 
   def __init__(self):
-    self._at_regime_low = _AutoTuner(
+    self._at_regime_low = AutoTuner(
       "FordAngleLowSpeedFactor",
       "FordAngleAutoTuneLastAdjustedLow",
       "FordAngleAutoTuneAdjustmentsLow",
     )
-    self._at_regime_high = _AutoTuner(
+    self._at_regime_high = AutoTuner(
       "FordAngleHighSpeedFactor",
       "FordAngleAutoTuneLastAdjustedHigh",
       "FordAngleAutoTuneAdjustmentsHigh",
     )
     self._params = None
     self.enabled = False
-    self.low_factor = 1.0
-    self.high_factor = 1.0
     self._at_last_flush_ts = 0.0
     self._at_flush_interval = 30.0
+    self._at_last_factor_write_ts = 0.0
     self.actual_curvature = 0.0
     self.curvature_error = 0.0
     self.integral_low = 0.0
@@ -114,32 +119,39 @@ class LateralAutoTuner:
     self._error_smooth = 0.0
     self._in_curve = False
 
+  @property
+  def low_factor(self) -> float:
+    return self._at_regime_low.factor
+
+  @property
+  def high_factor(self) -> float:
+    return self._at_regime_high.factor
+
   def configure(self, params, enabled: bool, param_low: float, param_high: float) -> None:
-    is_first = self._params is None
     was_enabled = self.enabled
     self._params = params
     self.enabled = enabled
-    if not self._at_regime_low.dirty:
-      self.low_factor = param_low
-    if not self._at_regime_high.dirty:
-      self.high_factor = param_high
+    if not self._at_regime_low.factor_dirty:
+      self._at_regime_low.factor = param_low
+    if not self._at_regime_high.factor_dirty:
+      self._at_regime_high.factor = param_high
     # Clear stale integral/curve state when re-enabling so we start fresh.
+    # adj_count is NOT reset here — it persists across sessions via params.
     if enabled and not was_enabled:
       self.reset()
-    # Load lifetime adjustment counts once so decay persists across sessions.
-    if is_first:
-      for tuner in (self._at_regime_low, self._at_regime_high):
-        try:
-          cnt = params.get(tuner.count_name, return_default=True)
-          tuner.adj_count = cnt if isinstance(cnt, int) else 0
-        except Exception:
-          tuner.adj_count = 0
+    # Reload lifetime adjustment counts from params on every configure call.
+    # This ensures decay persists across sessions and survives disengages.
+    for tuner in (self._at_regime_low, self._at_regime_high):
+      try:
+        cnt = params.get(tuner.count_name, return_default=True)
+        tuner.adj_count = cnt if isinstance(cnt, int) else 0
+      except Exception:
+        tuner.adj_count = 0
 
   def reset(self) -> None:
     for tuner in (self._at_regime_low, self._at_regime_high):
       tuner.reset()
       tuner.adj_history = []
-      tuner.adj_count = 0
     self._error_smooth = 0.0
     self._in_curve = False
     self.actual_curvature = 0.0
@@ -154,6 +166,21 @@ class LateralAutoTuner:
     except Exception:
       pass
     self._at_last_flush_ts = time.monotonic()
+
+  def _flush_factors(self) -> None:
+    if self._params is None:
+      return
+    now = time.monotonic()
+    if now - self._at_last_factor_write_ts < self._AT_FACTOR_WRITE_INTERVAL:
+      return
+    for tuner in (self._at_regime_low, self._at_regime_high):
+      if tuner.factor_dirty:
+        try:
+          self._params.put(tuner.factor_name, tuner.factor)
+        except Exception:
+          pass
+        tuner.factor_dirty = False
+    self._at_last_factor_write_ts = now
 
   def update(self, kappa_cmd: float, v_ego: float, CS) -> None:
     if not self.enabled:
@@ -216,13 +243,14 @@ class LateralAutoTuner:
     self.integral_high = self._at_regime_high.integral
 
     now = time.monotonic()
-    if self._at_regime_low.dirty or self._at_regime_high.dirty:
+    any_dirty = (self._at_regime_low.dirty or self._at_regime_high.dirty
+                 or self._at_regime_low.factor_dirty or self._at_regime_high.factor_dirty)
+    if any_dirty:
       if now - self._at_last_flush_ts >= self._at_flush_interval:
         self.flush()
+      self._flush_factors()
 
-  def _adjust_factor(self, tuner: _AutoTuner, step: float) -> None:
-    current = self.low_factor if tuner.factor_name == "FordAngleLowSpeedFactor" else self.high_factor
-
+  def _adjust_factor(self, tuner: AutoTuner, step: float) -> None:
     direction = 1 if step > 0 else -1
 
     # Oscillation: last adjustment was the opposite direction — we're near optimal.
@@ -233,16 +261,8 @@ class LateralAutoTuner:
     effective_alpha = max(self._AT_BLEND_ALPHA_MIN,
                           base_alpha / (1.0 + tuner.adj_count * self._AT_DECAY_RATE))
 
-    new_val = float(clip(current + effective_alpha * step, 0.5, 1.5))
-    try:
-      self._params.put(tuner.factor_name, new_val)
-    except Exception:
-      return
-
-    if tuner.factor_name == "FordAngleLowSpeedFactor":
-      self.low_factor = new_val
-    else:
-      self.high_factor = new_val
+    new_val = float(clip(tuner.factor + effective_alpha * step, 0.5, 1.5))
+    tuner.factor = new_val
 
     tuner.adj_history.append(direction)
     if len(tuner.adj_history) > self._AT_ADJ_HISTORY_LEN:
