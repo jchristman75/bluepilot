@@ -174,7 +174,7 @@ class MiciHudRendererBP(AutotuneDisplayMixin, HudRenderer):
     """Display current autotune speed factors."""
     low_text = f"Low: {self._at_low_factor:.2f}"
     high_text = f"High: {self._at_high_factor:.2f}"
-    font_size = 28
+    font_size = 84
     text_color = rl.Color(200, 220, 255, 220)
     shadow_color = rl.Color(0, 0, 0, 180)
 
