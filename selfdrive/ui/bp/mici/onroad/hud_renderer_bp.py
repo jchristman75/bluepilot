@@ -179,7 +179,7 @@ class MiciHudRendererBP(AutotuneDisplayMixin, HudRenderer):
     shadow_color = rl.Color(0, 0, 0, 180)
 
     x = int(rect.x + rect.width / 2)
-    y = int(rect.y + rect.height - 80)
+    y = int(rect.y + 174)
 
     low_size = measure_text_cached(self._font_bold, low_text, font_size)
     high_size = measure_text_cached(self._font_bold, high_text, font_size)

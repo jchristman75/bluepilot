@@ -135,7 +135,7 @@ class HudRendererBP(AutotuneDisplayMixin, HudRendererSP):
     shadow_color = rl.Color(0, 0, 0, 180)
 
     x = rect.x + UI_CONFIG.border_size + 10
-    y = rect.y + UI_CONFIG.header_height + 8
+    y = rect.y + 260
 
     low_size = measure_text_cached(self._font_medium, low_text, font_size)
     rl.draw_text_ex(self._font_medium, low_text, (x + 2, y + 2), font_size, 0, shadow_color)
