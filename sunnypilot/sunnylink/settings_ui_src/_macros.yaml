@@ -26,10 +26,14 @@ macros:
   advanced_only:
     - {type: param, key: ShowAdvancedControls, equals: true}
 
-  # Hide on MICI hardware (no analog HUD support yet).
+  # Hide on MICI hardware (no analog HUD support yet). Visible on TICI/TIZI (device_type != mici).
   hide_on_mici:
     - type: not
       condition: {type: capability, field: device_type, equals: mici}
+
+  # Show only on MICI (comma 4) hardware. Use for C4-specific options that have no TICI/TIZI equivalent.
+  mici_only:
+    - {type: capability, field: device_type, equals: mici}
 
   # Mirrors selfdrive/ui/sunnypilot/layouts/.../mads_settings.py:_mads_limited_settings()
   # Rivian + Tesla-without-vehicle-bus get the limited MADS UI (3-toggle subset).

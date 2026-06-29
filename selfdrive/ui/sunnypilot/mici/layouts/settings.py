@@ -10,13 +10,12 @@ from openpilot.selfdrive.ui.sunnypilot.mici.layouts.sunnylink import SunnylinkLa
 from openpilot.selfdrive.ui.sunnypilot.mici.layouts.models import ModelsLayoutMici
 import pyray as rl
 from openpilot.system.ui.lib.application import gui_app
-# BluePilot: vehicle selector, BP settings panel, lateral debug, and BigButtonBP override
+# BluePilot: vehicle selector, BP settings panel, and BigButtonBP override
 from openpilot.common.bluepilot import is_bluepilot
 if is_bluepilot():
   from openpilot.selfdrive.ui.bp.mici.widgets.button_bp import BigButtonBP as BigButton
   from openpilot.selfdrive.ui.bp.mici.layouts.settings.bluepilot import BluePilotLayoutMici
   from openpilot.selfdrive.ui.bp.mici.layouts.settings.vehicle_mici import VehicleLayoutMici
-  from openpilot.selfdrive.ui.bp.mici.onroad.lateral_debug_mici import LateralDebugMici
 
 ICON_SIZE = 70
 
@@ -44,11 +43,7 @@ class SettingsLayoutSP(OP.SettingsLayout):
       bluepilot_btn = BigButton("bluepilot", "", gui_app.texture("icons_mici/settings/car_icon.png", ICON_SIZE, ICON_SIZE))
       bluepilot_btn.set_click_callback(lambda: gui_app.push_widget(bp_panel))
 
-      lat_debug_btn = BigButton("lat debug", "", gui_app.texture("icons_mici/settings/device/lkas.png", ICON_SIZE, ICON_SIZE))
-      lat_debug_btn.set_click_callback(lambda: gui_app.push_widget(LateralDebugMici(back_callback=gui_app.pop_widget)))
-
       items.insert(4, bluepilot_btn)
-      items.insert(5, lat_debug_btn)
 
     self._scroller._items.clear()
     for item in items:

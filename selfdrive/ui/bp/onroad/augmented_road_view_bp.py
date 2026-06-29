@@ -1,4 +1,5 @@
 import time
+from enum import IntEnum
 import pyray as rl
 from cereal import log, messaging
 from openpilot.common.params import Params
@@ -19,6 +20,12 @@ from openpilot.selfdrive.ui.onroad.driver_state import BTN_SIZE
 from openpilot.selfdrive.ui.sunnypilot.onroad.developer_ui import DeveloperUiState, get_bottom_dev_ui_offset
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.selfdrive.ui.bp.lib.ui_debug_logger import bp_ui_log
+
+
+class GaugeStyle(IntEnum):
+  flat = 0
+  arched = 1
+
 
 # BluePilot: Margin to keep confidence ball inside the colored border
 BALL_BORDER_MARGIN = UI_BORDER_SIZE // 2  # 15px
@@ -65,11 +72,7 @@ class AugmentedRoadViewBP(AugmentedRoadView, BlindspotRendererMixin):
     self._confidence_ball = ConfidenceBallTiciBP()
     self._show_confidence_ball = self._bp_params.get_bool("BPShowConfidenceBall")
     self._param_counter = 0
-    raw_style = self._bp_params.get("FordPrefHybridGaugeStyle") or b"flat"
-    self._hybrid_gauge_style = (raw_style.decode("utf-8", errors="replace").strip("\x00").lower()
-                                if isinstance(raw_style, bytes) else str(raw_style).strip().lower())
-    if self._hybrid_gauge_style not in ("flat", "arched"):
-      self._hybrid_gauge_style = "flat"
+    self._hybrid_gauge_style = GaugeStyle(self._bp_params.get("FordPrefGaugeStyle", return_default=True) or 0)
     # BluePilot: Cache param to avoid per-frame disk I/O (refreshed in existing 60-frame block)
     self._hide_onroad_border = self._bp_params.get_bool("BPHideOnroadBorder")
     try:
@@ -97,11 +100,7 @@ class AugmentedRoadViewBP(AugmentedRoadView, BlindspotRendererMixin):
         self._cached_gauge_size = int(self._bp_params.get("FordPrefHybridDriveGaugeSize", return_default=True))
       except (TypeError, ValueError):
         self._cached_gauge_size = 2
-      raw_style = self._bp_params.get("FordPrefHybridGaugeStyle") or b"flat"
-      self._hybrid_gauge_style = (raw_style.decode("utf-8", errors="replace").strip("\x00").lower()
-                                  if isinstance(raw_style, bytes) else str(raw_style).strip().lower())
-      if self._hybrid_gauge_style not in ("flat", "arched"):
-        self._hybrid_gauge_style = "flat"
+      self._hybrid_gauge_style = GaugeStyle(self._bp_params.get("FordPrefGaugeStyle", return_default=True) or 0)
 
     self._switch_stream_if_needed(ui_state.sm)
     self._update_calibration()
@@ -233,9 +232,9 @@ class AugmentedRoadViewBP(AugmentedRoadView, BlindspotRendererMixin):
     When no hybrid gauge is active, the strip is not rendered — the stock arc torque bar
     is used instead (handled by the caller).
 
-    When FordPrefHybridGaugeStyle is "arched" and powerflow is ON: use arched powerflow + arched battery.
+    When gauge style is arched and powerflow is ON: use arched powerflow + arched battery.
     When powerflow is OFF: always use flat battery (no arched battery solo).
-    When style is "flat": use flat battery and/or flat powerflow.
+    When style is flat: use flat battery and/or flat powerflow.
 
     Returns:
         (gauge_height_offset, hybrid_active): gauge_height_offset is pixels from bottom of
@@ -243,7 +242,7 @@ class AugmentedRoadViewBP(AugmentedRoadView, BlindspotRendererMixin):
             when at least one hybrid gauge was rendered (strip was used for torque).
     """
     # Arched style + powerflow on: use arched layout. Powerflow off → flat battery only.
-    if getattr(self, "_hybrid_gauge_style", "flat") == "arched":
+    if getattr(self, "_hybrid_gauge_style", GaugeStyle.flat) == GaugeStyle.arched:
       self._power_flow_gauge_arched._update_state()
       if self._power_flow_gauge_arched._should_render():
         gauge_size = min(max(self._cached_gauge_size, 1), 2)  # 1 = small, 2 = large
@@ -402,7 +401,7 @@ class AugmentedRoadViewBP(AugmentedRoadView, BlindspotRendererMixin):
   _ARCHED_GAUGE_HEIGHT_OFFSET = 220.0
 
   def _render_gauges_arched(self, content_rect: rl.Rectangle, ball_offset: float, scale: float = 1.0) -> tuple[float, bool]:
-    """Render arched-style powerflow and battery gauges (FordPrefHybridGaugeStyle = arched).
+    """Render arched-style powerflow and battery gauges (gauge style = arched).
     scale: 0.75 for small (gauge size 1), 1.0 for large (gauge size 2).
     When both are visible, the steering strip spans battery + powerflow with center at screen middle.
     """

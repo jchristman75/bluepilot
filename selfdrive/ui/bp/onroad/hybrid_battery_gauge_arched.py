@@ -6,7 +6,7 @@ so the battery continues the top and bottom of the powerflow meter.
 - Upper half of arc: SOC % with animated fill (same animation as previous battery icon).
 - Bottom: volts and amps in powerflow string font.
 
-Only used when FordPrefHybridGaugeStyle = "arched".
+Only used when the hybrid gauge style is arched (FordPrefGaugeStyle = 1).
 """
 import traceback
 import numpy as np

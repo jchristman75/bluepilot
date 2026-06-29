@@ -310,7 +310,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"FordPrefHybridBatteryStatus", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"FordPrefHybridPowerFlow", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"FordPrefHybridDriveGaugeSize", {PERSISTENT | BACKUP, INT, "1"}},
-    {"FordPrefHybridGaugeStyle", {PERSISTENT | BACKUP, STRING, "flat"}},
+    {"FordPrefGaugeStyle", {PERSISTENT | BACKUP, INT, "0"}},  // hybrid/EV gauge style: 0=flat, 1=arched
     {"FordPrefHevDataAvailable", {CLEAR_ON_MANAGER_START, BOOL, "0"}},
     {"FordPrefHevBattDataAvailable", {CLEAR_ON_MANAGER_START, BOOL, "0"}},
     {"mici_complication", {PERSISTENT | BACKUP, INT, "0"}},

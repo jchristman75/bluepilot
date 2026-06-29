@@ -4,7 +4,10 @@
       "name": "FordSelectedVehicleModel",
       "default": "",
       "type": "string",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": false,
       "enabled": true
     },
@@ -12,7 +15,10 @@
       "name": "FordPrefSendHandsFreeCanMsg",
       "default": false,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "ccProp": "send_hands_free_cluster_msg",
       "create_default": true,
       "enabled": true
@@ -21,7 +27,10 @@
       "name": "FordPrefDisableBP_lat_UI",
       "default": false,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "ccProp": "disable_BP_lat_UI",
       "create_default": true,
       "enabled": true
@@ -30,7 +39,10 @@
       "name": "FordPrefDisableDownhillCompUI",
       "default": false,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "ccProp": "disable_downhill_comp_UI",
       "create_default": true,
       "enabled": true
@@ -39,7 +51,10 @@
       "name": "FordPrefHumanTurnDetectionEnable",
       "default": true,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "ccProp": "enable_human_turn_detection",
       "create_default": true,
       "enabled": true
@@ -48,7 +63,10 @@
       "name": "FordPrefLaneDepartCanMsg",
       "default": false,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "ccProp": "send_lane_depart_can_msg",
       "create_default": true,
       "enabled": true
@@ -57,7 +75,10 @@
       "name": "FordPrefDriverMonitorCanMsg",
       "default": false,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "ccProp": "send_driver_monitor_can_msg",
       "create_default": true,
       "enabled": true
@@ -66,7 +87,10 @@
       "name": "FordPrefEnableDebugLogs",
       "default": false,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": true,
       "enabled": true
     },
@@ -74,7 +98,10 @@
       "name": "FordPrefSupportsHybridDrive",
       "default": false,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": false,
       "enabled": true
     },
@@ -82,7 +109,10 @@
       "name": "FordPrefHybridBatteryStatus",
       "default": false,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": true,
       "enabled": true
     },
@@ -90,7 +120,10 @@
       "name": "FordPrefHybridPowerFlow",
       "default": false,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": true,
       "enabled": true
     },
@@ -98,15 +131,21 @@
       "name": "FordPrefHybridDriveGaugeSize",
       "default": 1,
       "type": "int",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": true,
       "enabled": true
     },
     {
-      "name": "FordPrefHybridGaugeStyle",
-      "default": "flat",
-      "type": "string",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "name": "FordPrefGaugeStyle",
+      "default": 0,
+      "type": "int",
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": true,
       "enabled": true
     },
@@ -114,7 +153,10 @@
       "name": "FordPrefHybridBatteryOverlay",
       "default": false,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": true,
       "enabled": true
     },
@@ -122,7 +164,10 @@
       "name": "FordPrefHideSteerSaturatedAlerts",
       "default": false,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": true,
       "enabled": true
     },
@@ -130,7 +175,10 @@
       "name": "BPUseBluepilotAlerts",
       "default": true,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": true,
       "enabled": true
     },
@@ -138,7 +186,10 @@
       "name": "FordPrefShowAnimatedWheelAngle",
       "default": true,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": true,
       "enabled": true
     },
@@ -146,7 +197,10 @@
       "name": "FordPrefShowRadarLeadOverlay",
       "default": true,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": true,
       "enabled": true
     },
@@ -154,7 +208,10 @@
       "name": "FordPrefRadarOverlaySize",
       "default": 1,
       "type": "int",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": true,
       "enabled": true
     },
@@ -164,17 +221,75 @@
       "min": 0.5,
       "max": 1.0,
       "type": "float",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "ccProp": "lane_change_factor_high",
       "create_default": true,
       "enabled": true
     },
     {
-      "name": "FordPrefPrimaryLateralControl",
-      "default": "curvature",
-      "type": "string",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "name": "FordPrefLateralControl",
+      "default": 0,
+      "type": "int",
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": true,
+      "enabled": true
+    },
+    {
+      "name": "FordAngleAutoTuneEnable",
+      "default": false,
+      "type": "bool",
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
+      "ccProp": "angle_auto_tune_enable",
+      "create_default": true,
+      "enabled": true
+    },
+    {
+      "name": "FordAngleAutoTuneLastAdjustedLow",
+      "default": 0,
+      "type": "int",
+      "flags": [
+        "PERSISTENT"
+      ],
+      "create_default": false,
+      "enabled": true
+    },
+    {
+      "name": "FordAngleAutoTuneLastAdjustedHigh",
+      "default": 0,
+      "type": "int",
+      "flags": [
+        "PERSISTENT"
+      ],
+      "create_default": false,
+      "enabled": true
+    },
+    {
+      "name": "FordAngleAutoTuneAdjustmentsLow",
+      "default": 0,
+      "type": "int",
+      "flags": [
+        "PERSISTENT"
+      ],
+      "create_default": false,
+      "enabled": true
+    },
+    {
+      "name": "FordAngleAutoTuneAdjustmentsHigh",
+      "default": 0,
+      "type": "int",
+      "flags": [
+        "PERSISTENT"
+      ],
+      "create_default": false,
       "enabled": true
     },
     {
@@ -183,7 +298,10 @@
       "min": 0.5,
       "max": 1.5,
       "type": "float",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "ccProp": "FordAngleLowSpeedFactor",
       "create_default": true,
       "enabled": true
@@ -194,50 +312,12 @@
       "min": 0.5,
       "max": 1.5,
       "type": "float",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "ccProp": "FordAngleHighSpeedFactor",
       "create_default": true,
-      "enabled": true
-    },
-    {
-      "name": "FordAngleAutoTuneEnable",
-      "default": false,
-      "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
-      "ccProp": "angle_auto_tune_enable",
-      "create_default": true,
-      "enabled": true
-    },
-    {
-      "name": "FordAngleAutoTuneLastAdjustedLow",
-      "default": 0,
-      "type": "int",
-      "flags": ["PERSISTENT"],
-      "create_default": false,
-      "enabled": true
-    },
-    {
-      "name": "FordAngleAutoTuneLastAdjustedHigh",
-      "default": 0,
-      "type": "int",
-      "flags": ["PERSISTENT"],
-      "create_default": false,
-      "enabled": true
-    },
-    {
-      "name": "FordAngleAutoTuneAdjustmentsLow",
-      "default": 0,
-      "type": "int",
-      "flags": ["PERSISTENT"],
-      "create_default": false,
-      "enabled": true
-    },
-    {
-      "name": "FordAngleAutoTuneAdjustmentsHigh",
-      "default": 0,
-      "type": "int",
-      "flags": ["PERSISTENT"],
-      "create_default": false,
       "enabled": true
     },
     {
@@ -246,7 +326,10 @@
       "min": 0.0,
       "max": 1.0,
       "type": "float",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "ccProp": "pc_blend_ratio_high_C_UI",
       "create_default": true,
       "enabled": true
@@ -257,7 +340,10 @@
       "min": 0.0,
       "max": 1.0,
       "type": "float",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "ccProp": "pc_blend_ratio_low_C_UI",
       "create_default": true,
       "enabled": true
@@ -266,7 +352,10 @@
       "name": "FordLatTuningEnableLanePositioning",
       "default": false,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "ccProp": "enable_lane_positioning",
       "create_default": false,
       "enabled": true
@@ -275,7 +364,10 @@
       "name": "FordLatTuningEnableHighCurvatureMode",
       "default": false,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "ccProp": "enable_high_curvature_mode",
       "create_default": false,
       "enabled": true
@@ -286,7 +378,10 @@
       "min": -0.5,
       "max": 0.5,
       "type": "float",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "ccProp": "custom_path_offset",
       "create_default": true,
       "enabled": true
@@ -297,7 +392,10 @@
       "min": 0.0,
       "max": 0.8,
       "type": "float",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "ccProp": "wheel_angle_lookup_time",
       "create_default": true,
       "enabled": true
@@ -308,7 +406,10 @@
       "min": 0.0,
       "max": 0.8,
       "type": "float",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "ccProp": "path_offset_lookup_time",
       "create_default": true,
       "enabled": true
@@ -317,7 +418,10 @@
       "name": "FordLatTuningEnableLanefullMode",
       "default": false,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "ccProp": "enable_lane_full_mode",
       "create_default": true,
       "enabled": true
@@ -328,7 +432,10 @@
       "min": 0,
       "max": 1,
       "type": "int",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "ccProp": "custom_profile",
       "create_default": true,
       "enabled": true
@@ -339,7 +446,10 @@
       "min": 0.0,
       "max": 5.0,
       "type": "float",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "ccProp": "LC_PID_gain_UI",
       "create_default": true,
       "enabled": true
@@ -350,7 +460,10 @@
       "min": 0.0,
       "max": 5.0,
       "type": "float",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "ccProp": "HC_PID_gain_UI",
       "create_default": true,
       "enabled": true
@@ -359,7 +472,10 @@
       "name": "CustomModelPathColor",
       "default": "Stock",
       "type": "string",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": false,
       "enabled": true
     },
@@ -367,7 +483,10 @@
       "name": "ShowGForceMeter",
       "default": false,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": true,
       "enabled": true
     },
@@ -375,7 +494,10 @@
       "name": "BlindSpot",
       "default": true,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": false,
       "enabled": true
     },
@@ -383,7 +505,10 @@
       "name": "ShowBlindspotOverlay",
       "default": true,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": true,
       "enabled": true
     },
@@ -391,7 +516,10 @@
       "name": "ShowStopIndicatorOverlay",
       "default": true,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": true,
       "enabled": true
     },
@@ -399,7 +527,10 @@
       "name": "FordPrefHevDataAvailable",
       "default": false,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": false,
       "enabled": true
     },
@@ -407,7 +538,10 @@
       "name": "FordPrefHevBattDataAvailable",
       "default": false,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": false,
       "enabled": true
     },
@@ -415,7 +549,10 @@
       "name": "ShowGForceMeter",
       "default": false,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": false,
       "enabled": true
     },
@@ -423,7 +560,10 @@
       "name": "ShowWideCameraAtLowSpeed",
       "default": false,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": false,
       "enabled": true
     },
@@ -431,7 +571,10 @@
       "name": "ShowBrakeStatus",
       "default": false,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": true,
       "enabled": true
     },
@@ -439,7 +582,10 @@
       "name": "BPLastSeenVersion",
       "default": "",
       "type": "string",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": false,
       "enabled": true
     },
@@ -447,7 +593,10 @@
       "name": "LaneLineCalibrationRequired",
       "default": false,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": false,
       "enabled": true
     },
@@ -455,7 +604,10 @@
       "name": "OffroadDisplayTest",
       "default": true,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": false,
       "enabled": true
     },
@@ -463,7 +615,10 @@
       "name": "DisableGPSAlert",
       "default": false,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": false,
       "enabled": true
     },
@@ -473,7 +628,10 @@
       "min": 10,
       "max": 120,
       "type": "int",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": true,
       "enabled": true
     },
@@ -481,7 +639,10 @@
       "name": "BluepilotShowEnhancedOnroadUI",
       "default": true,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": true,
       "enabled": true
     },
@@ -489,7 +650,10 @@
       "name": "BPUiTextSize",
       "default": 1,
       "type": "int",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": true,
       "enabled": true,
       "min": 0,
@@ -499,7 +663,10 @@
       "name": "EnableWebRoutesServer",
       "default": false,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": false,
       "enabled": true
     },
@@ -507,7 +674,10 @@
       "name": "BPPortalPort",
       "default": 8088,
       "type": "int",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": true,
       "enabled": true
     },
@@ -515,7 +685,9 @@
       "name": "BPPortalCrashCount",
       "default": 0,
       "type": "int",
-      "flags": ["PERSISTENT"],
+      "flags": [
+        "PERSISTENT"
+      ],
       "create_default": false,
       "enabled": true
     },
@@ -523,7 +695,9 @@
       "name": "BPPortalLastCrash",
       "default": 0,
       "type": "int",
-      "flags": ["PERSISTENT"],
+      "flags": [
+        "PERSISTENT"
+      ],
       "create_default": false,
       "enabled": true
     },
@@ -531,7 +705,10 @@
       "name": "EnableTethering",
       "default": false,
       "type": "bool",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": false,
       "enabled": true
     },
@@ -539,7 +716,10 @@
       "name": "WifiFavoriteSSID",
       "default": "",
       "type": "string",
-      "flags": ["PERSISTENT", "BACKUP"],
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
       "create_default": false,
       "enabled": true
     }

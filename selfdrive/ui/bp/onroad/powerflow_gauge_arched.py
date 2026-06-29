@@ -2,7 +2,7 @@
 Powerflow Gauge (Arched) for Hybrid Vehicles
 
 Arch-shaped gauge above the torque bar showing power flow direction.
-Restored from commit 7b9a2531b; select via FordPrefHybridGaugeStyle = "arched".
+Restored from commit 7b9a2531b; select via FordPrefGaugeStyle = 1 (arched).
 """
 import numpy as np
 import pyray as rl
@@ -39,7 +39,7 @@ ARCH_DOWN_OFFSET = 87
 ARCH_ROTATION_DEG = 2.0
 
 class PowerflowGaugeArched(Widget):
-  """Arch-shaped powerflow gauge (above torque bar). Use when FordPrefHybridGaugeStyle is arched."""
+  """Arch-shaped powerflow gauge (above torque bar). Use when the hybrid gauge style is arched."""
 
   def __init__(self):
     super().__init__()

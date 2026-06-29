@@ -109,6 +109,7 @@ class MiciAugmentedRoadViewBP(AugmentedRoadView, BlindspotRendererMixin):
 
   def _render(self, _):
     """Override render to place confidence ball on left, offset driver state, and conditionally hide border."""
+    bp_ui_log.tick()  # refresh BPUIDebugLog enabled state (mirrors TICI; MICI had no tick, so the toggle was inert)
     start_draw = time.monotonic()
     self._switch_stream_if_needed(ui_state.sm)
     self._update_calibration()

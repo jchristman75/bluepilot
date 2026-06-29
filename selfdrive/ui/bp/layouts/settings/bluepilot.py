@@ -15,6 +15,7 @@ from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.selfdrive.ui.bp.widgets.float_control_item import float_control_item
 from openpilot.selfdrive.ui.bp.widgets.section_header import CollapsibleSectionHeader
 from opendbc.sunnypilot.car.ford.lateral_curv_ext import PrimaryLateralControl
+from openpilot.selfdrive.ui.bp.onroad.augmented_road_view_bp import GaugeStyle
 
 
 class BluePilotLayout(Widget):
@@ -221,15 +222,7 @@ class BluePilotLayout(Widget):
     )
 
     # Hybrid gauge style: Flat (horizontal bar + container) vs Arched (arch above torque bar)
-    gauge_style_raw = self._safe_get(self._params, "FordPrefHybridGaugeStyle") or b"flat"
-    gauge_style_str = (gauge_style_raw.decode("utf-8", errors="replace").strip("\x00").lower()
-                       if isinstance(gauge_style_raw, bytes) else str(gauge_style_raw).strip().lower())
-    gauge_style_idx = 1 if gauge_style_str == "arched" else 0
-    try:
-      if gauge_style_str not in ("flat", "arched"):
-        self._params.put("FordPrefHybridGaugeStyle", "flat")
-    except UnknownKeyName:
-      pass
+    gauge_style_idx = GaugeStyle(self._params.get("FordPrefGaugeStyle", return_default=True) or 0)
     self._hybrid_gauge_style_btn = multiple_button_item(
       lambda: tr("Hybrid Gauge Style"),
       lambda: tr("Flat: horizontal bar in shared container. Arched: arch above torque bar (older style)."),
@@ -598,10 +591,7 @@ class BluePilotLayout(Widget):
       gauge_size = 1
     gauge_size = min(gauge_size, 2)  # Clamp old 3-tier values
     self._hybrid_gauge_size_btn.action_item.set_selected_button(gauge_size - 1)
-    raw_style = self._safe_get(ui_state.params, "FordPrefHybridGaugeStyle") or b"flat"
-    style_str = (raw_style.decode("utf-8", errors="replace").strip("\x00").lower()
-                 if isinstance(raw_style, bytes) else str(raw_style).strip().lower())
-    style_idx = 1 if style_str == "arched" else 0
+    style_idx = GaugeStyle(ui_state.params.get("FordPrefGaugeStyle", return_default=True) or 0)
     self._hybrid_gauge_style_btn.action_item.set_selected_button(style_idx)
     plat_idx = PrimaryLateralControl(ui_state.params.get("FordPrefLateralControl", return_default=True) or 0)
     self._primary_lateral_control_btn.action_item.set_selected_button(plat_idx)
@@ -770,7 +760,10 @@ class BluePilotLayout(Widget):
 
   def _set_hybrid_gauge_style(self, button_index: int):
     """Handle hybrid gauge style: 0 = Flat, 1 = Arched."""
-    self._params.put("FordPrefHybridGaugeStyle", "arched" if button_index == 1 else "flat")
+    try:
+      self._params.put("FordPrefGaugeStyle", int(GaugeStyle(button_index)))
+    except UnknownKeyName:
+      pass
 
   def _set_primary_lateral_control(self, button_index: int):
     try:

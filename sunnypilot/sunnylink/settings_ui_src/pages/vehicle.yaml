@@ -6,6 +6,221 @@ icon: vehicle
 order: 99
 kind: vehicle
 sections:
+- id: ford
+  title: Ford BluePilot Settings
+  description: 'BluePilot is a Ford-focused enhancement, adding custom lateral control, longitudinal
+    tuning, and Ford-specific visuals and driving aids. These settings let you fine-tune BluePilot’s
+    high-level behavior for your Ford vehicle. Items are grouped by category ([System], [Vehicle],
+    [Visuals], [Longitudinal Tuning], [Lateral Tuning]).'
+  items:
+  # --- System ---
+  - key: BPUIDebugLog
+    widget: toggle
+    title: '[System] UI Debug Logging'
+    description: Log UI state transitions for diagnosing rendering issues on device.
+  # --- Vehicle ---
+  - key: send_hands_free_cluster_msg
+    widget: toggle
+    title: '[Vehicle] Show BlueCruise UI on Cluster'
+    description: Display BlueCruise UI on the cluster for supported vehicles.
+  - key: vbatt_pause_charging
+    widget: option
+    title: '[Vehicle] 12V Battery Limit'
+    description: Set the 12V battery charging pause limit (11.0-14.0V).
+    min: 11.0
+    max: 14.0
+    step: 0.1
+    unit: V
+  # --- Visuals ---
+  - key: BPHideOnroadBorder
+    widget: toggle
+    title: '[Visuals] Hide Onroad Border'
+    description: Hide the colored status border around the driving view.
+  - key: mici_hide_onroad_fade
+    widget: toggle
+    title: '[Visuals] Hide Onroad Fade (C4)'
+    description: Hide the onroad fade overlay (comma 4).
+    visibility:
+    - $ref: '#/macros/mici_only'
+  - key: BPDisableLaneLineStatusColor
+    widget: toggle
+    title: '[Visuals] Disable Lane Line Status Color'
+    description: Keep lane lines grey instead of changing to green when engaged.
+  - key: ShowBlindspotOverlay
+    widget: toggle
+    title: '[Visuals] Show Blindspot Overlay'
+    description: Display red overlay when a vehicle is detected in the blindspot.
+  - key: ShowBrakeStatus
+    widget: toggle
+    title: '[Visuals] Show Brake Status'
+    description: Display the speed setpoint in red when the vehicle is braking.
+  - key: BPShowConfidenceBall
+    widget: toggle
+    title: '[Visuals] Show Confidence Ball (C3X)'
+    description: Display the confidence ball on the left side of the driving view.
+    visibility:
+    - $ref: '#/macros/hide_on_mici'
+  - key: BPAnimateSteeringWheel
+    widget: toggle
+    title: '[Visuals] Animate Steering Wheel'
+    description: Rotate the steering wheel icon to match the current steering angle.
+  - key: mici_complication
+    widget: multiple_button
+    title: '[Visuals] Lower Right Display (C4)'
+    description: Choose what is shown in the lower-right corner of the driving view (comma 4).
+    visibility:
+    - $ref: '#/macros/mici_only'
+    options:
+    - value: 0
+      label: 'Off'
+    - value: 1
+      label: Lead Car Speed
+    - value: 2
+      label: Speed
+    - value: 3
+      label: Lead Car Distance
+    - value: 4
+      label: Time to Lead Car
+  - key: FordPrefShowRadarLeadOverlay
+    widget: toggle
+    title: '[Visuals] Show Radar Lead Overlay (Ford ACC)'
+    description: Display a chevron with lead vehicle info when using Ford stock ACC.
+  - key: FordPrefRadarOverlaySize
+    widget: multiple_button
+    title: '[Visuals] Radar Overlay Size'
+    description: Set the size of the radar lead overlay chevron and info boxes.
+    options:
+    - value: 0
+      label: Small
+    - value: 1
+      label: Medium
+    - value: 2
+      label: Large
+    enablement:
+    - type: param
+      key: FordPrefShowRadarLeadOverlay
+      equals: true
+  - key: FordPrefHybridBatteryStatus
+    widget: toggle
+    title: '[Visuals] Show Hybrid/EV Battery Status'
+    description: Display the hybrid battery gauge with SOC, voltage, and amps.
+  - key: FordPrefHybridPowerFlow
+    widget: toggle
+    title: '[Visuals] Show Hybrid/EV Power Flow'
+    description: Display the power flow gauge showing throttle demand and regenerative braking.
+  - key: FordPrefHybridDriveGaugeSize
+    widget: multiple_button
+    title: '[Visuals] Hybrid/EV Gauge Size (C3X)'
+    description: Set the size of the battery and power flow gauges.
+    visibility:
+    - $ref: '#/macros/hide_on_mici'
+    options:
+    - value: 1
+      label: Small
+    - value: 2
+      label: Large
+    enablement:
+    - type: param
+      key: FordPrefHybridPowerFlow
+      equals: true
+  - key: FordPrefGaugeStyle
+    widget: multiple_button
+    title: '[Visuals] Hybrid Gauge Style (C3X)'
+    description: 'Flat: horizontal bar in a shared container. Arched: arch above the torque bar.'
+    visibility:
+    - $ref: '#/macros/hide_on_mici'
+    options:
+    - value: 0
+      label: Flat
+    - value: 1
+      label: Arched
+    enablement:
+    - type: param
+      key: FordPrefHybridPowerFlow
+      equals: true
+  - key: FordPrefHybridPowerFlowAlternate
+    widget: toggle
+    title: '[Visuals] Hybrid/EV Gauge Style: Round (C4)'
+    description: 'Off shows the flat style; on shows the round style (comma 4).'
+    visibility:
+    - $ref: '#/macros/mici_only'
+    enablement:
+    - type: param
+      key: FordPrefHybridPowerFlow
+      equals: true
+  # --- Longitudinal Tuning ---
+  - key: disable_BP_long_UI
+    widget: toggle
+    title: '[Longitudinal Tuning] Bypass BP Longitudinal Control'
+    description: Use stock longitudinal logic instead of BluePilot TTC/coasting tuning.
+  - key: disable_downhill_comp_UI
+    widget: toggle
+    title: '[Longitudinal Tuning] Disable Downhill Compensation'
+    description: Disable pitch-based brake/gas compensation when going downhill.
+  - key: disable_ford_radar_UI
+    widget: toggle
+    title: '[Longitudinal Tuning] Disable Ford Radar (Vision-Only Leads)'
+    description: Ignore the vehicle radar and drive leads exclusively from the vision model. Requires reboot.
+    needs_onroad_cycle: true
+  # --- Lateral Tuning ---
+  - key: FordPrefLateralControl
+    widget: multiple_button
+    title: '[Lateral Tuning] Primary Control Variable'
+    description: Curvature uses the existing 4-signal strategy. Angle uses path_angle as the primary actuator (in development).
+    options:
+    - value: 0
+      label: Curvature
+    - value: 1
+      label: Angle
+  - key: FordAngleLowSpeedFactor
+    widget: option
+    title: '[Lateral Tuning] Low Speed Adjustment Factor'
+    description: Scales the low-speed steering response in angle mode (0.5-1.5). Default 1.0.
+    min: 0.5
+    max: 1.5
+    step: 0.01
+    visibility:
+    - type: param
+      key: FordPrefLateralControl
+      equals: 1
+  - key: FordAngleHighSpeedFactor
+    widget: option
+    title: '[Lateral Tuning] High Speed Adjustment Factor'
+    description: Scales the high-speed steering response in angle mode (0.5-1.5). Default 1.0.
+    min: 0.5
+    max: 1.5
+    step: 0.01
+    visibility:
+    - type: param
+      key: FordPrefLateralControl
+      equals: 1
+  - key: disable_BP_lat_UI
+    widget: toggle
+    title: '[Lateral Tuning] Disable BP Lateral Control'
+    description: Disable BluePilot 4-signal Ford lateral control.
+  - key: BlinkerPauseLaneChange
+    widget: toggle
+    title: '[Lateral Tuning] Disable Lane Change Under Speed'
+    description: Pause lateral control when the blinker is on and below the minimum speed.
+  - key: lane_change_factor_high
+    widget: option
+    title: '[Lateral Tuning] Lane Change Factor High'
+    description: Scales steering during a lane change. <1.0 reduces (curvature control); >1.0 boosts (angle control).
+    min: 0.5
+    max: 2.0
+    step: 0.05
+  - key: custom_path_offset
+    widget: option
+    title: '[Lateral Tuning] In-Lane Offset'
+    description: Adjust the in-lane offset (-0.5 to 0.5 m).
+    min: -0.5
+    max: 0.5
+    step: 0.05
+    unit: m
+  - key: BpShowLateralControl
+    widget: toggle
+    title: '[Lateral Tuning] Show Lateral Control Mode'
+    description: Display the lateral control mode overlay on the steering wheel icon.
 - id: hyundai
   title: Hyundai / Kia / Genesis Settings
   description: ''
