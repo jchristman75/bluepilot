@@ -10,8 +10,6 @@ Convergence strategy:
      converge regardless of which speed range the driver favours.
   3. Oscillation detection — when recent adjustments alternate direction the factor
      is near optimal; switch to a finer alpha to zoom in rather than bounce.
-  4. Decaying learning rate — alpha shrinks as lifetime adjustment count grows,
-     locking the value in over many drives while keeping a floor for gradual drift.
 """
 import time
 
@@ -21,27 +19,25 @@ from numpy import clip, interp
 class AutoTuner:
   __slots__ = ("integral",
                 "curve_count",
-                "adj_history", "adj_count",
+                "adj_history",
                 "dirty", "factor_dirty",
                 "factor",
-                "factor_name", "ts_name", "count_name")
+                "factor_name", "ts_name")
 
-  def __init__(self, factor_name: str, ts_name: str, count_name: str, factor: float = 1.0):
+  def __init__(self, factor_name: str, ts_name: str, factor: float = 1.0):
     self.integral = 0.0
     self.curve_count = 0
     self.adj_history = []   # recent adjustment directions: +1 or -1
-    self.adj_count = 0      # lifetime total, loaded from params on first configure
     self.dirty = False
     self.factor_dirty = False
     self.factor = factor
     self.factor_name = factor_name
     self.ts_name = ts_name
-    self.count_name = count_name
 
   def reset(self):
     self.integral = 0.0
     self.curve_count = 0
-    # adj_history and adj_count persist across adjustments intentionally
+    # adj_history persists across adjustments intentionally
 
   def _post_adjust(self):
     self.dirty = True
@@ -53,12 +49,6 @@ class AutoTuner:
       return
     try:
       params.put(self.ts_name, int(time.time()))
-      try:
-        cnt_raw = params.get(self.count_name, return_default=True)
-        cnt = cnt_raw if isinstance(cnt_raw, int) else 0
-        params.put(self.count_name, cnt + 1)
-      except Exception:
-        pass
     except Exception:
       pass
     self.dirty = False
@@ -76,10 +66,6 @@ class LateralAutoTuner:
   _AT_BLEND_ALPHA = 0.4
   # Fine alpha: adjustments are oscillating — zoom in on the midpoint.
   _AT_BLEND_ALPHA_FINE = 0.08
-  # Floor: never go below this so the system stays responsive to genuine drift.
-  _AT_BLEND_ALPHA_MIN = 0.05
-  # How fast alpha decays per lifetime adjustment (applied after coarse/fine pick).
-  _AT_DECAY_RATE = 0.15
   # How many recent adjustment directions to inspect for oscillation.
   _AT_ADJ_HISTORY_LEN = 4
   # Speed breakpoints matching the high_gain_calc interpolation in lateral_angle_ext.py.
@@ -99,12 +85,10 @@ class LateralAutoTuner:
     self._at_regime_low = AutoTuner(
       "FordAngleLowSpeedFactor",
       "FordAngleAutoTuneLastAdjustedLow",
-      "FordAngleAutoTuneAdjustmentsLow",
     )
     self._at_regime_high = AutoTuner(
       "FordAngleHighSpeedFactor",
       "FordAngleAutoTuneLastAdjustedHigh",
-      "FordAngleAutoTuneAdjustmentsHigh",
     )
     self._params = None
     self.enabled = False
@@ -135,18 +119,8 @@ class LateralAutoTuner:
       self._at_regime_low.factor = param_low
     if not self._at_regime_high.factor_dirty:
       self._at_regime_high.factor = param_high
-    # Clear stale integral/curve state when re-enabling so we start fresh.
-    # adj_count is NOT reset here — it persists across sessions via params.
     if enabled and not was_enabled:
       self.reset()
-    # Reload lifetime adjustment counts from params on every configure call.
-    # This ensures decay persists across sessions and survives disengages.
-    for tuner in (self._at_regime_low, self._at_regime_high):
-      try:
-        cnt = params.get(tuner.count_name, return_default=True)
-        tuner.adj_count = cnt if isinstance(cnt, int) else 0
-      except Exception:
-        tuner.adj_count = 0
 
   def reset(self) -> None:
     for tuner in (self._at_regime_low, self._at_regime_high):
@@ -256,15 +230,10 @@ class LateralAutoTuner:
     # Oscillation: last adjustment was the opposite direction — we're near optimal.
     oscillating = len(tuner.adj_history) >= 2 and tuner.adj_history[-1] != direction
 
-    # Pick coarse or fine base alpha, then decay by lifetime adjustment count.
-    base_alpha = self._AT_BLEND_ALPHA_FINE if oscillating else self._AT_BLEND_ALPHA
-    effective_alpha = max(self._AT_BLEND_ALPHA_MIN,
-                          base_alpha / (1.0 + tuner.adj_count * self._AT_DECAY_RATE))
-
-    new_val = float(clip(tuner.factor + effective_alpha * step, 0.5, 1.5))
+    alpha = self._AT_BLEND_ALPHA_FINE if oscillating else self._AT_BLEND_ALPHA
+    new_val = float(clip(tuner.factor + alpha * step, 0.5, 1.5))
     tuner.factor = new_val
 
     tuner.adj_history.append(direction)
     if len(tuner.adj_history) > self._AT_ADJ_HISTORY_LEN:
       tuner.adj_history.pop(0)
-    tuner.adj_count += 1
