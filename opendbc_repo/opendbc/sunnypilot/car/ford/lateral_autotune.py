@@ -12,8 +12,13 @@ Convergence strategy:
      is near optimal; switch to a finer alpha to zoom in rather than bounce.
 """
 import time
+from collections import deque
 
 from numpy import clip, interp
+from opendbc.car import DT_CTRL
+
+_MAX_HISTORY_LEN = 150  # ~1.5 s at 100 Hz — covers any valid lateral_delay
+_DEFAULT_LATERAL_DELAY = 0.27
 
 
 class AutoTuner:
@@ -102,6 +107,7 @@ class LateralAutoTuner:
     # Shared error smoothing and curve-entry detection (both factors see the same road).
     self._error_smooth = 0.0
     self._in_curve = False
+    self._kappa_history: deque = deque(maxlen=_MAX_HISTORY_LEN)
 
   @property
   def low_factor(self) -> float:
@@ -128,6 +134,7 @@ class LateralAutoTuner:
       tuner.adj_history = []
     self._error_smooth = 0.0
     self._in_curve = False
+    self._kappa_history.clear()
     self.actual_curvature = 0.0
     self.curvature_error = 0.0
 
@@ -156,9 +163,20 @@ class LateralAutoTuner:
         tuner.factor_dirty = False
     self._at_last_factor_write_ts = now
 
-  def update(self, kappa_cmd: float, v_ego: float, CS) -> None:
+  def update(self, kappa_cmd: float, v_ego: float, CS, lateral_delay: float = _DEFAULT_LATERAL_DELAY) -> None:
     if not self.enabled:
       return
+
+    # Push the current command into history before anything else so the buffer
+    # is always populated even when we exit early below.
+    self._kappa_history.append(kappa_cmd)
+
+    # Look up the command that was issued `lateral_delay` seconds ago — that is
+    # the request the vehicle is physically responding to right now.
+    delay_samples = int(round(lateral_delay / DT_CTRL))
+    if len(self._kappa_history) <= delay_samples:
+      return  # not enough history yet
+    delayed_kappa_cmd = self._kappa_history[-(delay_samples + 1)]
 
     actual_kappa = 0.0
     try:
@@ -170,7 +188,7 @@ class LateralAutoTuner:
     except Exception:
       return
 
-    abs_kappa = abs(kappa_cmd)
+    abs_kappa = abs(delayed_kappa_cmd)
     is_curve = self._AT_KAPPA_MIN <= abs_kappa <= self._AT_KAPPA_MAX
 
     # Blended weights: how much each factor contributes to the gain at current speed.
@@ -189,7 +207,7 @@ class LateralAutoTuner:
     if not is_curve:
       return
 
-    raw_error = kappa_cmd - actual_kappa
+    raw_error = delayed_kappa_cmd - actual_kappa
     self._error_smooth = (self._AT_ALPHA * raw_error
                           + (1 - self._AT_ALPHA) * self._error_smooth)
     clipped = float(clip(self._error_smooth, -self._AT_INT_CLAMP, self._AT_INT_CLAMP))

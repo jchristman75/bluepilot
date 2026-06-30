@@ -380,7 +380,8 @@ class LateralAngleExt:
     # gradually adjust low/high speed factors to minimize tracking error.
     # Skip if driver is applying torque — their input corrupts the error signal.
     if not CS.out.steeringPressed:
-      self._auto_tuner.update(kappa_cmd, v_ego, CS)
+      lateral_delay = float(self.sm['liveDelay'].lateralDelay)
+      self._auto_tuner.update(kappa_cmd, v_ego, CS, lateral_delay)
     # Mirror tuner's factor values — an adjustment this frame takes effect next frame's gain calc.
     self.low_speed_curv_factor = self._auto_tuner.low_factor
     self.high_speed_curv_factor = self._auto_tuner.high_factor
