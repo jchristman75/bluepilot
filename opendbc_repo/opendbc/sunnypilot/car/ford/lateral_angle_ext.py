@@ -19,7 +19,7 @@ import numpy as np
 from numpy import clip, interp
 
 from opendbc.car import DT_CTRL
-from opendbc.car.ford.values import CAR
+from opendbc.car.ford.values import CAR, CarControllerParams
 from opendbc.sunnypilot.car.ford.lateral_autotune import LateralAutoTuner
 from opendbc.sunnypilot.car.ford.lateral_curv_ext import LateralResult
 from selfdrive.modeld.constants import ModelConstants
@@ -379,7 +379,7 @@ class LateralAngleExt:
     # Auto-tune: compare requested curvature against actual vehicle curvature,
     # gradually adjust low/high speed factors to minimize tracking error.
     # Skip if driver is applying torque — their input corrupts the error signal.
-    if not CS.out.steeringPressed:
+    if not CS.out.steeringPressed and (self.frame % CarControllerParams.STEER_STEP) == 0:
       lateral_delay = float(self.sm['liveDelay'].lateralDelay)
       self._auto_tuner.update(kappa_cmd, v_ego, CS, lateral_delay)
     # Mirror tuner's factor values — an adjustment this frame takes effect next frame's gain calc.

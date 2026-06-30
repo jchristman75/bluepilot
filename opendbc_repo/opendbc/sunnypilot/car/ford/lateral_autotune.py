@@ -16,8 +16,11 @@ from collections import deque
 
 from numpy import clip, interp
 from opendbc.car import DT_CTRL
+from opendbc.car.ford.values import CarControllerParams
 
-_MAX_HISTORY_LEN = 150  # ~1.5 s at 100 Hz — covers any valid lateral_delay
+# Autotune update runs at STEER_STEP rate (20 Hz), not the 100 Hz carcontroller loop.
+_DT_AT = DT_CTRL * CarControllerParams.STEER_STEP  # 0.05 s per sample
+_MAX_HISTORY_LEN = 30  # ~1.5 s at 20 Hz — covers any valid lateral_delay
 _DEFAULT_LATERAL_DELAY = 0.27
 
 
@@ -173,7 +176,7 @@ class LateralAutoTuner:
 
     # Look up the command that was issued `lateral_delay` seconds ago — that is
     # the request the vehicle is physically responding to right now.
-    delay_samples = int(round(lateral_delay / DT_CTRL))
+    delay_samples = int(round(lateral_delay / _DT_AT))
     if len(self._kappa_history) <= delay_samples:
       return  # not enough history yet
     delayed_kappa_cmd = self._kappa_history[-(delay_samples + 1)]
