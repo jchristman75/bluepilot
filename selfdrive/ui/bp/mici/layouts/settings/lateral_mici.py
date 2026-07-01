@@ -3,7 +3,7 @@
 from collections.abc import Callable
 
 from openpilot.selfdrive.ui.bp.mici.widgets.button_bp import BigParamControlBP
-from openpilot.selfdrive.ui.bp.mici.widgets.floatbutton import BigParamFloatControl
+from openpilot.selfdrive.ui.bp.mici.widgets.floatbutton import BigParamFloatControl, BigParamIntControl
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.widgets.scroller import NavScroller
 from opendbc.sunnypilot.car.ford.lateral_curv_ext import PrimaryLateralControl
@@ -30,7 +30,7 @@ class LateralLayoutMici(NavScroller):
       "Disable Auto Lane Change Under Speed", "BlinkerPauseLaneChange",
       toggle_callback=lambda state: self.blinker_min_speed.set_enabled(state),
     )
-    self.blinker_min_speed = BigParamFloatControl(
+    self.blinker_min_speed = BigParamIntControl(
       "Minimum Speed to Pause Lane Change", "BlinkerMinLateralControlSpeed", min=5, max=50, step=5,
     )
     self.lane_change_factor_high = BigParamFloatControl(

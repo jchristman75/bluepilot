@@ -20,9 +20,9 @@ BUTTON_SPACING = 7  # Reduced from 20 to ~1/3 (33/3 ≈ 11, but we need some spa
 class FloatControlAction(ItemAction):
   """Action item for float controls with +/- buttons."""
   
-  def __init__(self, param: str, min_value: float, max_value: float, step: float, 
+  def __init__(self, param: str, min_value: float, max_value: float, step: float,
                callback: Callable[[float], None] | None = None, enabled: bool | Callable[[], bool] = True,
-               suffix: str = ""):
+               suffix: str = "", integer: bool = False):
     super().__init__(width=0, enabled=enabled)  # Width 0 means use full width
     self.param = param
     self.min_value = min_value
@@ -30,6 +30,7 @@ class FloatControlAction(ItemAction):
     self.step = step
     self.callback = callback
     self.suffix = suffix
+    self.integer = integer
     self.params = Params()
     
     # Create +/- buttons
@@ -61,7 +62,8 @@ class FloatControlAction(ItemAction):
     """Set parameter value."""
     # Clamp to min/max
     value = max(self.min_value, min(self.max_value, value))
-    self.params.put(self.param, value, block=False)
+    stored = int(round(value)) if self.integer else value
+    self.params.put(self.param, stored, block=False)
     if self.callback:
       self.callback(value)
   
@@ -77,6 +79,8 @@ class FloatControlAction(ItemAction):
   
   def _decimals(self) -> int:
     """Infer display precision from step size so small steps are shown correctly."""
+    if self.integer:
+      return 0
     if self.step < 0.001:
       return 4
     if self.step < 0.01:
@@ -179,6 +183,15 @@ def float_control_item(title: str | Callable[[], str], description: str | Callab
                        param: str = "", min_value: float = 0.0, max_value: float = 1.0, step: float = 0.05,
                        callback: Callable[[float], None] | None = None, enabled: bool | Callable[[], bool] = True,
                        icon: str = "", suffix: str = "") -> ListItem:
-  """Create a list item with float control (+/- buttons)."""
-  action = FloatControlAction(param, min_value, max_value, step, callback, enabled, suffix)
+  """Create a list item with a float +/- stepper backed by a FLOAT param."""
+  action = FloatControlAction(param, min_value, max_value, step, callback, enabled, suffix, integer=False)
+  return ListItem(title=title, description=description, action_item=action, icon=icon)
+
+
+def int_control_item(title: str | Callable[[], str], description: str | Callable[[], str] | None = None,
+                     param: str = "", min_value: int = 0, max_value: int = 100, step: int = 1,
+                     callback: Callable[[float], None] | None = None, enabled: bool | Callable[[], bool] = True,
+                     icon: str = "") -> ListItem:
+  """Create a list item with an integer +/- stepper backed by an INT param."""
+  action = FloatControlAction(param, min_value, max_value, step, callback, enabled, suffix="", integer=True)
   return ListItem(title=title, description=description, action_item=action, icon=icon)

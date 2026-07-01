@@ -12,7 +12,7 @@ from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.lib.wifi_manager import WifiManager, Network
 from openpilot.selfdrive.ui.ui_state import ui_state
-from openpilot.selfdrive.ui.bp.widgets.float_control_item import float_control_item
+from openpilot.selfdrive.ui.bp.widgets.float_control_item import float_control_item, int_control_item
 from openpilot.selfdrive.ui.bp.widgets.section_header import CollapsibleSectionHeader
 from opendbc.sunnypilot.car.ford.lateral_curv_ext import PrimaryLateralControl
 from openpilot.selfdrive.ui.bp.onroad.augmented_road_view_bp import GaugeStyle
@@ -261,13 +261,13 @@ class BluePilotLayout(Widget):
       icon="chffr_wheel.png"
     )
 
-    self._blinker_min_speed = float_control_item(
+    self._blinker_min_speed = int_control_item(
       lambda: tr("Minimum Speed to Pause Lane Change"),
       lambda: tr("Below this speed, lateral control is paused when the blinker is active."),
       param="BlinkerMinLateralControlSpeed",
       min_value=5,
       max_value=50,
-      step=5,
+      step=1,
       icon="chffr_wheel.png"
     )
 
