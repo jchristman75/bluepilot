@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Autotune Debug Guide</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #22263a;
+      --border: #2e3350;
+      --accent: #4f8ef7;
+      --accent2: #f7924f;
+      --green: #4fc98e;
+      --red: #f76f6f;
+      --text: #dde1f0;
+      --muted: #7880a0;
+      --code-bg: #12151f;
+      --radius: 8px;
+      font-size: 16px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      line-height: 1.65;
+      padding: 2rem 1rem 4rem;
+    }
+
+    .page {
+      max-width: 860px;
+      margin: 0 auto;
+    }
+
+    /* ── Header ── */
+    header {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 1.5rem;
+      margin-bottom: 2.5rem;
+    }
+
+    header h1 {
+      font-size: 1.9rem;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: -0.02em;
+    }
+
+    header p {
+      margin-top: 0.4rem;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    /* ── Section headings ── */
+    h2 {
+      font-size: 1.15rem;
+      font-weight: 600;
+      color: #fff;
+      margin: 2.5rem 0 0.8rem;
+      padding-bottom: 0.4rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    h3 {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--accent);
+      margin: 1.4rem 0 0.4rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    p { margin-bottom: 0.75rem; }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ── Steps ── */
+    .steps { counter-reset: step; list-style: none; }
+
+    .steps > li {
+      counter-increment: step;
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .steps > li::before {
+      content: counter(step);
+      flex-shrink: 0;
+      width: 1.8rem;
+      height: 1.8rem;
+      background: var(--accent);
+      color: #fff;
+      font-size: 0.8rem;
+      font-weight: 700;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 0.15rem;
+    }
+
+    .steps > li > div { flex: 1; }
+    .steps > li > div > strong { display: block; margin-bottom: 0.3rem; color: #fff; }
+
+    /* ── Code blocks ── */
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.9rem 1.1rem;
+      overflow-x: auto;
+      font-size: 0.875rem;
+      line-height: 1.55;
+      margin: 0.6rem 0 0.4rem;
+    }
+
+    code {
+      font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
+      font-size: 0.875em;
+      color: #a8d1ff;
+    }
+
+    pre code { font-size: inherit; color: var(--text); }
+
+    .comment { color: var(--muted); }
+    .kw      { color: #c792ea; }
+    .str     { color: #c3e88d; }
+    .flag    { color: var(--accent2); }
+
+    /* ── Callout boxes ── */
+    .callout {
+      border-radius: var(--radius);
+      padding: 0.85rem 1.1rem;
+      margin: 1rem 0;
+      display: flex;
+      gap: 0.75rem;
+      align-items: flex-start;
+      font-size: 0.92rem;
+    }
+
+    .callout .icon { font-size: 1.1rem; flex-shrink: 0; line-height: 1.5; }
+
+    .callout.tip    { background: #0d2a1f; border: 1px solid #1a5c3a; }
+    .callout.note   { background: #0d1a2e; border: 1px solid #1a3a6e; }
+    .callout.warn   { background: #2a1f0a; border: 1px solid #6e4a10; }
+
+    /* ── Signal table ── */
+    .signal-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+      margin: 0.6rem 0;
+    }
+
+    .signal-table th {
+      background: var(--surface2);
+      text-align: left;
+      padding: 0.55rem 0.8rem;
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .signal-table td {
+      padding: 0.5rem 0.8rem;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+
+    .signal-table tr:last-child td { border-bottom: none; }
+    .signal-table tr:hover td { background: var(--surface); }
+
+    .signal-table code {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.1em 0.4em;
+      font-size: 0.82em;
+      white-space: nowrap;
+    }
+
+    /* ── Panel diagram ── */
+    .panel-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.6rem;
+      margin: 0.8rem 0;
+    }
+
+    .panel-grid .full { grid-column: 1 / -1; }
+
+    .panel-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.7rem 0.9rem;
+      font-size: 0.85rem;
+    }
+
+    .panel-box .name {
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 0.2rem;
+    }
+
+    .panel-box .desc { color: var(--muted); font-size: 0.82rem; }
+
+    .panel-box .lines { margin-top: 0.5rem; }
+
+    .panel-box .line {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.8rem;
+      margin: 0.15rem 0;
+    }
+
+    .swatch {
+      width: 22px;
+      height: 3px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+
+    /* ── Troubleshooting ── */
+    .trouble-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.8rem 1rem;
+      margin-bottom: 0.7rem;
+      font-size: 0.9rem;
+    }
+
+    .trouble-item .q {
+      font-weight: 600;
+      color: var(--accent2);
+      margin-bottom: 0.3rem;
+    }
+
+    /* ── Footer ── */
+    footer {
+      margin-top: 3rem;
+      padding-top: 1.2rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <h1>Autotune Debug Guide</h1>
+    <p>Extract curvature-factor tuning data from your device over WiFi and visualise it on your PC.</p>
+  </header>
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <h2>Overview</h2>
+
+  <p>
+    The autotune system runs on the device and continuously adjusts two curvature gain
+    factors — <strong>low-speed</strong> (&lt;&nbsp;30&nbsp;mph) and <strong>high-speed</strong>
+    (&gt;&nbsp;60&nbsp;mph) — by integrating the tracking error between the commanded
+    and actual curvature during curves.
+  </p>
+
+  <p>
+    Debug logging records all intermediate values at ~2&nbsp;Hz while in a curve, plus
+    an event every time a factor is adjusted. After a drive you can pull those records
+    off the device and plot them with <code>plot_autotune.py</code>.
+  </p>
+
+  <div class="callout note">
+    <span class="icon">ℹ</span>
+    <div>Logging only fires while autotune is <strong>enabled</strong> in the BluePilot
+    settings and while the car is in a curve
+    (0.003&nbsp;&lt;&nbsp;|κ|&nbsp;&lt;&nbsp;0.040&nbsp;1/m).</div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <h2>Requirements</h2>
+
+  <ul style="list-style: disc; padding-left: 1.4rem; line-height: 2;">
+    <li>SSH access to the device over local WiFi</li>
+    <li>Python&nbsp;3.10+ on your PC</li>
+    <li><code>matplotlib</code> installed on your PC &mdash;
+      <code>pip install matplotlib</code>
+    </li>
+    <li>Autotune enabled in BluePilot &rarr; Lateral settings</li>
+  </ul>
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <h2>Quick Start</h2>
+
+  <ol class="steps">
+    <li>
+      <div>
+        <strong>Take a drive with autotune enabled</strong>
+        Drive a route with several turns. The more curves, the more data.
+        Each distinct curve entry increments the curve counter; a factor
+        adjustment fires after 3 curve entries with a consistent error direction.
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Connect your PC to the same WiFi as the device</strong>
+        The device must be reachable by SSH. Confirm with:
+        <pre><code>ssh comma "echo ok"</code></pre>
+        If you connect by IP instead of hostname:
+        <pre><code>ssh root@192.168.x.x "echo ok"</code></pre>
+      </div>
+    </li>
+    <li>
+      <div>
+        <strong>Extract and plot in one command</strong>
+        From the root of the sunnypilot repo on your PC:
+        <pre><code>python3 tools/debug/plot_autotune.py --ssh comma</code></pre>
+        Or by IP:
+        <pre><code>python3 tools/debug/plot_autotune.py --ssh 192.168.x.x</code></pre>
+        The script SSHes to the device, filters the swaglog for autotune
+        events, streams them back, and opens the plot window.
+      </div>
+    </li>
+  </ol>
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <h2>Saving Data for Later</h2>
+
+  <p>
+    Use <code class="flag">--save</code> to cache the extracted records as a local
+    JSON file. You can then replot without reconnecting to the device.
+  </p>
+
+  <pre><code><span class="comment"># Extract and save</span>
+python3 tools/debug/plot_autotune.py --ssh comma --save autotune.json
+
+<span class="comment"># Replot from saved file (no device needed)</span>
+python3 tools/debug/plot_autotune.py autotune.json</code></pre>
+
+  <div class="callout tip">
+    <span class="icon">✓</span>
+    <div>Save after every drive to build up a history. Rename files by date
+    (e.g. <code>autotune_2026-06-30.json</code>) to track convergence over time.</div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <h2>Reading Local Swaglog Files</h2>
+
+  <p>
+    If you copy the device's swaglog directory to your PC via <code>scp</code>
+    you can point the script directly at it:
+  </p>
+
+  <pre><code><span class="comment"># Copy swaglogs off device</span>
+scp -r comma:/data/log /tmp/device_logs
+
+<span class="comment"># Plot from the local copy</span>
+python3 tools/debug/plot_autotune.py /tmp/device_logs</code></pre>
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <h2>The Plot</h2>
+
+  <p>Six panels are shown. Each sample on the x-axis is one log point (~0.5&nbsp;s apart, only during curves).</p>
+
+  <div class="panel-grid">
+
+    <div class="panel-box full">
+      <div class="name">Curvature (κ)</div>
+      <div class="desc">The three curvature signals. All three should track each other
+      when the tune is converged.</div>
+      <div class="lines">
+        <div class="line"><div class="swatch" style="background:#4f8ef7"></div> kappa_cmd — what the model requests right now</div>
+        <div class="line"><div class="swatch" style="background:#f7924f"></div> delayed_kappa_cmd — command from ~270ms ago (what the car is responding to)</div>
+        <div class="line"><div class="swatch" style="background:#4fc98e"></div> actual_kappa — yawRate / vEgo (what the car is actually doing)</div>
+      </div>
+    </div>
+
+    <div class="panel-box full">
+      <div class="name">Curvature Error</div>
+      <div class="desc">Difference between delayed command and actual. Zero means perfect tracking.
+      A persistent positive error means the car is understeering; negative means oversteering.</div>
+      <div class="lines">
+        <div class="line"><div class="swatch" style="background:#7880a0; border-top: 1px dashed #7880a0; height:0"></div> raw_error — per-sample (noisy)</div>
+        <div class="line"><div class="swatch" style="background:#f76f6f"></div> error_smooth — exponential moving average (α=0.1)</div>
+      </div>
+    </div>
+
+    <div class="panel-box">
+      <div class="name">Integrals</div>
+      <div class="desc">Accumulated weighted error for each factor.
+      When an integral crosses ±0.0008 and there have been ≥3 curve entries, a factor adjustment fires and the integral resets to zero.</div>
+      <div class="lines">
+        <div class="line"><div class="swatch" style="background:#4f8ef7"></div> integral_low</div>
+        <div class="line"><div class="swatch" style="background:#f7924f"></div> integral_high</div>
+      </div>
+    </div>
+
+    <div class="panel-box">
+      <div class="name">Curvature Factors</div>
+      <div class="desc">The values being tuned. Should converge toward 1.0 when well-tuned.
+      Clamped to [0.5, 1.5]. Vertical tick marks indicate adjustment events.</div>
+      <div class="lines">
+        <div class="line"><div class="swatch" style="background:#4f8ef7"></div> low_factor (≤ 30 mph)</div>
+        <div class="line"><div class="swatch" style="background:#f7924f"></div> high_factor (≥ 60 mph)</div>
+      </div>
+    </div>
+
+    <div class="panel-box">
+      <div class="name">Blend Weights</div>
+      <div class="desc">How the error is distributed between the two factors at the current speed.
+      At 30 mph w_low=1, w_high=0. At 60 mph w_low=0, w_high=1. Linearly interpolated between.</div>
+      <div class="lines">
+        <div class="line"><div class="swatch" style="background:#4f8ef7"></div> w_low</div>
+        <div class="line"><div class="swatch" style="background:#f7924f"></div> w_high</div>
+      </div>
+    </div>
+
+    <div class="panel-box">
+      <div class="name">Speed</div>
+      <div class="desc">Vehicle speed in mph. Useful for correlating which factor was active
+      and confirming the drive covered both speed ranges.</div>
+    </div>
+
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <h2>Factor Adjustment Table</h2>
+
+  <p>
+    The script also prints a table of every adjustment that fired during the session:
+  </p>
+
+  <pre><code>=================================================================
+                      Factor adjustments
+=================================================================
+  FordAngleLowSpeedFactor          1.0000 -> 1.0040  step=+0.0100  osc=False  curves=3
+  FordAngleHighSpeedFactor         1.0000 -> 0.9960  step=-0.0100  osc=False  curves=3
+  FordAngleLowSpeedFactor          1.0040 -> 1.0044  step=+0.0100  osc=True   curves=3</code></pre>
+
+  <table class="signal-table" style="margin-top:0.8rem">
+    <thead>
+      <tr>
+        <th>Column</th>
+        <th>Meaning</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>old_factor → new_factor</code></td>
+        <td>Factor value before and after the adjustment</td>
+      </tr>
+      <tr>
+        <td><code>step</code></td>
+        <td>Raw step magnitude (positive = increase, negative = decrease).
+            Scaled by the integral ratio, max 3× the base step of 0.01</td>
+      </tr>
+      <tr>
+        <td><code>osc=True</code></td>
+        <td>Oscillation detected — the last two adjustments went in opposite directions.
+            Fine alpha (0.08) is used instead of coarse (0.4) to zoom in on the optimum</td>
+      </tr>
+      <tr>
+        <td><code>curves</code></td>
+        <td>How many distinct curve entries had accumulated before this adjustment fired</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <h2>Logged Signals Reference</h2>
+
+  <table class="signal-table">
+    <thead>
+      <tr><th>Signal</th><th>Units</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>v_ego</code></td><td>m/s</td><td>Vehicle speed at sample time</td></tr>
+      <tr><td><code>kappa_cmd</code></td><td>1/m</td><td>Curvature commanded by the model this frame</td></tr>
+      <tr><td><code>delayed_kappa_cmd</code></td><td>1/m</td><td>Command issued <code>lateral_delay</code> seconds ago</td></tr>
+      <tr><td><code>actual_kappa</code></td><td>1/m</td><td>Measured curvature: yawRate / vEgoRaw</td></tr>
+      <tr><td><code>raw_error</code></td><td>1/m</td><td>delayed_kappa_cmd − actual_kappa</td></tr>
+      <tr><td><code>error_smooth</code></td><td>1/m</td><td>EMA of raw_error (α=0.1)</td></tr>
+      <tr><td><code>w_low</code> / <code>w_high</code></td><td>—</td><td>Blend weights for each factor at current speed</td></tr>
+      <tr><td><code>integral_low</code> / <code>integral_high</code></td><td>1/m·s</td><td>Accumulated weighted error since last reset</td></tr>
+      <tr><td><code>curve_count_low</code> / <code>curve_count_high</code></td><td>—</td><td>Curve entries since last adjustment</td></tr>
+      <tr><td><code>low_factor</code> / <code>high_factor</code></td><td>—</td><td>Current factor values</td></tr>
+      <tr><td><code>lateral_delay</code></td><td>s</td><td>Configured actuation delay (default 0.27 s)</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <h2>What Good Convergence Looks Like</h2>
+
+  <ul style="list-style: disc; padding-left: 1.4rem; line-height: 2.1;">
+    <li><strong>actual_kappa</strong> tracks <strong>delayed_kappa_cmd</strong> closely with no consistent offset</li>
+    <li><strong>error_smooth</strong> fluctuates around zero without a sustained positive or negative bias</li>
+    <li>Integrals accumulate slowly, reset frequently, and don't consistently saturate in one direction</li>
+    <li>Factor adjustments alternate direction (<code>osc=True</code>), indicating the factor is hovering near optimal</li>
+    <li>Both <code>low_factor</code> and <code>high_factor</code> are stable (not drifting)</li>
+  </ul>
+
+  <div class="callout warn">
+    <span class="icon">⚠</span>
+    <div>
+      If <code>error_smooth</code> is consistently positive (understeering), both factors will
+      climb. If it is consistently negative (oversteering), they will drop. A factor that hits
+      the 0.5 or 1.5 clamp and stays there indicates the car's physical response is outside
+      the range autotune can compensate for.
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <h2>Troubleshooting</h2>
+
+  <div class="trouble-item">
+    <div class="q">No autotune_state entries found</div>
+    <p>Autotune was not enabled during the drive, or the drive had no curves within the
+    curvature window (0.003–0.040 1/m). Enable autotune in BluePilot &rarr; Lateral settings
+    and drive a route with moderate curves.</p>
+  </div>
+
+  <div class="trouble-item">
+    <div class="q">SSH timed out / connection refused</div>
+    <p>Confirm the device and PC are on the same WiFi network. Try pinging the device:
+    <code>ping comma</code> or <code>ping 192.168.x.x</code>. Make sure the device has
+    not gone to sleep or lost its WiFi connection.</p>
+  </div>
+
+  <div class="trouble-item">
+    <div class="q">SSH error: Permission denied (publickey)</div>
+    <p>Your SSH key is not authorised on the device. Add your public key:
+    <code>ssh-copy-id comma</code>, or check that <code>~/.ssh/config</code> has the
+    correct identity file for the device.</p>
+  </div>
+
+  <div class="trouble-item">
+    <div class="q">matplotlib not available</div>
+    <p>Install it on your PC: <code>pip install matplotlib</code>. The script will still
+    print the adjustment table without it.</p>
+  </div>
+
+  <div class="trouble-item">
+    <div class="q">Only a handful of samples even though I drove a long route</div>
+    <p>Logging only fires while <em>in</em> a curve (kappa within the window) at 2 Hz.
+    Straight highway driving produces no samples. This is expected.</p>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <footer>
+    <p>
+      Script: <code>tools/debug/plot_autotune.py</code> &nbsp;·&nbsp;
+      Logging: <code>opendbc_repo/opendbc/sunnypilot/car/ford/lateral_autotune.py</code>
+    </p>
+  </footer>
+
+</div>
+</body>
+</html>
