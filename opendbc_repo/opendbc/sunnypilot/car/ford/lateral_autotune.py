@@ -17,6 +17,7 @@ from collections import deque
 from numpy import clip, interp
 from opendbc.car import DT_CTRL
 from opendbc.car.ford.values import CarControllerParams
+from openpilot.common.swaglog import cloudlog
 
 # Autotune update runs at STEER_STEP rate (20 Hz), not the 100 Hz carcontroller loop.
 _DT_AT = DT_CTRL * CarControllerParams.STEER_STEP  # 0.05 s per sample
@@ -88,6 +89,8 @@ class LateralAutoTuner:
   _AT_V_MIN = 5.0
   # Debounce factor writes to params — max once per second.
   _AT_FACTOR_WRITE_INTERVAL = 1.0
+  # Log debug state at ~2 Hz (every 10 frames at 20 Hz).
+  _AT_LOG_INTERVAL_FRAMES = 10
 
   def __init__(self):
     self._at_regime_low = AutoTuner(
@@ -103,6 +106,7 @@ class LateralAutoTuner:
     self._at_last_flush_ts = 0.0
     self._at_flush_interval = 30.0
     self._at_last_factor_write_ts = 0.0
+    self._log_frame_counter = 0
     self.actual_curvature = 0.0
     self.curvature_error = 0.0
     self.integral_low = 0.0
@@ -237,6 +241,27 @@ class LateralAutoTuner:
     self.integral_low  = self._at_regime_low.integral
     self.integral_high = self._at_regime_high.integral
 
+    self._log_frame_counter += 1
+    if self._log_frame_counter >= self._AT_LOG_INTERVAL_FRAMES:
+      self._log_frame_counter = 0
+      cloudlog.event("autotune_state", debug=True,
+        v_ego=round(v_ego, 3),
+        kappa_cmd=round(kappa_cmd, 6),
+        delayed_kappa_cmd=round(delayed_kappa_cmd, 6),
+        actual_kappa=round(actual_kappa, 6),
+        raw_error=round(raw_error, 6),
+        error_smooth=round(self._error_smooth, 6),
+        w_low=round(w_low, 3),
+        w_high=round(w_high, 3),
+        integral_low=round(self._at_regime_low.integral, 6),
+        integral_high=round(self._at_regime_high.integral, 6),
+        curve_count_low=self._at_regime_low.curve_count,
+        curve_count_high=self._at_regime_high.curve_count,
+        low_factor=round(self._at_regime_low.factor, 4),
+        high_factor=round(self._at_regime_high.factor, 4),
+        lateral_delay=round(lateral_delay, 3),
+      )
+
     now = time.monotonic()
     any_dirty = (self._at_regime_low.dirty or self._at_regime_high.dirty
                  or self._at_regime_low.factor_dirty or self._at_regime_high.factor_dirty)
@@ -252,8 +277,21 @@ class LateralAutoTuner:
     oscillating = len(tuner.adj_history) >= 2 and tuner.adj_history[-1] != direction
 
     alpha = self._AT_BLEND_ALPHA_FINE if oscillating else self._AT_BLEND_ALPHA
+    old_val = tuner.factor
     new_val = float(clip(tuner.factor + alpha * step, 0.5, 1.5))
     tuner.factor = new_val
+
+    cloudlog.event("autotune_adjust",
+      factor=tuner.factor_name,
+      old_factor=round(old_val, 4),
+      new_factor=round(new_val, 4),
+      step=round(step, 4),
+      alpha=alpha,
+      direction=direction,
+      oscillating=oscillating,
+      integral=round(tuner.integral, 6),
+      curve_count=tuner.curve_count,
+    )
 
     tuner.adj_history.append(direction)
     if len(tuner.adj_history) > self._AT_ADJ_HISTORY_LEN:
