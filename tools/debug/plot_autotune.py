@@ -133,26 +133,39 @@ def _strip_type_suffix(key: str) -> str:
   return key
 
 
-def extract_autotune(records: list[dict]) -> tuple[list[dict], list[dict]]:
-  states, adjustments = [], []
+def extract_autotune(records: list[dict]) -> tuple[list[dict], list[dict], list[dict]]:
+  states, adjustments, oscillations = [], [], []
   for record in records:
     msg = record.get("msg$s") or record.get("msg", {})
     if not isinstance(msg, dict):
       continue
     event = msg.get("event$s") or msg.get("event")
+    if event not in ("autotune_state", "autotune_adjust", "autotune_oscillation"):
+      continue
+    # 'created' is the swaglog record's own wall-clock timestamp (epoch seconds, unsuffixed —
+    # only the 'msg' subtree gets type-suffixed keys). It's the only reliable way to align
+    # adjust/oscillation events — which fire the instant they happen — against the ~2 Hz
+    # autotune_state samples; a shared list index across the three lists is not meaningful.
+    entry = {_strip_type_suffix(k): v for k, v in msg.items()}
+    entry["_t"] = record.get("created")
     if event == "autotune_state":
-      states.append({_strip_type_suffix(k): v for k, v in msg.items()})
+      states.append(entry)
     elif event == "autotune_adjust":
-      adjustments.append({_strip_type_suffix(k): v for k, v in msg.items()})
-  return states, adjustments
+      adjustments.append(entry)
+    else:
+      oscillations.append(entry)
+  return states, adjustments, oscillations
 
 
-def plot(states: list[dict], adjustments: list[dict]) -> None:
+def plot(states: list[dict], adjustments: list[dict], oscillations: list[dict] | None = None) -> None:
   if not states:
     print("No autotune_state entries found — nothing to plot.")
     return
+  oscillations = oscillations or []
 
-  idx = list(range(len(states)))
+  t0 = states[0].get("_t") or 0.0
+  rel_t = lambda items: [(it.get("_t") or t0) - t0 for it in items]
+  x = rel_t(states)
   get = lambda key: [s.get(key, 0) for s in states]
 
   fig = plt.figure(figsize=(14, 10))
@@ -166,50 +179,61 @@ def plot(states: list[dict], adjustments: list[dict]) -> None:
   ax_weight = fig.add_subplot(gs[3, 0])
   ax_speed  = fig.add_subplot(gs[3, 1])
 
-  ax_kappa.plot(idx, get("kappa_cmd"),         label="kappa_cmd",         lw=0.8, alpha=0.7)
-  ax_kappa.plot(idx, get("delayed_kappa_cmd"), label="delayed_kappa_cmd", lw=0.8, alpha=0.7)
-  ax_kappa.plot(idx, get("actual_kappa"),      label="actual_kappa",      lw=1.0)
+  ax_kappa.plot(x, get("kappa_cmd"),         label="kappa_cmd",         lw=0.8, alpha=0.7)
+  ax_kappa.plot(x, get("delayed_kappa_cmd"), label="delayed_kappa_cmd", lw=0.8, alpha=0.7)
+  ax_kappa.plot(x, get("actual_kappa"),      label="actual_kappa",      lw=1.0)
   ax_kappa.set_title("Curvature (κ)")
   ax_kappa.set_ylabel("1/m")
   ax_kappa.legend(fontsize=7)
   ax_kappa.grid(True, alpha=0.3)
 
-  ax_error.plot(idx, get("raw_error"),    label="raw_error",    lw=0.7, alpha=0.6)
-  ax_error.plot(idx, get("error_smooth"), label="error_smooth", lw=1.2)
+  ax_error.plot(x, get("raw_error"),    label="raw_error",    lw=0.7, alpha=0.6)
+  ax_error.plot(x, get("error_smooth"), label="error_smooth", lw=1.2)
   ax_error.axhline(0, color="gray", lw=0.5)
+  # Limit-cycle detections: mark where the raw-error zero-crossing/amplitude detector fired.
+  for i, osc in enumerate(oscillations):
+    tt = (osc.get("_t") or t0) - t0
+    ax_error.axvline(x=tt, color="red", lw=1.0, alpha=0.6, linestyle="--",
+                      label="oscillation" if i == 0 else None)
   ax_error.set_title("Curvature Error")
   ax_error.set_ylabel("1/m")
   ax_error.legend(fontsize=7)
   ax_error.grid(True, alpha=0.3)
 
-  ax_int.plot(idx, get("integral_low"),  label="integral_low")
-  ax_int.plot(idx, get("integral_high"), label="integral_high")
+  ax_int.plot(x, get("integral_low"),  label="integral_low")
+  ax_int.plot(x, get("integral_high"), label="integral_high")
   ax_int.axhline(0, color="gray", lw=0.5)
   ax_int.set_title("Integrals")
   ax_int.legend(fontsize=7)
   ax_int.grid(True, alpha=0.3)
 
-  ax_factor.plot(idx, get("low_factor"),  label="low_factor")
-  ax_factor.plot(idx, get("high_factor"), label="high_factor")
-  # Vertical markers at each adjustment
-  for i, adj in enumerate(adjustments):
+  ax_factor.plot(x, get("low_factor"),  label="low_factor")
+  ax_factor.plot(x, get("high_factor"), label="high_factor")
+  # Vertical markers at each adjustment, placed at its actual wall-clock time.
+  for adj in adjustments:
     fname = adj.get("factor", "")
     color = "blue" if "Low" in fname else "orange"
-    ax_factor.axvline(x=len(states) - 1 - i, color=color, lw=0.5, alpha=0.4)
+    tt = (adj.get("_t") or t0) - t0
+    ax_factor.axvline(x=tt, color=color, lw=0.5, alpha=0.4)
+  for osc in oscillations:
+    tt = (osc.get("_t") or t0) - t0
+    ax_factor.axvline(x=tt, color="red", lw=1.0, alpha=0.5, linestyle="--")
   ax_factor.set_title("Curvature Factors")
   ax_factor.legend(fontsize=7)
   ax_factor.grid(True, alpha=0.3)
 
-  ax_weight.plot(idx, get("w_low"),  label="w_low")
-  ax_weight.plot(idx, get("w_high"), label="w_high")
+  ax_weight.plot(x, get("w_low"),  label="w_low")
+  ax_weight.plot(x, get("w_high"), label="w_high")
   ax_weight.set_title("Blend Weights vs Speed")
   ax_weight.set_ylabel("weight")
+  ax_weight.set_xlabel("time (s)")
   ax_weight.legend(fontsize=7)
   ax_weight.grid(True, alpha=0.3)
 
-  ax_speed.plot(idx, [s.get("v_ego", 0) * 2.237 for s in states], color="purple")
+  ax_speed.plot(x, [s.get("v_ego", 0) * 2.237 for s in states], color="purple")
   ax_speed.set_title("Speed (mph)")
   ax_speed.set_ylabel("mph")
+  ax_speed.set_xlabel("time (s)")
   ax_speed.grid(True, alpha=0.3)
 
   plt.show()
@@ -230,6 +254,23 @@ def print_adjustments(adjustments: list[dict]) -> None:
     osc    = adj.get("oscillating", False)
     curves = adj.get("curve_count", "?")
     print(f"  {factor:<35} {old:.4f} -> {new:.4f}  step={step:+.4f}  osc={osc}  curves={curves}")
+
+
+def print_oscillations(oscillations: list[dict]) -> None:
+  if not oscillations:
+    print("\nNo limit-cycle (oscillation) detections found.")
+    return
+  print(f"\n{'='*65}")
+  print(f"{'Limit-cycle detections':^65}")
+  print(f"{'='*65}")
+  for osc in oscillations:
+    v_ego     = osc.get("v_ego", 0)
+    crossings = osc.get("crossings", "?")
+    peak      = osc.get("peak_abs", 0)
+    w_low     = osc.get("w_low", 0)
+    w_high    = osc.get("w_high", 0)
+    print(f"  v_ego={v_ego:5.1f} m/s  crossings={crossings}  peak_abs={peak:.4f}  "
+          f"w_low={w_low:.2f}  w_high={w_high:.2f}")
 
 
 def main() -> None:
@@ -261,10 +302,12 @@ def main() -> None:
     Path(args.save).write_text("\n".join(json.dumps(r) for r in raw_records) + "\n")
     print(f"Saved {len(raw_records)} records to {args.save}")
 
-  states, adjustments = extract_autotune(raw_records)
-  print(f"Found {len(states)} state samples, {len(adjustments)} adjustments.")
+  states, adjustments, oscillations = extract_autotune(raw_records)
+  print(f"Found {len(states)} state samples, {len(adjustments)} adjustments, "
+        f"{len(oscillations)} oscillation detections.")
 
   print_adjustments(adjustments)
+  print_oscillations(oscillations)
 
   if not states:
     return
@@ -273,7 +316,7 @@ def main() -> None:
     print("\nmatplotlib not available — install it to get plots.")
     return
 
-  plot(states, adjustments)
+  plot(states, adjustments, oscillations)
 
 
 if __name__ == "__main__":

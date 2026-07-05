@@ -8,8 +8,17 @@ Convergence strategy:
      proportionally to how much each contributes to the gain at that speed.  This
      mirrors the gain interpolation in lateral_angle_ext.py and lets both factors
      converge regardless of which speed range the driver favours.
-  3. Oscillation detection — when recent adjustments alternate direction the factor
-     is near optimal; switch to a finer alpha to zoom in rather than bounce.
+  3. Convergence-oscillation detection — when recent *factor adjustments* alternate
+     direction the factor is near optimal; switch to a finer alpha to zoom in rather
+     than bounce.
+  4. Limit-cycle detection — a too-high factor makes the vehicle overshoot the
+     commanded curvature; the planner/model reacts to the resulting path error by
+     commanding less curvature, which then undershoots, and the cycle repeats. That
+     ringing has near-zero net area per cycle, so it can partially or fully cancel
+     out of the smoothed/clamped integral above and go undetected. Zero-crossings
+     and peak amplitude of the *raw*, unsmoothed error within a single curve entry
+     catch this directly and force an immediate factor decrease, bypassing the
+     curve-count/integral gating used for steady-state tuning.
 """
 import time
 from collections import deque
@@ -87,6 +96,12 @@ class LateralAutoTuner:
   _AT_KAPPA_MIN = 0.003
   _AT_KAPPA_MAX = 0.040
   _AT_V_MIN = 5.0
+  # Limit-cycle detection on raw (unsmoothed) error within a single curve entry.
+  # Sign flips smaller than the noise floor don't count as crossings; the peak-amplitude
+  # gate then confirms the ringing is a real overshoot/undershoot and not sensor noise.
+  _AT_OSC_MIN_CROSSINGS = 2
+  _AT_OSC_NOISE_FLOOR = 0.0015   # 1/m
+  _AT_OSC_MIN_AMP = 0.0025       # 1/m — peak |raw_error| required to trust the crossings
   # Debounce factor writes to params — max once per second.
   _AT_FACTOR_WRITE_INTERVAL = 1.0
   # Log debug state at ~2 Hz (every 10 frames at 20 Hz).
@@ -115,6 +130,11 @@ class LateralAutoTuner:
     self._error_smooth = 0.0
     self._in_curve = False
     self._kappa_history: deque = deque(maxlen=_MAX_HISTORY_LEN)
+    # Limit-cycle detector state, reset on every curve entry (see update()).
+    self._osc_prev_sign = 0
+    self._osc_crossings = 0
+    self._osc_peak_abs = 0.0
+    self._osc_fired = False
 
   @property
   def low_factor(self) -> float:
@@ -142,6 +162,10 @@ class LateralAutoTuner:
     self._error_smooth = 0.0
     self._in_curve = False
     self._kappa_history.clear()
+    self._osc_prev_sign = 0
+    self._osc_crossings = 0
+    self._osc_peak_abs = 0.0
+    self._osc_fired = False
     self.actual_curvature = 0.0
     self.curvature_error = 0.0
 
@@ -209,12 +233,45 @@ class LateralAutoTuner:
     if is_curve and not self._in_curve:
       self._at_regime_low.curve_count  += 1
       self._at_regime_high.curve_count += 1
+      self._osc_prev_sign = 0
+      self._osc_crossings = 0
+      self._osc_peak_abs = 0.0
+      self._osc_fired = False
     self._in_curve = is_curve
 
     if not is_curve:
       return
 
     raw_error = delayed_kappa_cmd - actual_kappa
+
+    # Limit-cycle detection on the raw, unsmoothed error (see module docstring, strategy 4).
+    # Overshoot always means the factor commanded too much curvature, so unlike the integral
+    # path below, the correction direction here is unconditionally "decrease" — a ringing
+    # error alternates sign by definition, so its own sign can't tell us which way to go.
+    abs_raw = abs(raw_error)
+    if abs_raw >= self._AT_OSC_NOISE_FLOOR:
+      sign = 1 if raw_error > 0 else -1
+      if self._osc_prev_sign != 0 and sign != self._osc_prev_sign:
+        self._osc_crossings += 1
+      self._osc_prev_sign = sign
+    self._osc_peak_abs = max(self._osc_peak_abs, abs_raw)
+
+    if (not self._osc_fired and self._osc_crossings >= self._AT_OSC_MIN_CROSSINGS
+        and self._osc_peak_abs >= self._AT_OSC_MIN_AMP):
+      self._osc_fired = True
+      for tuner, weight in ((self._at_regime_low, w_low), (self._at_regime_high, w_high)):
+        if weight < self._AT_MIN_WEIGHT:
+          continue
+        self._adjust_factor(tuner, -self._AT_STEP)
+        tuner._post_adjust()
+      cloudlog.event("autotune_oscillation",
+        v_ego=round(v_ego, 3),
+        crossings=self._osc_crossings,
+        peak_abs=round(self._osc_peak_abs, 6),
+        w_low=round(w_low, 3),
+        w_high=round(w_high, 3),
+      )
+
     self._error_smooth = (self._AT_ALPHA * raw_error
                           + (1 - self._AT_ALPHA) * self._error_smooth)
     clipped = float(clip(self._error_smooth, -self._AT_INT_CLAMP, self._AT_INT_CLAMP))
