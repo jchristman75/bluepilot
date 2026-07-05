@@ -216,7 +216,8 @@ class LateralAngleExt:
       high_factor = _read_factor_param(params, "FordAngleHighSpeedFactor", self._auto_tuner.high_factor)
       primary_lateral_control = getattr(self, "primary_lateral_control", PrimaryLateralControl.curvature)
       enabled = self._auto_tuner.is_effectively_enabled(params, primary_lateral_control)
-      self._auto_tuner.configure(params, enabled, low_factor, high_factor)
+      debug_enabled = self._auto_tuner.is_debug_enabled(params)
+      self._auto_tuner.configure(params, enabled, low_factor, high_factor, debug_enabled)
       self.low_speed_curv_factor = self._auto_tuner.low_factor
       self.high_speed_curv_factor = self._auto_tuner.high_factor
 

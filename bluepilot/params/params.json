@@ -253,6 +253,18 @@
       "enabled": true
     },
     {
+      "name": "FordAngleAutoTuneDebugEnable",
+      "default": false,
+      "type": "bool",
+      "flags": [
+        "PERSISTENT",
+        "BACKUP"
+      ],
+      "ccProp": "angle_auto_tune_debug_enable",
+      "create_default": true,
+      "enabled": true
+    },
+    {
       "name": "FordAngleAutoTuneLastAdjustedLow",
       "default": 0,
       "type": "int",

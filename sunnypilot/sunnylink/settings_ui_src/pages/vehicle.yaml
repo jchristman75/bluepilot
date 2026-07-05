@@ -194,6 +194,26 @@ sections:
     - type: param
       key: FordPrefLateralControl
       equals: 1
+  - key: FordAngleAutoTuneEnable
+    widget: toggle
+    title: '[Lateral Tuning] Auto-Tune Angle Factors'
+    description: Automatically adjusts low and high speed factors while driving to minimize steering tracking error. Disable before manual tuning.
+    visibility:
+    - type: param
+      key: FordPrefLateralControl
+      equals: 1
+  - key: FordAngleAutoTuneDebugEnable
+    widget: toggle
+    title: '[Lateral Tuning] Auto-Tune Debug Logging'
+    description: Log detailed Auto-Tune signals (curvature error, integrals, factor adjustments) for offline analysis. Requires Auto-Tune to be enabled.
+    visibility:
+    - type: param
+      key: FordPrefLateralControl
+      equals: 1
+    enablement:
+    - type: param
+      key: FordAngleAutoTuneEnable
+      equals: true
   - key: disable_BP_lat_UI
     widget: toggle
     title: '[Lateral Tuning] Disable BP Lateral Control'

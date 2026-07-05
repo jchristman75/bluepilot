@@ -79,6 +79,7 @@ class BluePilotLayout(Widget):
       ("BpShowLateralControl", self._show_lateral_control),
       ("BPUIDebugLog", self._ui_debug_log),
       ("FordAngleAutoTuneEnable", self._angle_auto_tune),
+      ("FordAngleAutoTuneDebugEnable", self._angle_auto_tune_debug),
     )
 
     ui_state.add_offroad_transition_callback(self._update_toggles)
@@ -408,6 +409,16 @@ class BluePilotLayout(Widget):
       icon="chffr_wheel.png"
     )
 
+    # Auto-tune debug logging toggle — only meaningful while Auto-Tune itself is enabled
+    self._angle_auto_tune_debug = toggle_item(
+      lambda: tr("Auto-Tune Debug Logging"),
+      lambda: tr("Log detailed Auto-Tune signals (curvature error, integrals, factor adjustments) "
+                 "for offline analysis. Requires Auto-Tune to be enabled."),
+      initial_state=self._safe_get_bool(self._params, "FordAngleAutoTuneDebugEnable"),
+      callback=lambda state: self._toggle_callback(state, "FordAngleAutoTuneDebugEnable"),
+      icon="chffr_wheel.png"
+    )
+
     # Disable BP lateral control toggle
     self._disable_BP_lat = toggle_item(
       lambda: tr("Disable BP Lateral Control"),
@@ -490,6 +501,7 @@ class BluePilotLayout(Widget):
       self._low_speed_curv_factor,
       self._high_speed_curv_factor,
       self._angle_auto_tune,
+      self._angle_auto_tune_debug,
       self._enable_human_turn_detection,
       self._disable_lane_change_under_speed,
       self._blinker_min_speed,
@@ -598,12 +610,16 @@ class BluePilotLayout(Widget):
     custom_prof = fresh.get("custom_profile") if "custom_profile" in fresh else self._safe_get_bool(ui_state.params, "custom_profile")
     lane_pos = fresh.get("enable_lane_positioning") if "enable_lane_positioning" in fresh else self._safe_get_bool(ui_state.params, "enable_lane_positioning")
     pause_lc = fresh.get("BlinkerPauseLaneChange") if "BlinkerPauseLaneChange" in fresh else self._safe_get_bool(ui_state.params, "BlinkerPauseLaneChange")
+    auto_tune_on = fresh.get("FordAngleAutoTuneEnable") if "FordAngleAutoTuneEnable" in fresh else self._safe_get_bool(ui_state.params, "FordAngleAutoTuneEnable")
     is_angle = (plat_idx == PrimaryLateralControl.angle)
     is_curv = not is_angle
     # Angle-mode-only items
     self._lateral_header.set_item_visible(self._low_speed_curv_factor, is_angle)
     self._lateral_header.set_item_visible(self._high_speed_curv_factor, is_angle)
     self._lateral_header.set_item_visible(self._angle_auto_tune, is_angle)
+    self._lateral_header.set_item_visible(self._angle_auto_tune_debug, is_angle)
+    # Debug logging only makes sense while Auto-Tune itself is on
+    self._angle_auto_tune_debug.action_item.set_enabled(auto_tune_on)
     # Conditional on BlinkerPauseLaneChange
     self._blinker_min_speed.action_item.set_enabled(pause_lc)
     # Curvature-mode-only items

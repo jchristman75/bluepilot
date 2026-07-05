@@ -23,6 +23,7 @@ class LateralLayoutMici(NavScroller):
       "High Speed Adjustment Factor", "FordAngleHighSpeedFactor", min=0.5, max=1.5, step=0.01,
     )
     self.angle_auto_tune_enable = BigParamControlBP("Angle Auto-Tune", "FordAngleAutoTuneEnable")
+    self.angle_auto_tune_debug = BigParamControlBP("Auto-Tune Debug Logging", "FordAngleAutoTuneDebugEnable")
 
     # --- Always-visible items ---
     self.disable_BP_lat = BigParamControlBP("Disable BP Lateral Control", "disable_BP_lat_UI")
@@ -68,6 +69,7 @@ class LateralLayoutMici(NavScroller):
       self.low_speed_factor,
       self.high_speed_factor,
       self.angle_auto_tune_enable,
+      self.angle_auto_tune_debug,
       self.disable_lane_change_under_speed,
       self.blinker_min_speed,
       self.lane_change_factor_high,
@@ -85,6 +87,7 @@ class LateralLayoutMici(NavScroller):
 
     self._refresh_toggles = (
       ("FordAngleAutoTuneEnable", self.angle_auto_tune_enable),
+      ("FordAngleAutoTuneDebugEnable", self.angle_auto_tune_debug),
       ("disable_BP_lat_UI", self.disable_BP_lat),
       ("BlinkerPauseLaneChange", self.disable_lane_change_under_speed),
       ("enable_human_turn_detection", self.enable_human_turn_detection),
@@ -110,6 +113,9 @@ class LateralLayoutMici(NavScroller):
     self.low_speed_factor.set_visible(is_angle)
     self.high_speed_factor.set_visible(is_angle)
     self.angle_auto_tune_enable.set_visible(is_angle)
+    self.angle_auto_tune_debug.set_visible(is_angle)
+    # Debug logging only makes sense while Auto-Tune itself is on
+    self.angle_auto_tune_debug.set_enabled(ui_state.params.get_bool("FordAngleAutoTuneEnable"))
     self.blinker_min_speed.set_enabled(ui_state.params.get_bool("BlinkerPauseLaneChange"))
     for item in (
       self.enable_human_turn_detection,

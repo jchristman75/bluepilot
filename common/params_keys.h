@@ -295,6 +295,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"FordAngleLowSpeedFactor", {PERSISTENT | BACKUP, FLOAT, "1.0"}},
     {"FordAngleHighSpeedFactor", {PERSISTENT | BACKUP, FLOAT, "1.0"}},
     {"FordAngleAutoTuneEnable", {PERSISTENT | BACKUP, BOOL, "0"}},
+    {"FordAngleAutoTuneDebugEnable", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"FordAngleAutoTuneLastAdjustedLow", {PERSISTENT, INT, "0"}},
     {"FordAngleAutoTuneLastAdjustedHigh", {PERSISTENT, INT, "0"}},
     {"disable_BP_lat_UI", {PERSISTENT | BACKUP, BOOL, "0"}},
