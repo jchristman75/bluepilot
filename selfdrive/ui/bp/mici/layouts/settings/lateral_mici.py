@@ -109,6 +109,7 @@ class LateralLayoutMici(NavScroller):
     is_curv = not is_angle
     self.low_speed_factor.set_visible(is_angle)
     self.high_speed_factor.set_visible(is_angle)
+    self.angle_auto_tune_enable.set_visible(is_angle)
     self.blinker_min_speed.set_enabled(ui_state.params.get_bool("BlinkerPauseLaneChange"))
     for item in (
       self.enable_human_turn_detection,

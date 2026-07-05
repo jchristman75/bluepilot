@@ -26,6 +26,7 @@ from collections import deque
 from numpy import clip, interp
 from opendbc.car import DT_CTRL
 from opendbc.car.ford.values import CarControllerParams
+from opendbc.sunnypilot.car.ford.lateral_curv_ext import PrimaryLateralControl
 from openpilot.common.swaglog import cloudlog
 
 # Autotune update runs at STEER_STEP rate (20 Hz), not the 100 Hz carcontroller loop.
@@ -106,6 +107,7 @@ class LateralAutoTuner:
   _AT_FACTOR_WRITE_INTERVAL = 1.0
   # Log debug state at ~2 Hz (every 10 frames at 20 Hz).
   _AT_LOG_INTERVAL_FRAMES = 10
+  _ENABLE_PARAM = "FordAngleAutoTuneEnable"
 
   def __init__(self):
     self._at_regime_low = AutoTuner(
@@ -143,6 +145,18 @@ class LateralAutoTuner:
   @property
   def high_factor(self) -> float:
     return self._at_regime_high.factor
+
+  def is_effectively_enabled(self, params, primary_lateral_control) -> bool:
+    """Auto-tune should run only when the user's param is on AND the car is currently in
+    angle mode — it tunes the angle-mode gain factors and only ever runs from
+    update_angle_strategy. Checking the mode here, rather than clearing the param when the
+    user switches to curvature mode, means the enabled state is preserved and honored again
+    the next time they switch back to angle mode."""
+    try:
+      param_enabled = params.get_bool(self._ENABLE_PARAM)
+    except Exception:
+      param_enabled = False
+    return param_enabled and primary_lateral_control == PrimaryLateralControl.angle
 
   def configure(self, params, enabled: bool, param_low: float, param_high: float) -> None:
     was_enabled = self.enabled

@@ -603,6 +603,7 @@ class BluePilotLayout(Widget):
     # Angle-mode-only items
     self._lateral_header.set_item_visible(self._low_speed_curv_factor, is_angle)
     self._lateral_header.set_item_visible(self._high_speed_curv_factor, is_angle)
+    self._lateral_header.set_item_visible(self._angle_auto_tune, is_angle)
     # Conditional on BlinkerPauseLaneChange
     self._blinker_min_speed.action_item.set_enabled(pause_lc)
     # Curvature-mode-only items

@@ -21,7 +21,7 @@ from numpy import clip, interp
 from opendbc.car import DT_CTRL
 from opendbc.car.ford.values import CAR, CarControllerParams
 from opendbc.sunnypilot.car.ford.lateral_autotune import LateralAutoTuner
-from opendbc.sunnypilot.car.ford.lateral_curv_ext import LateralResult
+from opendbc.sunnypilot.car.ford.lateral_curv_ext import LateralResult, PrimaryLateralControl
 from selfdrive.modeld.constants import ModelConstants
 
 
@@ -214,10 +214,8 @@ class LateralAngleExt:
     if params is not None and hasattr(params, "get"):
       low_factor = _read_factor_param(params, "FordAngleLowSpeedFactor", self._auto_tuner.low_factor)
       high_factor = _read_factor_param(params, "FordAngleHighSpeedFactor", self._auto_tuner.high_factor)
-      try:
-        enabled = params.get_bool("FordAngleAutoTuneEnable")
-      except Exception:
-        enabled = False
+      primary_lateral_control = getattr(self, "primary_lateral_control", PrimaryLateralControl.curvature)
+      enabled = self._auto_tuner.is_effectively_enabled(params, primary_lateral_control)
       self._auto_tuner.configure(params, enabled, low_factor, high_factor)
       self.low_speed_curv_factor = self._auto_tuner.low_factor
       self.high_speed_curv_factor = self._auto_tuner.high_factor
