@@ -64,6 +64,11 @@ def apply_ford_ext_params(ret: structs.CarParams, CP, car_fw, fingerprint, alpha
   if 0x07A in fingerprint[CAN.main] and 0x24B in fingerprint[CAN.main] and 0x24C in fingerprint[CAN.main]:
     ret.flags |= int(FordFlags.HEV_BATTERY_DATA)
 
+  # BluePilot: BEV/PHEV charging telemetry
+  # Battery_Traction_5 (0x24D) has instantaneous charge power; MtrTrac_Data2 (0x442) has charge status
+  if 0x24D in fingerprint[CAN.main] and 0x442 in fingerprint[CAN.main]:
+    ret.flags |= int(FordFlags.CHARGING_DATA)
+
 
 def apply_ford_ext_params_sp(ret: structs.CarParamsSP) -> None:
   """

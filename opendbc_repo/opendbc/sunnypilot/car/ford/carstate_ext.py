@@ -68,6 +68,25 @@ def get_hev_engine_on_reason_text(reason_value):
   return engine_on_reasons.get(int(reason_value), "Unknown")
 
 
+# BluePilot: charge status text lookup
+def get_charge_status_text(status_value):
+  """Convert ChrgStat_D_ActlMntr value to human-readable text.
+
+  These values come from the MtrTrac_Data2_FD1 CAN message (ChrgStat_D_ActlMntr signal).
+  """
+  charge_statuses = {
+    0: "",
+    1: "Charging (Parked)",
+    2: "Charging (Driving)",
+    3: "Not Charging",
+    4: "Charge Complete",
+    5: "Not Used",
+    6: "No Data",
+    7: "Faulty",
+  }
+  return charge_statuses.get(int(status_value), "Unknown")
+
+
 class CarStateExt:
   """
   Extension class for Ford CarState to parse cruise control buttons.
@@ -320,6 +339,7 @@ class CarStateExt:
     hybrid_drive = dat.carStateBP.hybridDrive
     hybrid_battery = dat.carStateBP.hybridBattery
     brake_light_status = dat.carStateBP.brakeLightStatus
+    charging = dat.carStateBP.charging
 
     # Initialize with defaults
     hybrid_drive.dataAvailable = False
@@ -341,6 +361,13 @@ class CarStateExt:
 
     brake_light_status.dataAvailable = False
     brake_light_status.brakeLightsOn = False
+
+    charging.dataAvailable = False
+    charging.chargingActive = False
+    charging.statusText = ""
+    charging.statusValue = 0
+    charging.powerKw = 0.0
+    charging.powerLimitKw = 0.0
 
     # Brake light status — try BCM message first, then fallback to BrakeSysFeatures_2
     brake_lights_detected = False
@@ -419,6 +446,23 @@ class CarStateExt:
           hybrid_battery.socMinPerc = batt_data3["BattTracSoc_Pc_MnPrtct"]
           hybrid_battery.socMaxPerc = batt_data3["BattTracSoc_Pc_MxPrtct"]
           hybrid_battery.socActual = batt_data4["BattTracSoc2_Pc_Actl"]
+    except (KeyError, AttributeError):
+      pass
+
+    # Charging telemetry (Battery_Traction_5_FD1, MtrTrac_Data2_FD1)
+    try:
+      if self.CP.flags & FordFlags.CHARGING_DATA:
+        batt_data5 = cp.vl["Battery_Traction_5_FD1"]
+        mtr_trac_data2 = cp.vl["MtrTrac_Data2_FD1"]
+
+        if all(x is not None for x in [batt_data5, mtr_trac_data2]):
+          charging.dataAvailable = True
+          status_value = int(mtr_trac_data2["ChrgStat_D_ActlMntr"])
+          charging.statusValue = status_value
+          charging.statusText = get_charge_status_text(status_value)
+          charging.chargingActive = status_value in (1, 2)  # ChargingInParkingState, ChargingInDrivingState
+          charging.powerKw = batt_data5["BattTrac2_Pw_ChrgInst"] / 1000.0
+          charging.powerLimitKw = batt_data5["BattTrac2_Pw_LimChrg"] / 1000.0
     except (KeyError, AttributeError):
       pass
 

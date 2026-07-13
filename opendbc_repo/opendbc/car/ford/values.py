@@ -54,6 +54,7 @@ class FordFlags(IntFlag):
   ALT_STEER_ANGLE = 2
   HEV_CLUSTER_DATA = 4
   HEV_BATTERY_DATA = 8
+  CHARGING_DATA = 16
 
 
 class RADAR:

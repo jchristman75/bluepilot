@@ -125,6 +125,12 @@ class SidebarBP(Widget):
     self._debug_btn.set_on_click(self._handle_debug_click)
     self._debug_btn.set_scale(0.65)
 
+    # Charging button (Ford BEV/PHEV telemetry) - only shown while charging data is available
+    self._charging_btn = IconButton("icons_mici/settings/charge_icon.png")
+    self._charging_btn.set_on_click(self._handle_charging_click)
+    self._charging_btn.set_scale(0.65)
+    self._charging_data_available = False
+
     # Fan widget - rotates continuously based on fan speed
     self._fan_widget = FanWidget()
 
@@ -153,7 +159,8 @@ class SidebarBP(Widget):
 
   def set_callbacks(self, on_settings: Callable = None, on_flag: Callable = None,
                     on_info: Callable = None, on_debug: Callable = None,
-                    on_network: Callable = None, open_settings: Callable = None):
+                    on_network: Callable = None, open_settings: Callable = None,
+                    on_charging: Callable = None):
     """Set button callbacks - supports both old and new API"""
     self._on_settings_click = on_settings
     self._on_flag_click = on_flag
@@ -161,6 +168,7 @@ class SidebarBP(Widget):
     self._on_debug_click = on_debug
     self._on_network_click = on_network
     self._open_settings_callback = open_settings
+    self._on_charging_click = on_charging
 
   def _handle_settings_click(self):
     if self._on_settings_click:
@@ -191,6 +199,11 @@ class SidebarBP(Widget):
   def _handle_debug_click(self):
     if self._on_debug_click:
       self._on_debug_click()
+
+  def _handle_charging_click(self):
+    print(f"[ChargingIcon] clicked, callback_set={self._on_charging_click is not None}")
+    if self._on_charging_click:
+      self._on_charging_click()
 
   def _handle_network_click(self):
     if self._on_network_click:
@@ -226,6 +239,17 @@ class SidebarBP(Widget):
 
     # Update metric cards with current values
     self._update_metric_cards()
+
+    # Charging button visibility follows whether the car is reporting charging telemetry
+    prev_charging_data_available = self._charging_data_available
+    try:
+      self._charging_data_available = bool(sm['carStateBP'].charging.dataAvailable)
+    except (KeyError, AttributeError, TypeError) as e:
+      self._charging_data_available = False
+      if prev_charging_data_available:
+        print(f"[ChargingIcon] carStateBP access failed, hiding icon: {e}")
+    if prev_charging_data_available != self._charging_data_available:
+      print(f"[ChargingIcon] visibility changed -> available={self._charging_data_available}")
 
   def _update_network_status(self, device_state):
     """Update network type and strength"""
@@ -521,6 +545,11 @@ class SidebarBP(Widget):
     # Debug only when onroad
     if ui_state.started and self._debug_btn:
       self._debug_btn.render(rl.Rectangle(self._btn_x, bottom_y, btn_size, btn_size))
+      bottom_y -= btn_size + btn_spacing
+
+    # Charging only when the car is reporting charging telemetry
+    if self._charging_data_available:
+      self._charging_btn.render(rl.Rectangle(self._btn_x, bottom_y, btn_size, btn_size))
 
   def _draw_background(self, rect: rl.Rectangle):
     """Draw sidebar background with gradient"""

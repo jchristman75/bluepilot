@@ -22,6 +22,7 @@ from openpilot.selfdrive.ui.bp.mici.layouts.settings.audio_mici import AudioLayo
 from openpilot.selfdrive.ui.bp.mici.layouts.settings.visuals_mici import VisualsLayoutMici
 from openpilot.selfdrive.ui.bp.mici.layouts.settings.longitudinal_mici import LongitudinalLayoutMici
 from openpilot.selfdrive.ui.bp.mici.layouts.settings.lateral_mici import LateralLayoutMici
+from openpilot.selfdrive.ui.bp.mici.layouts.charging_mici import ChargingLayoutMici
 
 
 class BluePilotBigButton(BigButtonBP):
@@ -106,6 +107,12 @@ class BluePilotLayoutMici(NavScroller):
     )
     lat_btn.set_click_callback(lambda: gui_app.push_widget(lat_panel))
 
+    charging_panel = ChargingLayoutMici(back_callback=gui_app.pop_widget)
+    charging_btn = BluePilotBigButton(
+      tr("charging"), "", "icons_mici/settings/charge_icon.png", icon_size=80,
+    )
+    charging_btn.set_click_callback(lambda: gui_app.push_widget(charging_panel))
+
     self._scroller.add_widgets([
       self.enable_web_routes,
       self.show_web_routes_qr,
@@ -113,6 +120,7 @@ class BluePilotLayoutMici(NavScroller):
       vehicle_btn,
       audio_btn,
       visuals_btn,
+      charging_btn,
       self.primary_lateral_control,
       lat_btn,
       long_btn,
