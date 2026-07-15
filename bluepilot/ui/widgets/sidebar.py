@@ -243,9 +243,12 @@ class SidebarBP(Widget):
     # Charging button visibility follows whether the car is reporting charging telemetry
     prev_charging_data_available = self._charging_data_available
     try:
-      self._charging_data_available = bool(sm['carStateBP'].charging.dataAvailable)
+      charging = sm['carStateBP'].charging
+      self._charging_data_available = bool(charging.dataAvailable)
+      self._charging_btn.set_glow(bool(charging.chargingActive))
     except (KeyError, AttributeError, TypeError) as e:
       self._charging_data_available = False
+      self._charging_btn.set_glow(False)
       if prev_charging_data_available:
         print(f"[ChargingIcon] carStateBP access failed, hiding icon: {e}")
     if prev_charging_data_available != self._charging_data_available:

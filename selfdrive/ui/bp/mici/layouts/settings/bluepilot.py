@@ -23,6 +23,9 @@ from openpilot.selfdrive.ui.bp.mici.layouts.settings.visuals_mici import Visuals
 from openpilot.selfdrive.ui.bp.mici.layouts.settings.longitudinal_mici import LongitudinalLayoutMici
 from openpilot.selfdrive.ui.bp.mici.layouts.settings.lateral_mici import LateralLayoutMici
 from openpilot.selfdrive.ui.bp.mici.layouts.charging_mici import ChargingLayoutMici
+from bluepilot.ui.widgets.icon_button import draw_breathing_fill
+from bluepilot.ui.lib.colors import BPColors
+import pyray as rl
 
 
 class BluePilotBigButton(BigButtonBP):
@@ -30,6 +33,25 @@ class BluePilotBigButton(BigButtonBP):
 
   def _get_label_font_size(self):
     return 64
+
+
+class ChargingButtonMici(BluePilotBigButton):
+  """Charging category button with a breathing green background while charging is active."""
+
+  def _render(self, rect):
+    try:
+      charging_active = bool(ui_state.sm['carStateBP'].charging.chargingActive)
+    except (KeyError, AttributeError, TypeError):
+      charging_active = False
+
+    if not charging_active:
+      super()._render(rect)
+      return
+
+    _, btn_x, btn_y, scale = self._handle_background()
+    draw_breathing_fill(rl.Rectangle(btn_x, btn_y, self._rect.width * scale, self._rect.height * scale),
+                         BPColors.GOOD, roundness=0.15, segments=8)
+    self._draw_content(btn_y)
 
 
 class BluePilotLayoutMici(NavScroller):
@@ -108,7 +130,7 @@ class BluePilotLayoutMici(NavScroller):
     lat_btn.set_click_callback(lambda: gui_app.push_widget(lat_panel))
 
     charging_panel = ChargingLayoutMici(back_callback=gui_app.pop_widget)
-    charging_btn = BluePilotBigButton(
+    charging_btn = ChargingButtonMici(
       tr("charging"), "", "icons_mici/settings/charge_icon.png", icon_size=80,
     )
     charging_btn.set_click_callback(lambda: gui_app.push_widget(charging_panel))
