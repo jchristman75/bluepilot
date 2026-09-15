@@ -118,6 +118,12 @@ _STALL_HOLD_S = 0.5          # accumulated clip-binding time before a pulse fire
 _STALL_BLIP_FRAMES = 6       # mode-0 pulse length (6 frames @ 20 Hz = 300 ms; PSCM acked mode 0 in ~150 ms on-road)
 _STALL_COOLDOWN_S = 2.0      # re-arm delay after a pulse (release ramp + PSCM response time)
 _STALL_MAX_BLIPS = 3         # give up on a stuck episode; devLim telemetry keeps recording the stall
+# Sign-reversal stalls only: a gap that is still closing is the car responding, not a stall.
+# Compared against a smoothed |gap| because frame-to-frame differencing is buried in yawRate
+# noise. 0.95 admits closing slower than ~0.17 x |gap| per second -- an order below the rate a
+# real S-curve reversal closes at.
+_STALL_GAP_TAU = 0.3         # s, smoothing for the |gap| reference
+_STALL_GAP_CLOSING = 0.95
 # Proactive hand-off blip: any sustained driver press attenuates the PSCM (route 000000be seg 4:
 # 3 s of sub-45-deg circle-exit steering left it at ~0x delivery, and the reactive detector's
 # fire-after-the-stall-develops timing meant 2.4 s of dead-straight running into the next curve
@@ -129,6 +135,17 @@ _PRESS_BLIP_MIN_S = 0.5      # press must last this long before its release earn
 _BLIP_MAX_PATH_ANGLE = 0.10  # rad
 # steeringPressed chatters: a 30 ms dip inside a 1.7 s hold fired a pulse (route 00000399 t=172.04).
 _PRESS_RELEASE_S = 0.3       # release must persist this long to count as one
+# _PRESS_RELEASE_S is a budget for the whole grab, not per dip. Resetting it on every re-press
+# meant a lightly-resting hand -- which chatters with dips shorter than the debounce -- could
+# never end its grab, so press_timer_s summed unrelated taps into a "sustained hold" that was
+# never held, and a later release fired a pulse on that stale total. Accumulating the dips
+# instead costs a genuine 30 ms dip 30 ms of budget (route 00000399 still earns its pulse) and
+# ends a chattery grab after 0.3 s of total dip.
+# An earned pulse that a guard blocks (cooldown, pulse in flight, mid-curve) is held pending and
+# retried rather than dropped -- otherwise the driver has to grab and release again. The window
+# outlasts a full _STALL_COOLDOWN_S plus pulse; past that the hand-off moment has gone and the
+# reactive detector is the right backstop.
+_PRESS_BLIP_PENDING_S = 3.0
 # The pulse also leaves path_angle to ramp back in through the soft ROC. The fixed
 # _BLIP_MAX_PATH_ANGLE cap above doesn't scale with speed: at 25 m/s, 0.10 rad is a R~250 m
 # curve and the ramp adds ~0.6 s of unassisted steering (~15 m). Cap the ramp-recovery
@@ -212,13 +229,15 @@ class LateralAngleExt:
     # Post-override stall blip state (see module constants). angle_stall_blip_active is read by
     # carcontroller to force mode 0, exactly like angle_human_turn_active.
     self.stall_blip_hold_s = 0.0      # accumulated deviation-clip-binding time toward a pulse
+    self._stall_gap_mag_slow = -1.0   # smoothed |desired - current|; < 0 = unseeded
     self.stall_blip_frames_left = 0   # remaining pulse frames; > 0 -> mode 0 on the wire
     self.stall_blip_cooldown_s = 0.0  # re-arm delay after a pulse
     self.stall_blip_count = 0         # pulses fired this stall episode
     self.angle_stall_blip_active = False
     self.angle_stall_blip_source = 0  # 0=none, 1=hand-off pulse, 2=reactive stall pulse
-    self.press_timer_s = 0.0          # continuous steeringPressed time, for the hand-off blip
-    self.release_timer_s = 0.0        # !steeringPressed time, debounces the hand-off blip
+    self.press_timer_s = 0.0          # pressed time in the current grab, for the hand-off blip
+    self.release_timer_s = 0.0        # total !steeringPressed time in the grab (see _PRESS_RELEASE_S)
+    self.press_blip_pending_s = 0.0   # earned hand-off pulse waiting for a clear frame to fire
 
   def update_angle_params(self, params):
     """Sets per-platform gain defaults and reads user angle-tuning params."""
@@ -318,6 +337,7 @@ class LateralAngleExt:
       self.bp_nudge_offset_pct = 0.0
       self.bp_nudge_offset_m = 0.0
       self.stall_blip_hold_s = 0.0
+      self._stall_gap_mag_slow = -1.0
       self.stall_blip_frames_left = 0
       self.stall_blip_cooldown_s = 0.0
       self.stall_blip_count = 0
@@ -325,6 +345,7 @@ class LateralAngleExt:
       self.angle_stall_blip_source = 0
       self.press_timer_s = 0.0
       self.release_timer_s = 0.0
+      self.press_blip_pending_s = 0.0
       self.precision_type = 1
       return LateralResult(
         apply_curvature=0.0,
@@ -368,6 +389,7 @@ class LateralAngleExt:
       # covers the press so far: only press time accumulated AFTER the latch releases should earn
       # a hand-off pulse.
       self.stall_blip_hold_s = 0.0
+      self._stall_gap_mag_slow = -1.0
       self.stall_blip_frames_left = 0
       self.stall_blip_cooldown_s = 0.0
       self.stall_blip_count = 0
@@ -375,6 +397,7 @@ class LateralAngleExt:
       self.angle_stall_blip_source = 0
       self.press_timer_s = 0.0
       self.release_timer_s = 0.0
+      self.press_blip_pending_s = 0.0
       self.precision_type = 1
       return LateralResult(
         apply_curvature=0.0,
@@ -391,21 +414,33 @@ class LateralAngleExt:
     # hand-off, while the car is straight and the command small, instead of waiting for the
     # reactive stall detector below to watch the car miss the next curve first.
     if CS.out.steeringPressed:
+      if self.press_timer_s <= 0.0:
+        self.release_timer_s = 0.0  # first press of a new grab
       self.press_timer_s += _STEER_DT
-      self.release_timer_s = 0.0
+      # A fresh grab supersedes any pulse the previous one earned: that grab's release will
+      # earn its own, and firing mid-press would drop lateral while the driver is steering.
+      self.press_blip_pending_s = 0.0
     else:
+      # Not reset on re-press: dips accumulate across the grab -- see _PRESS_RELEASE_S.
       self.release_timer_s += _STEER_DT
-      # press_timer_s survives the window, so a re-press resumes the same grab.
+      # press_timer_s survives a sub-debounce dip, so a re-press resumes the same grab.
       if self.press_timer_s > 0.0 and self.release_timer_s >= _PRESS_RELEASE_S:
-        if (self.press_timer_s >= _PRESS_BLIP_MIN_S and self.stall_blip_cooldown_s <= 0.0
-            and self.stall_blip_frames_left <= 0
-            and abs(self.path_angle_last) < _BLIP_MAX_PATH_ANGLE
-            # ramp-recovery distance guard: straight (path_angle ~0) always passes; curves
-            # scale with speed through the soft ROC
-            and (abs(self.path_angle_last) / _soft_roc_rad_per_s(v_ego)) * v_ego < _BLIP_MAX_RAMP_M):
-          self.stall_blip_frames_left = _STALL_BLIP_FRAMES
-          self.angle_stall_blip_source = 1
+        if self.press_timer_s >= _PRESS_BLIP_MIN_S:
+          self.press_blip_pending_s = _PRESS_BLIP_PENDING_S
         self.press_timer_s = 0.0
+
+    # An earned pulse waits for a frame where every guard is clear instead of being dropped.
+    if self.press_blip_pending_s > 0.0:
+      self.press_blip_pending_s = max(0.0, self.press_blip_pending_s - _STEER_DT)
+      if (self.stall_blip_cooldown_s <= 0.0
+          and self.stall_blip_frames_left <= 0
+          and abs(self.path_angle_last) < _BLIP_MAX_PATH_ANGLE
+          # ramp-recovery distance guard: straight (path_angle ~0) always passes; curves
+          # scale with speed through the soft ROC
+          and (abs(self.path_angle_last) / _soft_roc_rad_per_s(v_ego)) * v_ego < _BLIP_MAX_RAMP_M):
+        self.stall_blip_frames_left = _STALL_BLIP_FRAMES
+        self.angle_stall_blip_source = 1
+        self.press_blip_pending_s = 0.0
 
     # Stall-blip pulse in progress: hold lateral inactive (mode 0, all-zero signals -- the same
     # wire pattern as the human-turn override, no ford.h involvement) for _STALL_BLIP_FRAMES so the
@@ -670,6 +705,13 @@ class LateralAngleExt:
     self.stall_blip_cooldown_s = max(0.0, self.stall_blip_cooldown_s - _STEER_DT)
     _stall_gap = desired_curvature - current_curvature
     _stall_gap_min = _STALL_GAP_RATIO * self.bp_curvature_error
+    # Seed on the first frame: a reference rising from zero would call every gap "not closing"
+    # for the first _STALL_GAP_TAU and hand the detector a free window.
+    if self._stall_gap_mag_slow < 0.0:
+      self._stall_gap_mag_slow = abs(_stall_gap)
+    else:
+      _gap_alpha = _STEER_DT / (_STEER_DT + _STALL_GAP_TAU)
+      self._stall_gap_mag_slow += _gap_alpha * (abs(_stall_gap) - self._stall_gap_mag_slow)
     _stalled = (not CS.out.steeringPressed and not self.lane_change and v_ego > 9.0
                 and abs(_stall_gap) > _stall_gap_min
                 # curve entry from straight satisfies the gap test by construction; require a real
@@ -678,7 +720,21 @@ class LateralAngleExt:
                 # post-override stall on gentler curves is only covered by the proactive hand-off
                 # blip above, never detected here. Do not "fix" this back into firing at entry.
                 and abs(current_curvature) > _stall_gap_min
-                and abs(desired_curvature) > abs(current_curvature))
+                # "desired leads measured", stated by sign rather than magnitude. The magnitude
+                # form missed the reversal case outright -- mid S-curve with the PSCM stuck on a
+                # stale positive curvature while the planner already wants negative, |desired|
+                # can sit below |current| with the car pointed the wrong way entirely. What is
+                # genuinely NOT a stall is the car turning harder than asked in the same
+                # direction, so exclude only that.
+                and not (desired_curvature * current_curvature > 0.0
+                         and abs(current_curvature) >= abs(desired_curvature))
+                # Opposite signs are also the normal way through an S-curve, where the car is
+                # lagging but responding. Only a gap that is not closing is a stall, so require
+                # the reversal case to show no progress against a _STALL_GAP_TAU-smoothed
+                # reference (frame-to-frame differencing is buried in yawRate noise). The
+                # same-sign case keeps its road-validated behaviour untouched.
+                and (desired_curvature * current_curvature >= 0.0
+                     or abs(_stall_gap) >= _STALL_GAP_CLOSING * self._stall_gap_mag_slow))
     if _stalled:
       if self.bp_curvature_deviation_limited and self.stall_blip_cooldown_s <= 0.0:
         self.stall_blip_hold_s += _STEER_DT
