@@ -1,7 +1,8 @@
 """
 BluePilot Charging Overlay Panel
 Slide-in overlay (same animation/close pattern as ControlsDebugPanel) showing the
-full charge-session curve, live kW/Amps/SOC, and a time-to-80% estimate.
+full charge-session curve, live kW/SOC (plus Amps where the car reports pack current),
+and a time-to-80% estimate.
 """
 
 import pyray as rl
@@ -16,6 +17,12 @@ from bluepilot.ui.lib.colors import BPColors
 from bluepilot.ui.widgets.debug.debug_colors import DebugColors
 
 TARGET_SOC_PCT = 80.0
+HERO_VALUE_FONT = 96  # kW: the one charging figure the car reports usefully
+VALUE_FONT = 48
+LABEL_FONT = 24
+VALUE_LINE = 1.15  # line height as a multiple of the font size
+LABEL_LINE = 1.25
+READOUT_H = HERO_VALUE_FONT * VALUE_LINE + LABEL_FONT * LABEL_LINE
 # No true "never timeout" sentinel exists in Device; reuse the large-number convention
 # from selfdrive/ui/tests/diff/replay.py to keep the screen on indefinitely while open.
 STAY_AWAKE_TIMEOUT_S = 99999
@@ -43,6 +50,10 @@ class ChargingOverlayPanel(Widget):
 
   def toggle_visibility(self):
     self._set_visible(not self._visible_state)
+
+  def show_panel(self, reason: str = "auto"):
+    """Open the panel from outside (charge-session auto-open); no-op if already open."""
+    self._set_visible(True, reason=reason)
 
   def _set_visible(self, visible: bool, reason: str = "toggle"):
     if visible == self._visible_state:
@@ -148,12 +159,18 @@ class ChargingOverlayPanel(Widget):
     status_text = data['status'] or ("Charging" if data['active'] else "Not Charging")
     rl.draw_text_ex(self._font_semi, status_text, rl.Vector2(rect.x + pad, rect.y + pad + 60), 32, 0, status_color)
 
+    # kW leads, in the big font. Amps only earns a column on a car that actually reports pack
+    # current: on the Mach-E it is motor current, flat 0.0 A for a whole parked charge, so the
+    # tile was only ever a zero (see charge_session_history.amps_reported).
     readout_y = rect.y + pad + 130
-    readout_h = 90
-    col_w = (rect.width - 2 * pad) / 3
-    self._draw_stat(rl.Rectangle(rect.x + pad, readout_y, col_w, readout_h), f"{data['kw']:.1f}", "kW")
-    self._draw_stat(rl.Rectangle(rect.x + pad + col_w, readout_y, col_w, readout_h), f"{data['amps']:.0f}", "Amps")
-    self._draw_stat(rl.Rectangle(rect.x + pad + 2 * col_w, readout_y, col_w, readout_h), f"{data['soc']:.0f}%", "SOC")
+    readout_h = READOUT_H
+    columns = [(f"{data['kw']:.1f}", "kW", HERO_VALUE_FONT), (f"{data['soc']:.0f}%", "SOC", VALUE_FONT)]
+    if charge_session_history.amps_reported:
+      columns.insert(1, (f"{data['amps']:.0f}", "Amps", VALUE_FONT))
+    col_w = (rect.width - 2 * pad) / len(columns)
+    for i, (value, label, font_size) in enumerate(columns):
+      self._draw_stat(rl.Rectangle(rect.x + pad + i * col_w, readout_y, col_w, readout_h),
+                      value, label, font_size)
 
     # Time-to-80% estimate: fixed position right below the readout row (small
     # margin), not chart-relative, so it can never float below the visible panel.
@@ -174,14 +191,18 @@ class ChargingOverlayPanel(Widget):
     chart_h = max(100, rect.height - (chart_y - rect.y) - pad - close_area_h)
     self._chart.render(rl.Rectangle(rect.x + pad, chart_y, rect.width - 2 * pad, chart_h))
 
-  def _draw_stat(self, rect: rl.Rectangle, value: str, label: str) -> None:
-    value_size = measure_text_cached(self._font_bold, value, 48)
+  def _draw_stat(self, rect: rl.Rectangle, value: str, label: str, value_font: int = VALUE_FONT) -> None:
+    # Values are centered in a shared row height rather than drawn from its top, so a small
+    # number (SOC) lines up with the big one (kW) instead of floating above it.
+    value_h = rect.height - LABEL_FONT * LABEL_LINE
+    value_size = measure_text_cached(self._font_bold, value, value_font)
     rl.draw_text_ex(self._font_bold, value,
-                     rl.Vector2(rect.x + (rect.width - value_size.x) / 2, rect.y), 48, 0, BPColors.WHITE)
-    label_size = measure_text_cached(self._font_semi, label, 24)
+                     rl.Vector2(rect.x + (rect.width - value_size.x) / 2,
+                                rect.y + (value_h - value_size.y) / 2), value_font, 0, BPColors.WHITE)
+    label_size = measure_text_cached(self._font_semi, label, LABEL_FONT)
     rl.draw_text_ex(self._font_semi, label,
-                     rl.Vector2(rect.x + (rect.width - label_size.x) / 2, rect.y + rect.height * 0.65),
-                     24, 0, BPColors.TEXT_SECONDARY)
+                     rl.Vector2(rect.x + (rect.width - label_size.x) / 2, rect.y + value_h),
+                     LABEL_FONT, 0, BPColors.TEXT_SECONDARY)
 
   def _render_close_button(self, panel_rect: rl.Rectangle):
     close_w = self.CLOSE_BUTTON_SIZE

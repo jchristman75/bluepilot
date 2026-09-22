@@ -437,7 +437,12 @@ class CarStateExt:
           hybrid_battery.voltHighLimit = batt_data1["BattTrac_U_LimHi"]
           hybrid_battery.voltLowLimit = batt_data1["BattTrac_U_LimLo"]
           hybrid_battery.voltActual = batt_data1["BattTrac_U_Actl"]
-          # BattTrac_I_Actl reads a constant -750 A on the Mach-E (bytes 0-1 of 0x07A are always 0)
+          # BattTrac_I_Actl reads a constant -750 A on the Mach-E (bytes 0-1 of 0x07A are always 0).
+          # Verified driving AND charging: in route 0000041c (DC fast charge, 32.5 -> 50.6% SOC)
+          # 0x07A arrives at 100 Hz on bus 0 the whole time and BattTrac_U_Actl in the same frame
+          # tracks 361.5 -> 369.0 V, while the 15-bit current field is raw 0 in every frame. No
+          # other HV current signal in the DBC is live either, so there is no pack current to be
+          # had on this platform -- the charging UI shows kW alone (see charging/session.py).
           if self.CP.carFingerprint == CAR.FORD_MUSTANG_MACH_E_MK1:
             # motor current is positive when motoring; UI wants positive = charging, so negate
             hybrid_battery.ampsActual = -cp.vl["MtrTracData_1_FD1"]["MtrTrac2_I_Actl"]

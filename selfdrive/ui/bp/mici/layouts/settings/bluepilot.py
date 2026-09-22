@@ -22,7 +22,7 @@ from openpilot.selfdrive.ui.bp.mici.layouts.settings.audio_mici import AudioLayo
 from openpilot.selfdrive.ui.bp.mici.layouts.settings.visuals_mici import VisualsLayoutMici
 from openpilot.selfdrive.ui.bp.mici.layouts.settings.longitudinal_mici import LongitudinalLayoutMici
 from openpilot.selfdrive.ui.bp.mici.layouts.settings.lateral_mici import LateralLayoutMici
-from openpilot.selfdrive.ui.bp.mici.layouts.charging_mici import ChargingLayoutMici
+from openpilot.selfdrive.ui.bp.mici.layouts.charging_mici import get_charging_layout
 from bluepilot.ui.widgets.icon_button import draw_breathing_fill
 from bluepilot.ui.lib.colors import BPColors
 import pyray as rl
@@ -129,7 +129,7 @@ class BluePilotLayoutMici(NavScroller):
     )
     lat_btn.set_click_callback(lambda: gui_app.push_widget(lat_panel))
 
-    charging_panel = ChargingLayoutMici(back_callback=gui_app.pop_widget)
+    charging_panel = get_charging_layout()
     charging_btn = ChargingButtonMici(
       tr("charging"), "", "icons_mici/settings/charge_icon.png", icon_size=80,
     )

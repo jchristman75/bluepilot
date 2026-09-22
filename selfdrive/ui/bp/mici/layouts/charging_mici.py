@@ -1,5 +1,10 @@
 """BluePilot MICI: Charging screen — the charge curve fills the whole background,
-with live status/kW/Amps/SOC/time-to-80% overlaid on top."""
+with live status/kW/SOC/time-to-80% overlaid on top.
+
+kW carries the display: pack current is not shown because ampsActual is motor current on the
+Mach-E (MtrTrac2_I_Actl), flat 0.0 A for an entire parked charge (route 0000041c: 5569 charging
+samples, none non-zero), and that platform's own BattTrac_I_Actl is dead -- see carstate_ext.py.
+"""
 
 from collections.abc import Callable
 
@@ -15,9 +20,33 @@ from bluepilot.ui.lib.colors import BPColors
 
 TARGET_SOC_PCT = 80.0
 SCRIM_COLOR = rl.Color(0, 0, 0, 150)
+HERO_VALUE_FONT = 92  # kW, the one charging number the car reports usefully
+VALUE_FONT = 48
+LABEL_FONT = 24
+VALUE_LINE = 1.15  # line height as a multiple of the font size
+LABEL_LINE = 1.25
+# Row height follows the fonts rather than a guessed constant: the mici screen is only 240px
+# tall, so the whole block gets scaled down and a hard-coded row would clip the hero number.
+READOUT_H = HERO_VALUE_FONT * VALUE_LINE + LABEL_FONT * LABEL_LINE
 # No true "never timeout" sentinel exists in Device; reuse the large-number convention
 # from selfdrive/ui/tests/diff/replay.py to keep the screen on indefinitely while open.
 STAY_AWAKE_TIMEOUT_S = 99999
+
+
+_shared_layout: 'ChargingLayoutMici | None' = None
+
+
+def get_charging_layout() -> 'ChargingLayoutMici':
+  """The one charging screen instance.
+
+  The settings button and the charge-session auto-open (charging/auto_open.py) push the
+  same widget: gui_app refuses a widget that is already on the nav stack, and two
+  instances would fight over the interactive-timeout override on show/hide.
+  """
+  global _shared_layout
+  if _shared_layout is None:
+    _shared_layout = ChargingLayoutMici(back_callback=gui_app.pop_widget)
+  return _shared_layout
 
 
 class ChargingLayoutMici(NavWidget):
@@ -70,11 +99,10 @@ class ChargingLayoutMici(NavWidget):
         'active': charging.chargingActive,
         'status': charging.statusText,
         'kw': charging.powerKw,
-        'amps': hybrid_battery.ampsActual if hybrid_battery.dataAvailable else 0.0,
         'soc': hybrid_battery.socActual if hybrid_battery.dataAvailable else 0.0,
       }
     except (KeyError, AttributeError, TypeError):
-      return {'available': False, 'active': False, 'status': "", 'kw': 0.0, 'amps': 0.0, 'soc': 0.0}
+      return {'available': False, 'active': False, 'status': "", 'kw': 0.0, 'soc': 0.0}
 
   def _render(self, rect: rl.Rectangle) -> None:
     # Charge curve fills the entire background
@@ -91,11 +119,11 @@ class ChargingLayoutMici(NavWidget):
                 color=BPColors.TEXT_SECONDARY, alignment=rl.GuiTextAlignment.TEXT_ALIGN_CENTER)
       return
 
-    # Top scrim: title, status, time-to-80% estimate, then the kW/Amps/SOC readout row.
+    # Top scrim: title, status, time-to-80% estimate, then the kW/SOC readout row.
     # The whole block is scaled to fit within a fraction of the actual screen height,
     # so on a short mici display everything shrinks together instead of the bottom
     # rows getting pushed off-screen.
-    base_title_h, base_status_h, base_time_h, base_readout_h, base_row_gap, base_pad = 50, 40, 44, 80, 8, 30
+    base_title_h, base_status_h, base_time_h, base_readout_h, base_row_gap, base_pad = 50, 40, 44, READOUT_H, 8, 30
     base_total_h = base_pad * 2 + base_title_h + base_status_h + base_time_h + base_readout_h + 3 * base_row_gap
 
     scale = min(1.0, (rect.height * 0.9) / base_total_h)
@@ -137,14 +165,20 @@ class ChargingLayoutMici(NavWidget):
               time_text, font_size=int(32 * scale), font_weight=FontWeight.MEDIUM, color=BPColors.WHITE,
               alignment=rl.GuiTextAlignment.TEXT_ALIGN_CENTER)
 
-    col_w = (rect.width - 2 * pad) / 3
-    self._draw_stat(rl.Rectangle(rect.x + pad, readout_y, col_w, readout_h), f"{data['kw']:.1f}", "kW", scale)
-    self._draw_stat(rl.Rectangle(rect.x + pad + col_w, readout_y, col_w, readout_h), f"{data['amps']:.0f}", "Amps", scale)
-    self._draw_stat(rl.Rectangle(rect.x + pad + 2 * col_w, readout_y, col_w, readout_h), f"{data['soc']:.0f}%", "SOC", scale)
+    # kW in the hero font, SOC alongside it (no Amps column -- see the module docstring).
+    col_w = (rect.width - 2 * pad) / 2
+    self._draw_stat(rl.Rectangle(rect.x + pad, readout_y, col_w, readout_h),
+                    f"{data['kw']:.1f}", "kW", scale, value_font=HERO_VALUE_FONT)
+    self._draw_stat(rl.Rectangle(rect.x + pad + col_w, readout_y, col_w, readout_h),
+                    f"{data['soc']:.0f}%", "SOC", scale)
 
-  def _draw_stat(self, rect: rl.Rectangle, value: str, label: str, scale: float = 1.0) -> None:
-    gui_label(rl.Rectangle(rect.x, rect.y, rect.width, rect.height * 0.65), value, font_size=int(48 * scale),
+  def _draw_stat(self, rect: rl.Rectangle, value: str, label: str, scale: float = 1.0,
+                 value_font: int = VALUE_FONT) -> None:
+    # Every column reserves the hero row height, whatever its font size, so a small value
+    # (SOC) sits centered against the big one (kW) instead of riding above it.
+    value_h = rect.height - LABEL_FONT * LABEL_LINE * scale
+    gui_label(rl.Rectangle(rect.x, rect.y, rect.width, value_h), value, font_size=int(value_font * scale),
               font_weight=FontWeight.BOLD, color=BPColors.WHITE, alignment=rl.GuiTextAlignment.TEXT_ALIGN_CENTER)
-    gui_label(rl.Rectangle(rect.x, rect.y + rect.height * 0.65, rect.width, rect.height * 0.35), label,
-              font_size=int(24 * scale), font_weight=FontWeight.MEDIUM, color=BPColors.LIGHT_GRAY,
+    gui_label(rl.Rectangle(rect.x, rect.y + value_h, rect.width, rect.height - value_h), label,
+              font_size=int(LABEL_FONT * scale), font_weight=FontWeight.MEDIUM, color=BPColors.LIGHT_GRAY,
               alignment=rl.GuiTextAlignment.TEXT_ALIGN_CENTER)

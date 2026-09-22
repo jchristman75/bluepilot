@@ -9,6 +9,11 @@ from openpilot.system.ui.lib.application import gui_app
 from openpilot.selfdrive.ui.layouts.main import MainLayout
 from openpilot.selfdrive.ui.mici.layouts.main import MiciMainLayout
 from openpilot.selfdrive.ui.ui_state import ui_state
+# BluePilot: charge-session watcher that opens the charging screen on its own
+from openpilot.common.bluepilot import is_bluepilot
+if is_bluepilot():
+  from openpilot.selfdrive.ui.bp.charging.auto_open import charging_auto_open
+# End BluePilot
 
 BIG_UI = gui_app.big_ui()
 
@@ -32,6 +37,13 @@ def main():
   for should_render, frame_time, cpu_time in gui_app.render():
     extra_start = time.monotonic()
     ui_state.update()
+
+    # BluePilot: poll the charge session here, not from a widget/nav tick -- those are
+    # gated on rendering, and a session that starts with the screen off still has to
+    # bring up the charging screen (see charging/auto_open.py).
+    if is_bluepilot():
+      charging_auto_open.update()
+    # End BluePilot
 
     if should_render:
       # reaffine after power save offlines our core

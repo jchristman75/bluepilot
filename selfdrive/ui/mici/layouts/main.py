@@ -10,6 +10,9 @@ from openpilot.selfdrive.ui.mici.onroad.augmented_road_view import AugmentedRoad
 from openpilot.common.bluepilot import is_bluepilot
 if is_bluepilot():
   from openpilot.selfdrive.ui.bp.mici.onroad.augmented_road_view_bp import MiciAugmentedRoadViewBP as AugmentedRoadView
+  # BluePilot: charging screen, pushed on its own when a charge session starts
+  from openpilot.selfdrive.ui.bp.charging.auto_open import charging_auto_open
+  from openpilot.selfdrive.ui.bp.mici.layouts.charging_mici import get_charging_layout
 from openpilot.selfdrive.ui.ui_state import device, ui_state
 from openpilot.selfdrive.ui.mici.layouts.onboarding import OnboardingWindow
 from openpilot.system.ui.widgets import Widget
@@ -57,6 +60,10 @@ class MiciMainLayout(Scroller):
 
     # Set callbacks
     self._setup_callbacks()
+
+    # BluePilot: plugging in (or booting mid-charge) brings the charging screen up
+    if is_bluepilot():
+      charging_auto_open.set_opener(self._open_charging)
 
     gui_app.add_nav_stack_tick(self._handle_transitions)
     gui_app.push_widget(self)
@@ -125,6 +132,16 @@ class MiciMainLayout(Scroller):
       # Screen turns off on timeout offroad, so pop immediately without animation
       gui_app.pop_widgets_to(self, instant=True)
       self._scroll_to(self._home_layout)
+
+  # BluePilot: open the charging screen for a charge session that just started. Called
+  # from the ui.py main loop, so it can also fire with the screen off -- show_event's
+  # interactive-timeout override is what wakes it.
+  def _open_charging(self):
+    if gui_app.widget_in_stack(self._onboarding_window):
+      return
+    charging_layout = get_charging_layout()
+    if not gui_app.widget_in_stack(charging_layout):
+      gui_app.push_widget(charging_layout)
 
   def _on_bookmark_clicked(self):
     user_bookmark = messaging.new_message('bookmarkButton')

@@ -20,6 +20,7 @@ if is_bluepilot():
   from openpilot.selfdrive.ui.bp.onroad.augmented_road_view_bp import AugmentedRoadViewBP as AugmentedRoadView
   from bluepilot.ui.widgets.debug import ControlsDebugPanel
   from bluepilot.ui.widgets.charging_overlay_panel import ChargingOverlayPanel
+  from openpilot.selfdrive.ui.bp.charging.auto_open import charging_auto_open
 
 if gui_app.sunnypilot_ui():
   from openpilot.selfdrive.ui.sunnypilot.layouts.settings.settings import SettingsLayoutSP as SettingsLayout
@@ -56,6 +57,8 @@ class MainLayout(Widget):
       self._charging_panel = ChargingOverlayPanel()
       self._charging_toggled_this_frame = False
       self._charging_panel_was_rendered = False
+      # BluePilot: a charge session starting (or the UI coming up mid-charge) opens the panel
+      charging_auto_open.set_opener(lambda: self._charging_panel.show_panel(reason="charging_started"))
 
     # Set callbacks
     self._setup_callbacks()
