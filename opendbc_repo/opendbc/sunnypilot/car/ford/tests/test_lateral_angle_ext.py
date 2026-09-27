@@ -27,6 +27,7 @@ from opendbc.sunnypilot.car.ford import lateral_curv_ext
 from opendbc.sunnypilot.car.ford.values_ext import FordSafetyFlagsSP
 from opendbc.sunnypilot.car.ford.lateral_curv_ext import LateralCurvExt
 from opendbc.sunnypilot.car.ford.lateral_angle_ext import LateralAngleExt
+from opendbc.sunnypilot.car.ford.pscm_path_offset import _C0_GAIN, _C0_MAX_M, c0_roc_per_frame
 
 
 def _explorer_cp():
@@ -366,6 +367,75 @@ class TestLaneCenteringIntegration(unittest.TestCase):
 
     self._update(lat_active=False)
     self.assertEqual(self.ext.lane_center_trim.correction, 0.0)
+
+
+class TestPscmPathOffset(unittest.TestCase):
+  """c0 path offset (pscm_path_offset.py) as wired into update_angle_strategy."""
+
+  V_EGO = 20.0
+
+  def setUp(self):
+    self.CP = _explorer_cp()
+    self.ext = _Harness(self.CP)
+    self.ext.human_turn_detector = _ForcedDetector(False)
+    self.ext.model = _Model(lane_center_y=0.5)  # lane center 0.5 m to the right, lines trusted
+    self.cs = _CS(vEgoRaw=self.V_EGO, vEgo=self.V_EGO, yawRate=0.0)
+
+  def _update(self, lat_active=True):
+    return self.ext.update_angle_strategy(_CC(latActive=lat_active), self.cs, _Actuators(curvature=0.0), self.CP)
+
+  def _settle(self, frames=200):
+    lat = None
+    for _ in range(frames):
+      lat = self._update()
+    return lat
+
+  def test_tracks_lane_center_with_model_sign(self):
+    lat = self._settle()
+    self.assertAlmostEqual(lat.path_offset, 0.5 * _C0_GAIN, places=3)  # positive = right, like model y
+
+  def test_capped_below_supervisor_release_threshold(self):
+    self.ext.model = _Model(lane_center_y=3.0)
+    self.assertAlmostEqual(self._settle().path_offset, _C0_MAX_M, places=6)
+
+  def test_zero_below_9_ms(self):
+    self.cs.out.vEgoRaw = self.cs.out.vEgo = 8.5
+    self.assertEqual(self._settle().path_offset, 0.0)
+
+  def test_rate_limited_inside_panda_check(self):
+    self.ext.model = _Model(lane_center_y=3.0)
+    last = 0.0
+    for _ in range(100):
+      c0 = self._update().path_offset
+      self.assertLessEqual(abs(c0 - last), c0_roc_per_frame(self.V_EGO) + 1e-9)
+      last = c0
+
+  def test_lane_change_ramps_to_zero_not_steps(self):
+    before = self._settle().path_offset
+    self.ext.model.meta.laneChangeState = 1
+    after = self._update().path_offset
+    self.assertGreater(after, 0.0)
+    self.assertAlmostEqual(before - after, c0_roc_per_frame(self.V_EGO), places=6)
+    self.assertAlmostEqual(self._settle().path_offset, 0.0, places=6)
+
+  def test_user_bias_only_with_lane_positioning(self):
+    self.ext.custom_path_offset_ang = -0.5  # would cancel the 0.5 m lane-center offset
+    self.assertAlmostEqual(self._settle().path_offset, 0.5 * _C0_GAIN, places=3)
+    self.ext.enable_lane_positioning_ang = True
+    self.assertAlmostEqual(self._settle(400).path_offset, 0.0, places=3)
+
+  def test_mode0_paths_zero_c0_and_restart_from_zero(self):
+    self._settle()
+    self.ext.human_turn_detector = _ForcedDetector(True)
+    self.assertEqual(self._update().path_offset, 0.0)
+    self.ext.human_turn_detector = _ForcedDetector(False)
+    self.assertLessEqual(self._update().path_offset, c0_roc_per_frame(self.V_EGO) + 1e-9)
+    self._settle()
+    self.assertEqual(self._update(lat_active=False).path_offset, 0.0)
+
+  def test_ramp_type_immediate_when_active(self):
+    self.assertEqual(self._update().ramp_type, 3)
+    self.assertEqual(self._update(lat_active=False).ramp_type, 0)
 
 
 class TestHandoffBlipDebounce(unittest.TestCase):

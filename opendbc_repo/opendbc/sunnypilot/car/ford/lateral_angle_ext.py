@@ -7,12 +7,17 @@ PSCM short lookahead d_ref and y ≈ ½κ x² ⇒ path_angle = ½ κ d_ref (see
 blended with ``actuators.curvature`` per ``FordPathAngleBlendRatio`` (0 = planner only,
 1 = model only).
 
-**c0 (path_offset) is always zero on the wire, unconditionally.** An earlier port attempt piped
-a small additive trim onto path_angle through the curv-mode ``LC_PID_controller``, but it never
-actually tracked lane center correctly in this mode: path_angle here is a derived quantity
-(``kappa_cmd * v_ego * curvature_factor``), so an additive trim in that domain has the wrong
-(inverted) speed-dependence for a lane-centering nudge, and it bypassed every limiter this file
-applies to ``kappa_cmd``. That attempt was removed; only the DBC-required zero c0 remains.
+**c0 (path_offset)** carries the offset of the target path from the car (``pscm_path_offset.py``),
+per the PSCM Walkthrough (Lightning reference firmware): only c0 feeds the PSCM's internal
+integrator, so it is what rejects steady disturbances the deviation-clipped c1 can't lead past.
+Capped under the PSCM supervisor's release threshold, zero below 9 m/s, rate-limited inside ford.h's
+c0 check. (Not to be confused with an earlier removed attempt that added a lane-centering trim onto
+path_angle itself -- wrong speed-dependence, and it bypassed every kappa_cmd limiter.)
+
+**Wire mode/ramp** follow the Walkthrough's settings: LatCtl_D2_Rq 2 (PathFollowingExtendedMode,
+set in carcontroller.py) and LatCtlRampType_D_Rq 3 (Immediately). Immediate ramp is safe here
+because every mode-0 frame zeroes path_angle_last and c0, so re-engagement always starts from zero
+through the soft ROC.
 
 **Lane centering trim (``lane_center_trim.py``)** replaces it: a small correction applied to
 ``kappa_cmd`` itself (see ``LaneCenterTrim``), before the deviation clip / gain table / PSCM
@@ -41,6 +46,7 @@ from opendbc.car.ford.values import CAR, CarControllerParams
 from opendbc.sunnypilot.car.ford.lateral_curv_ext import LateralResult
 from opendbc.sunnypilot.car.ford.human_turn import HumanTurnDetector
 from opendbc.sunnypilot.car.ford.lane_center_trim import LaneCenterTrim
+from opendbc.sunnypilot.car.ford.pscm_path_offset import PscmPathOffset
 from opendbc.sunnypilot.car.ford.values_ext import BP_ANGLE_LIMITS
 from selfdrive.modeld.constants import ModelConstants
 
@@ -209,6 +215,8 @@ class LateralAngleExt:
     self.enable_lane_positioning_ang = False
     self.custom_path_offset_ang = 0.0
     self.lane_centering_strength_ang = 0.25
+    # BluePilot: c0 path offset for the PSCM's integrator -- see pscm_path_offset.py.
+    self.pscm_path_offset = PscmPathOffset()
     # Telemetry: variable curvature lookup time used this frame (s)
     self.bp_curvature_lookup_time = _VLT_T_EXTRA_MAX + 0.3725  # warm start at ~0.5s
     # BluePilot: error-clipped kappa path_angle was derived from -- carcontroller.py reads this as
@@ -293,8 +301,8 @@ class LateralAngleExt:
   def update_angle_strategy(self, CC, CS, actuators, CP):
     """
     Curvature from planner (+ optional predicted blend, + lane centering trim) → path_angle via
-    ½·κ·d_ref. c0 (path_offset) is always zero on the wire; the lane centering trim lives entirely
-    in the curvature domain (kappa_cmd), not on c0. c2 and c3 are zero.
+    ½·κ·d_ref. c0 (path_offset) is the target path's offset from the car (pscm_path_offset.py);
+    the lane centering trim stays in the curvature domain (kappa_cmd). c2 and c3 are zero.
     Blended κ is not passed through Ford c2 rate / DBC limits (those target the curvature actuator).
     """
     self._ensure_lateral_curv_initialized(CP)
@@ -329,6 +337,7 @@ class LateralAngleExt:
       self.human_turn_detector.reset()
       self.angle_human_turn_active = False
       self.lane_center_trim.reset()
+      self.pscm_path_offset.reset()
       self.stall_blip_hold_s = 0.0
       self._stall_gap_mag_slow = -1.0
       self.stall_blip_frames_left = 0
@@ -374,6 +383,7 @@ class LateralAngleExt:
       # Keep exit detection current so resume doesn't compare against a stale pre-turn value.
       self._desired_curvature_last = float(actuators.curvature)
       self.lane_center_trim.reset()
+      self.pscm_path_offset.reset()
       # A human turn ends any stall episode -- its own mode 0 does the PSCM reset job. That also
       # covers the press so far: only press time accumulated AFTER the latch releases should earn
       # a hand-off pulse.
@@ -450,6 +460,7 @@ class LateralAngleExt:
       self.bp_kappa_cmd = self.get_current_curvature(CS)
       self._desired_curvature_last = float(actuators.curvature)
       self.lane_center_trim.reset()
+      self.pscm_path_offset.reset()
       self.precision_type = 1
       if self.stall_blip_frames_left <= 0:
         self.stall_blip_cooldown_s = _STALL_COOLDOWN_S
@@ -643,8 +654,11 @@ class LateralAngleExt:
     self.bp_angle_rate_limited = bool(abs(path_angle - _path_angle_pre_roc) > 1e-9)
 
 
-    # c0 always zero -- no centering trim in angle mode.
-    path_offset = 0.0
+    # c0: target-path offset at the PSCM's preview distance, toward the same target as the lane
+    # centering trim (user bias only when lane positioning is on) -- see pscm_path_offset.py.
+    path_offset = self.pscm_path_offset.update(
+      self.model, v_ego, d_ref, self.custom_path_offset_ang if self.enable_lane_positioning_ang else 0.0,
+      self.lane_change)
 
     # Telemetry / state
     self.bp_path_angle_gain_lowC_highV = self.path_angle_gain_lowC_highV
@@ -729,7 +743,8 @@ class LateralAngleExt:
       if CS.out.steeringPressed or abs(_stall_gap) < 0.5 * _stall_gap_min:
         self.stall_blip_count = 0  # episode over: the car is tracking again or the driver took it
 
-    ramp_type = 2
+    # Immediately (PSCM Walkthrough setting) -- see the module docstring for why it's jump-free.
+    ramp_type = 3
 
 
     return LateralResult(

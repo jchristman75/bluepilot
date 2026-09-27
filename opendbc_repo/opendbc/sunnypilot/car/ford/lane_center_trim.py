@@ -162,42 +162,46 @@ class LaneCenterTrim:
     return True, float(raw)
 
   def _laneline_blend(self, model, lookahead: float) -> tuple[float, float]:
-    """Returns (scale, laneline_center_y). scale=0 whenever lanelines can't be trusted (missing,
-    low-probability, structurally invalid) -- center_y is unused/meaningless in that case since
-    it's weighted out by scale in the caller's blend."""
-    try:
-      lane_lines = model.laneLines
-      probs = model.laneLineProbs
-      stds = model.laneLineStds # a line could exist but this verifies how sure it is of where it is
-      if len(lane_lines) < 3 or len(probs) < 3 or len(stds) < 3:
-        return 0.0, 0.0
+    return laneline_blend(model, lookahead)
 
-      left_x = np.asarray(lane_lines[1].x, dtype=float)
-      left_y = np.asarray(lane_lines[1].y, dtype=float)
-      right_x = np.asarray(lane_lines[2].x, dtype=float)
-      right_y = np.asarray(lane_lines[2].y, dtype=float)
-      if (left_x.size < 2 or left_x.size != left_y.size or
-          right_x.size < 2 or right_x.size != right_y.size):
-        return 0.0, 0.0
-      if not (np.isfinite(left_x).all() and np.isfinite(left_y).all() and
-              np.isfinite(right_x).all() and np.isfinite(right_y).all()):
-        return 0.0, 0.0
-      if not (np.all(np.diff(left_x) > 0) and np.all(np.diff(right_x) > 0)):
-        return 0.0, 0.0
 
-      left = float(np.interp(lookahead, left_x, left_y))
-      right = float(np.interp(lookahead, right_x, right_y))
-      width = right - left
-
-      # Same confidence formula as lateral_curv_ext.py's path_offset blend: width-tolerance
-      # (penalizes implausibly wide/merging-looking detections) combined with per-line
-      # probability via min() -- a single missing/unreliable line (e.g. no line on the curb
-      # side, only a center stripe) drags confidence toward 0 on its own.
-      width_tolerance = float(np.interp(width, _WIDTH_TOLERANCE_BP, _WIDTH_TOLERANCE_V))
-      std_tolerance = float(np.interp(max(float(stds[1]), float(stds[2])), _STD_TOLERANCE_BP, _STD_TOLERANCE_V)) #StarPilot stopped at 0.3, this fades the std through the table
-      confidence = min(float(probs[1]), float(probs[2]), width_tolerance, std_tolerance) #confidence is the weakest signal
-      scale = float(np.clip(np.interp(confidence, _CONFIDENCE_BP, _CONFIDENCE_V), 0.0, 1.0))
-      center_y = 0.5 * (left + right)
-      return scale, center_y
-    except (AttributeError, IndexError, TypeError, ValueError):
+def laneline_blend(model, lookahead: float) -> tuple[float, float]:
+  """Returns (scale, laneline_center_y). scale=0 whenever lanelines can't be trusted (missing,
+  low-probability, structurally invalid) -- center_y is unused/meaningless in that case since
+  it's weighted out by scale in the caller's blend. Shared with pscm_path_offset.py."""
+  try:
+    lane_lines = model.laneLines
+    probs = model.laneLineProbs
+    stds = model.laneLineStds # a line could exist but this verifies how sure it is of where it is
+    if len(lane_lines) < 3 or len(probs) < 3 or len(stds) < 3:
       return 0.0, 0.0
+
+    left_x = np.asarray(lane_lines[1].x, dtype=float)
+    left_y = np.asarray(lane_lines[1].y, dtype=float)
+    right_x = np.asarray(lane_lines[2].x, dtype=float)
+    right_y = np.asarray(lane_lines[2].y, dtype=float)
+    if (left_x.size < 2 or left_x.size != left_y.size or
+        right_x.size < 2 or right_x.size != right_y.size):
+      return 0.0, 0.0
+    if not (np.isfinite(left_x).all() and np.isfinite(left_y).all() and
+            np.isfinite(right_x).all() and np.isfinite(right_y).all()):
+      return 0.0, 0.0
+    if not (np.all(np.diff(left_x) > 0) and np.all(np.diff(right_x) > 0)):
+      return 0.0, 0.0
+
+    left = float(np.interp(lookahead, left_x, left_y))
+    right = float(np.interp(lookahead, right_x, right_y))
+    width = right - left
+
+    # Same confidence formula as lateral_curv_ext.py's path_offset blend: width-tolerance
+    # (penalizes implausibly wide/merging-looking detections) combined with per-line
+    # probability via min() -- a single missing/unreliable line (e.g. no line on the curb
+    # side, only a center stripe) drags confidence toward 0 on its own.
+    width_tolerance = float(np.interp(width, _WIDTH_TOLERANCE_BP, _WIDTH_TOLERANCE_V))
+    std_tolerance = float(np.interp(max(float(stds[1]), float(stds[2])), _STD_TOLERANCE_BP, _STD_TOLERANCE_V)) #StarPilot stopped at 0.3, this fades the std through the table
+    confidence = min(float(probs[1]), float(probs[2]), width_tolerance, std_tolerance) #confidence is the weakest signal
+    scale = float(np.clip(np.interp(confidence, _CONFIDENCE_BP, _CONFIDENCE_V), 0.0, 1.0))
+    center_y = 0.5 * (left + right)
+    return scale, center_y
+  except (AttributeError, IndexError, TypeError, ValueError):
+    return 0.0, 0.0

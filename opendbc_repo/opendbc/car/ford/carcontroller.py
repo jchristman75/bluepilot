@@ -198,7 +198,10 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
         # resets the PSCM's post-override attenuation when the deviation clip deadlocks hands-free.
         lat_active = CC.latActive and not (_angle_mode and (self.angle_human_turn_active or self.angle_stall_blip_active))
         if self.CP.flags & FordFlags.CANFD:
-          mode = 1 if lat_active else 0
+          # BluePilot: angle mode requests PathFollowingExtendedMode (2), the setting the PSCM
+          # Walkthrough's LMC2 path controller runs; curvature mode keeps PathFollowingLimitedMode (1).
+          # ford.h only checks mode != 0.
+          mode = (2 if _angle_mode else 1) if lat_active else 0
           counter = (self.frame // CarControllerParams.STEER_STEP) % 0x10
           can_sends.append(fordcan_ext.create_lat_ctl2_msg(
             self.packer, self.CAN, mode, lat.ramp_type, lat.precision_type,
