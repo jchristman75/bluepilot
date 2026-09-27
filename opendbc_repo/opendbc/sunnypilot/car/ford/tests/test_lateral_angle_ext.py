@@ -489,6 +489,26 @@ class TestReactiveStallRealCurveGate(unittest.TestCase):
     self.assertEqual(self.ext.angle_stall_blip_source, 2)
     self.assertTrue(self.ext.angle_stall_blip_active)
 
+  def test_post_release_drift_against_plan_fires(self):
+    # Route 00000442 t=153 shape: straight road after a left turn, car curving right at
+    # +0.002 (below the real-curve floor) while the plan wants -0.006. The clip pins the command
+    # at ~0, the gap never closes -> the pulse fires.
+    self.cs.out.yawRate = -0.02
+    for _ in range(12):
+      self._update(-0.006)
+    self.assertEqual(self.ext.stall_blip_count, 1)
+    self.assertEqual(self.ext.angle_stall_blip_source, 2)
+    self.assertTrue(self.ext.angle_stall_blip_active)
+
+  def test_drift_against_plan_below_reversed_floor_does_not_fire(self):
+    # measured +0.0005 is yaw-rate noise territory, not a car curving against the plan.
+    self.cs.out.yawRate = -0.005
+    for _ in range(20):
+      self._update(-0.006)
+    self.assertTrue(self.ext.bp_curvature_deviation_limited)
+    self.assertEqual(self.ext.stall_blip_frames_left, 0)
+    self.assertEqual(self.ext.stall_blip_hold_s, 0.0)
+
 
 if __name__ == '__main__':
   unittest.main()

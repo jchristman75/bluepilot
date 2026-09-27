@@ -123,6 +123,17 @@ _STALL_MAX_BLIPS = 3         # give up on a stuck episode; devLim telemetry keep
 # real S-curve reversal closes at.
 _STALL_GAP_TAU = 0.3         # s, smoothing for the |gap| reference
 _STALL_GAP_CLOSING = 0.95
+# Post-release drift: the real-curve floor (|measured| > 2x tolerance) keeps curve entry from
+# straight out of the detector, but entry has the car turning WITH the plan or not yet at all. A
+# car measurably curving AGAINST the plan is the deadlock instead: for ~5 s after the driver lets
+# go (worst after a manual turn) the PSCM tracks with a ~2e-3 1/m bias, the deviation clip pins
+# the command at measured - tolerance (~0 on a straight road), and the car drifts toward the
+# shoulder while the plan's correction grows (routes 00000442 t=153, 00000447 t=51, 00000438
+# t=420 -- each ended by a driver grab 1-3 s in). Admit that case down to this fraction of the
+# tolerance; the reversal case's not-closing test below still applies. Offline replay over
+# 456 hands-free min (b09ba355 + 740c61c6 routes): 7 fires, all genuine stalls, 0 elsewhere;
+# at 1.0x the tolerance it caught only 1 of the 7.
+_STALL_REVERSED_FLOOR_RATIO = 0.5
 # Proactive hand-off blip: any sustained driver press attenuates the PSCM (route 000000be seg 4:
 # 3 s of sub-45-deg circle-exit steering left it at ~0x delivery, and the reactive detector's
 # fire-after-the-stall-develops timing meant 2.4 s of dead-straight running into the next curve
@@ -684,7 +695,11 @@ class LateralAngleExt:
                 # ~250 m) the stall signature is smaller than the entry transient, so a
                 # post-override stall on gentler curves is only covered by the proactive hand-off
                 # blip above, never detected here. Do not "fix" this back into firing at entry.
-                and abs(current_curvature) > _stall_gap_min
+                # The one exception is a car curving AGAINST the plan, which entry never does --
+                # see _STALL_REVERSED_FLOOR_RATIO.
+                and (abs(current_curvature) > _stall_gap_min
+                     or (desired_curvature * current_curvature < 0.0
+                         and abs(current_curvature) > _STALL_REVERSED_FLOOR_RATIO * self.bp_curvature_error))
                 # "desired leads measured", stated by sign rather than magnitude. The magnitude
                 # form missed the reversal case outright -- mid S-curve with the PSCM stuck on a
                 # stale positive curvature while the planner already wants negative, |desired|
