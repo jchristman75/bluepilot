@@ -228,7 +228,7 @@ class TestBluePilotLateralSchemeSplit:
       "If oversteering, reduce. If understeering, increase",
     ))
     assert item["description"] == expected_description
-    assert (item["min"], item["max"], item["step"]) == (0.75, 1.25, 0.01)
+    assert (item["min"], item["max"], item["step"]) == (0.25, 1.25, 0.01)
     assert self._mode_gate(item) == 1
 
 

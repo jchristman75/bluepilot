@@ -168,7 +168,7 @@ class LaneCenterTrim:
 def laneline_blend(model, lookahead: float) -> tuple[float, float]:
   """Returns (scale, laneline_center_y). scale=0 whenever lanelines can't be trusted (missing,
   low-probability, structurally invalid) -- center_y is unused/meaningless in that case since
-  it's weighted out by scale in the caller's blend. Shared with pscm_path_offset.py."""
+  it's weighted out by scale in the caller's blend."""
   try:
     lane_lines = model.laneLines
     probs = model.laneLineProbs

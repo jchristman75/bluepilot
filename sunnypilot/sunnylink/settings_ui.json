@@ -2599,6 +2599,19 @@
           ]
         },
         {
+          "key": "FordAngleLeadLag_ang",
+          "widget": "toggle",
+          "title": "[Lateral Tuning] Lead-Lag Command Shaping (Angle)",
+          "description": "Shapes the angle-mode steering command to the PSCM's measured response so curve entries don't overshoot and the car doesn't weave. Steady-state steering is unchanged. Turn off to compare against the old static gain.",
+          "visibility": [
+            {
+              "type": "param",
+              "key": "FordPrefLateralControl",
+              "equals": 1
+            }
+          ]
+        },
+        {
           "key": "enable_lane_positioning_ang",
           "widget": "toggle",
           "title": "[Lateral Tuning] Enable Lane Positioning (Angle)",

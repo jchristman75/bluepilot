@@ -25,3 +25,12 @@ sign convention (wire values are negated back to the controller's internal sign)
 So the Lightning firmware constants should not be imported for the Mach-E; its servo is fast in
 the range BluePilot drives it hands-free. What does limit it there is the post-release bias
 (see `lateral_angle_ext.py` `_STALL_REVERSED_FLOOR_RATIO`), not servo dynamics.
+
+## Command shaping (2026-09-28, routes 41x-45x + 1a7-1af)
+
+A regularized FIR fit of wire path_angle -> yaw rate (hands-free, deviation clip not binding,
+R² 0.85-0.97) shows the PSCM's delivery droops: a step reaches ~0.91 in 0.5 s and settles at ~0.75
+by ~1.5 s (20-60 mph); 0.98 -> 0.87 above 60 mph. Identical in LatCtl_D2_Rq 1 and 2. A static
+~1.33x gain therefore over-drives transients, which is why `lateral_angle_ext.py` now lead-lag shapes
+the wire (`FordAngleLeadLag_ang`). Note `extract.py` must latch the PSCM's 972 on bus 0: at route
+start a short-lived bus-2 copy can arrive first and freeze LatCtlSte_D_Stat at "Available".

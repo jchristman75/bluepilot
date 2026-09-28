@@ -90,8 +90,11 @@ def extract_segment(args):
         for f in m.can:
           if f.src >= 128:
             continue
+          # Latch the PSCM bus on the first 972, but let bus 0 (the main bus) take over: at route start
+          # a short-lived copy on bus 2 can arrive first and then go stale, freezing LatCtlSte_D_Stat.
           if f.address == 972:
-            pscm_bus = f.src if pscm_bus is None else pscm_bus
+            if pscm_bus is None or (f.src == 0 and pscm_bus != 0):
+              pscm_bus = f.src
             if f.src == pscm_bus:
               lad = _decode(f.dat, _LAD3)
           elif f.address == 130 and (pscm_bus is None or f.src == pscm_bus):

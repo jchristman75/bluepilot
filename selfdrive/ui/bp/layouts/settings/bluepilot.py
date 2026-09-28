@@ -98,6 +98,7 @@ class BluePilotLayout(Widget):
       ("enable_lane_full_mode_curv", self._enable_lane_full_mode),
       ("custom_profile_curv", self._custom_profile),
       ("enable_lane_positioning_ang", self._enable_lane_positioning_ang),
+      ("FordAngleLeadLag_ang", self._angle_lead_lag),
       ("disable_BP_lat_UI", self._disable_BP_lat),
       ("disable_BP_long_UI", self._disable_BP_long),
       ("disable_downhill_comp_UI", self._disable_dowhill_comp),
@@ -559,6 +560,15 @@ class BluePilotLayout(Widget):
       icon="chffr_wheel.png"
     )
 
+    # Lead-lag command shaping (lateral_angle_ext.py) -- A/B toggle, default on.
+    self._angle_lead_lag = toggle_item(
+      lambda: tr("Lead-Lag Command Shaping"),
+      lambda: tr("Match the steering command to the PSCM's measured response: less curve-entry overshoot and weave. Off = old static gain."),
+      initial_state=self._safe_get_bool(self._params, "FordAngleLeadLag_ang"),
+      callback=lambda state: self._toggle_callback(state, "FordAngleLeadLag_ang"),
+      icon="chffr_wheel.png"
+    )
+
     # Lane centering trim — angle mode's "advanced lane positioning" (curvature-domain trim,
     # see lane_center_trim.py). Mirrors the curv-mode items below, one-to-one, but scoped to
     # its own _ang params.
@@ -674,6 +684,7 @@ class BluePilotLayout(Widget):
       self._high_speed_curv_factor,
       self._high_speed_dampening,
       self._lane_change_factor_high_ang,
+      self._angle_lead_lag,
       self._enable_lane_positioning_ang,
       self._custom_path_offset_ang,
       self._lane_centering_strength_ang,
@@ -927,6 +938,7 @@ class BluePilotLayout(Widget):
     self._high_speed_curv_factor.action_item.set_enabled(is_angle)
     self._high_speed_dampening.action_item.set_enabled(is_angle)
     self._lane_change_factor_high_ang.action_item.set_enabled(is_angle)
+    self._angle_lead_lag.action_item.set_enabled(is_angle)
     self._enable_lane_positioning_ang.action_item.set_enabled(is_angle)
     self._custom_path_offset_ang.action_item.set_enabled(is_angle and lane_pos_ang)
     self._lane_centering_strength_ang.action_item.set_enabled(is_angle and lane_pos_ang)

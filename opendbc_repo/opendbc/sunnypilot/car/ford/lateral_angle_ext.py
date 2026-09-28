@@ -1,32 +1,39 @@
 """
 BluePilot: Ford CAN-FD path-angle–primary lateral control (developer).
 
-Steering intent is c1 from κ → θ. Converts planner/model curvature into ``path_angle`` using
-PSCM short lookahead d_ref and y ≈ ½κ x² ⇒ path_angle = ½ κ d_ref (see
-``bluepilot/agent_info/20_FORD_PSCM_KNOWLEDGE_PACK.md``). Predicted curvature (modelV2) is
-blended with ``actuators.curvature`` per ``FordPathAngleBlendRatio`` (0 = planner only,
-1 = model only).
+Steering intent is carried on c1 (``LatCtlPath_An_Actl``): planner curvature (optionally blended
+with the model's predicted curvature per ``FordPathAngleBlendRatio``) becomes
+``path_angle = κ·v·K``, where K is the speed/curvature gain table below (``curvature_factor``).
+The Mach-E PSCM treats that path angle roughly as a yaw-rate request: its steady-state delivery
+is ~0.75 of the wire value, which is what K ≈ 1.33 corrects. c0, c2 and c3 are sent as zero.
 
-**c0 (path_offset)** carries the offset of the target path from the car (``pscm_path_offset.py``),
-per the PSCM Walkthrough (Lightning reference firmware): only c0 feeds the PSCM's internal
-integrator, so it is what rejects steady disturbances the deviation-clipped c1 can't lead past.
-Capped under the PSCM supervisor's release threshold, zero below 9 m/s, rate-limited inside ford.h's
-c0 check. (Not to be confused with an earlier removed attempt that added a lane-centering trim onto
-path_angle itself -- wrong speed-dependence, and it bypassed every kappa_cmd limiter.)
+**Command shaping (lead-lag).** The PSCM's delivery is not flat in time: a step on the wire
+reaches ~0.91 of itself within 0.5 s, then droops to ~0.75 over the next ~1.5 s (FIR fit over
+~20 h of hands-free Mach-E driving, R² 0.85-0.97, identical in LatCtl_D2_Rq 1 and 2). A static K
+therefore over-drives every transient: 0.3-0.7 Hz planner content arrived 1.2-1.27x amplified
+(the "jello" weave) and curve entries overshot toward the inside edge. The wire now carries
+``v·(r·Kκ + (1-r)·lowpass(Kκ, τ))`` -- K is reached in steady state (so the user factors keep
+their meaning) but the immediate response is r·K. Open-loop replay: tracking error 2.7x lower at
+20-60 mph. Toggle: ``FordAngleLeadLag_ang`` (off = the previous static gain, bit-for-bit).
 
-**Wire mode/ramp** follow the Walkthrough's settings: LatCtl_D2_Rq 2 (PathFollowingExtendedMode,
-set in carcontroller.py) and LatCtlRampType_D_Rq 3 (Immediately). Immediate ramp is safe here
-because every mode-0 frame zeroes path_angle_last and c0, so re-engagement always starts from zero
-through the soft ROC.
+**Deviation clip.** κ is clipped to measured ± bp_curvature_error before the gain (mirrors curvature
+mode and ford.h's shadow-curvature check). Because the gain is applied after the clip, a binding
+clip feeds the car's own yaw back into the command; with the static gain that loop gain was
+~1.33 x 0.91 ≈ 1.2, and on an unwind 1.33·(meas - tol) stays above meas for any κ > 0.008 -- the car
+could not straighten while the planner asked it to (47-62% of clip-bound unwind time on the
+recorded routes). Lead-lag drops the loop gain below 1, and an explicit unwind clamp keeps a
+clip-bound unwind from commanding more than the measured curvature.
 
-**Lane centering trim (``lane_center_trim.py``)** replaces it: a small correction applied to
-``kappa_cmd`` itself (see ``LaneCenterTrim``), before the deviation clip / gain table / PSCM
-clamp / soft ROC below -- so it inherits every one of those limiters automatically instead of
-bypassing them. Blends toward lane-line center by confidence (same formula as
-``lateral_curv_ext``'s ``path_offset``) and falls back to the model's own predicted path -- not
-to zero -- when lines are missing/unreliable, so the user's left/right offset still applies on
-center-stripe-only roads. Disabled during lane changes, user-tunable (enable, offset, authority)
-via ``enable_lane_positioning_ang`` / ``custom_path_offset_ang`` / ``lane_centering_strength_ang``.
+**Lane centering trim (``lane_center_trim.py``):** a small correction applied to ``kappa_cmd``
+itself, before the deviation clip / gain / PSCM clamp / soft ROC below, so it inherits every one of
+those limiters. Blends toward lane-line center by confidence and falls back to the model's own
+predicted path when lines are missing/unreliable. Disabled during lane changes, user-tunable
+(enable, offset, authority) via ``enable_lane_positioning_ang`` / ``custom_path_offset_ang`` /
+``lane_centering_strength_ang``.
+
+**Wire mode/ramp:** LatCtl_D2_Rq 2 (PathFollowingExtendedMode, set in carcontroller.py) and
+LatCtlRampType_D_Rq 3 (Immediately). Immediate ramp is safe here because every mode-0 frame zeroes
+path_angle_last, so re-engagement always starts from zero through the soft ROC.
 
 **Human-turn override**: while the driver manually turns (same sustained-press + angle criteria
 as ``lateral_curv_ext``, via the shared ``HumanTurnDetector``), lateral is forced inactive (mode
@@ -46,7 +53,6 @@ from opendbc.car.ford.values import CAR, CarControllerParams
 from opendbc.sunnypilot.car.ford.lateral_curv_ext import LateralResult
 from opendbc.sunnypilot.car.ford.human_turn import HumanTurnDetector
 from opendbc.sunnypilot.car.ford.lane_center_trim import LaneCenterTrim
-from opendbc.sunnypilot.car.ford.pscm_path_offset import PscmPathOffset
 from opendbc.sunnypilot.car.ford.values_ext import BP_ANGLE_LIMITS
 from selfdrive.modeld.constants import ModelConstants
 
@@ -74,10 +80,6 @@ _CANFD_SUV_CARS = frozenset({
 FORD_DBC_PATH_ANGLE_MIN = -0.5
 FORD_DBC_PATH_ANGLE_MAX = 0.5235
 
-
-# PSCM d_ref (m) vs speed (m/s) — 6 points; above ~55.6 m/s use plateau + optional cap to 5 m.
-_PSCM_DREF_SPEEDS_MS = (0.0, 4.17, 27.78, 41.67, 50.0, 55.56)
-_PSCM_DREF_M = (0.5, 0.95, 1.4, 2.075, 2.75, 3.875)
 
 # Default blend ratio validated on F-150 fleet data (0.5s lookup time).
 _FORD_PATH_ANGLE_BLEND_RATIO_DEFAULT = 0.50
@@ -167,6 +169,15 @@ _PRESS_BLIP_PENDING_S = 3.0
 # curve and the ramp adds ~0.6 s of unassisted steering (~15 m). Cap the ramp-recovery
 # distance so a hand-off pulse never fires where the recovery would understeer the curve.
 _BLIP_MAX_RAMP_M = 10.0
+# Lead-lag command shaping (see module docstring): the wire carries r*K*kappa immediately and the
+# remaining (1-r)*K*kappa through a first-order lag of tau. Fitted per speed band on routes
+# 41x-45x + 1a7-1af (hands-free, clip not binding): r=0.70/tau=0.7 s is the optimum from 20 to
+# 56 mph (the step response peaks at 0.91 and droops to 0.75); above 60 mph the droop is smaller
+# (0.98 -> 0.87) and the optimum moves to r=0.85/tau=1.0 s.
+_LEADLAG_V_BP = (25.0, 27.0)          # m/s
+_LEADLAG_FAST_RATIO = (0.70, 0.85)    # r: immediate share of the steady-state gain
+_LEADLAG_TAU_S = (0.7, 1.0)           # s: lag on the remaining share
+
 # path_angle soft-ROC breakpoints (rad per 20 Hz call) -- shared by the limiter below and the
 # hand-off blip's ramp-recovery distance guard above.
 _SOFT_ROC_V_NODES = [9., 10., 15., 25.]
@@ -175,16 +186,6 @@ _SOFT_ROC_RAD_PER_CALL = [0.055, 0.055, 0.0425, 0.009]
 
 def _soft_roc_rad_per_s(v_ego_ms: float) -> float:
   return float(interp(v_ego_ms, _SOFT_ROC_V_NODES, _SOFT_ROC_RAD_PER_CALL)) / _STEER_DT
-
-
-
-def pscm_d_ref_m(v_ego_ms: float) -> float:
-  v = max(float(v_ego_ms), 0.0)
-  d = float(np.interp(v, _PSCM_DREF_SPEEDS_MS, _PSCM_DREF_M))
-  if v > _PSCM_DREF_SPEEDS_MS[-1]:
-    # Doc: d_ref table ends at 3.875 m; contribution saturates for high speed — cap at 5 m.
-    d = min(5.0, d)
-  return d
 
 
 class LateralAngleExt:
@@ -215,8 +216,12 @@ class LateralAngleExt:
     self.enable_lane_positioning_ang = False
     self.custom_path_offset_ang = 0.0
     self.lane_centering_strength_ang = 0.25
-    # BluePilot: c0 path offset for the PSCM's integrator -- see pscm_path_offset.py.
-    self.pscm_path_offset = PscmPathOffset()
+    # BluePilot: lead-lag command shaping (see module docstring). _wire_slow is the lagged share of
+    # K*kappa, in curvature units; None = unseeded (seeded on the first active frame so
+    # re-engagement ramps exactly as before, through the soft ROC).
+    self.angle_lead_lag_enabled = True
+    self._wire_slow = None
+    self.bp_unwind_clamped = False  # clip-bound unwind clamp actually bit this frame
     # Telemetry: variable curvature lookup time used this frame (s)
     self.bp_curvature_lookup_time = _VLT_T_EXTRA_MAX + 0.3725  # warm start at ~0.5s
     # BluePilot: error-clipped kappa path_angle was derived from -- carcontroller.py reads this as
@@ -281,6 +286,13 @@ class LateralAngleExt:
             float(raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw), 0.85, 1.50))
       except Exception:
         pass
+      # BluePilot: lead-lag command shaping A/B toggle (default on).
+      try:
+        raw = params.get("FordAngleLeadLag_ang", return_default=True)
+        if raw is not None and raw != b"":
+          self.angle_lead_lag_enabled = (raw.decode() if isinstance(raw, bytes) else str(raw)).strip() not in ("0", "False", "false")
+      except Exception:
+        pass
       # BluePilot: angle-mode lane centering trim (advanced lane positioning) params.
       try:
         self.enable_lane_positioning_ang = bool(params.get_bool("enable_lane_positioning_ang"))
@@ -298,17 +310,45 @@ class LateralAngleExt:
         except Exception:
           pass
 
+  def _shape_wire_kappa(self, target: float, kappa_cmd: float, kappa_pre_clip: float,
+                        current_curvature: float, v_ego: float) -> float:
+    """Lead-lag shaping of the steady-state wire command ``target`` (= K*kappa_cmd, curvature
+    units) plus the clip-bound unwind clamp -- see the module docstring. Returns path_angle / v."""
+    r = float(interp(v_ego, _LEADLAG_V_BP, _LEADLAG_FAST_RATIO))
+    tau = float(interp(v_ego, _LEADLAG_V_BP, _LEADLAG_TAU_S))
+    if self._wire_slow is None:
+      # First active frame after mode 0: seed at the target so (re-)engagement behaves exactly as
+      # the static gain did -- the soft ROC ramp from zero is the transient there.
+      self._wire_slow = target
+    else:
+      self._wire_slow += (_STEER_DT / (tau + _STEER_DT)) * (target - self._wire_slow)
+
+    # Clip-bound unwind: the planner wants less turn than the car has, and the deviation clip is
+    # what's holding kappa_cmd at measured - tolerance. Don't let the lagged share keep the turn in,
+    # and never command more than the car is already delivering -- that's the lock that kept the
+    # car turning while the plan unwound (see module docstring).
+    s = 1.0 if current_curvature >= 0.0 else -1.0
+    if (self.bp_curvature_deviation_limited and abs(current_curvature) > self.bp_curvature_error
+        and (kappa_pre_clip - current_curvature) * s < 0.0):
+      if self._wire_slow * s > target * s:
+        self._wire_slow = target
+      shaped = r * target + (1.0 - r) * self._wire_slow
+      if shaped * s > abs(current_curvature):
+        shaped = current_curvature
+        self.bp_unwind_clamped = True
+      return shaped
+    return r * target + (1.0 - r) * self._wire_slow
+
   def update_angle_strategy(self, CC, CS, actuators, CP):
     """
     Curvature from planner (+ optional predicted blend, + lane centering trim) → path_angle via
-    ½·κ·d_ref. c0 (path_offset) is the target path's offset from the car (pscm_path_offset.py);
-    the lane centering trim stays in the curvature domain (kappa_cmd). c2 and c3 are zero.
+    κ·v·K, lead-lag shaped (see module docstring). The lane centering trim stays in the curvature
+    domain (kappa_cmd). c0, c2 and c3 are zero.
     Blended κ is not passed through Ford c2 rate / DBC limits (those target the curvature actuator).
     """
     self._ensure_lateral_curv_initialized(CP)
 
     v_ego = float(CS.out.vEgoRaw)
-    d_ref = pscm_d_ref_m(v_ego)
 
     curvature_rate = 0.0
     path_offset = 0.0
@@ -337,7 +377,7 @@ class LateralAngleExt:
       self.human_turn_detector.reset()
       self.angle_human_turn_active = False
       self.lane_center_trim.reset()
-      self.pscm_path_offset.reset()
+      self._wire_slow = None
       self.stall_blip_hold_s = 0.0
       self._stall_gap_mag_slow = -1.0
       self.stall_blip_frames_left = 0
@@ -383,7 +423,7 @@ class LateralAngleExt:
       # Keep exit detection current so resume doesn't compare against a stale pre-turn value.
       self._desired_curvature_last = float(actuators.curvature)
       self.lane_center_trim.reset()
-      self.pscm_path_offset.reset()
+      self._wire_slow = None
       # A human turn ends any stall episode -- its own mode 0 does the PSCM reset job. That also
       # covers the press so far: only press time accumulated AFTER the latch releases should earn
       # a hand-off pulse.
@@ -460,7 +500,7 @@ class LateralAngleExt:
       self.bp_kappa_cmd = self.get_current_curvature(CS)
       self._desired_curvature_last = float(actuators.curvature)
       self.lane_center_trim.reset()
-      self.pscm_path_offset.reset()
+      self._wire_slow = None
       self.precision_type = 1
       if self.stall_blip_frames_left <= 0:
         self.stall_blip_cooldown_s = _STALL_COOLDOWN_S
@@ -478,7 +518,6 @@ class LateralAngleExt:
 
     self.precision_type = 1
     precision = 1
-    LP = self.lp
     desired_curvature = float(actuators.curvature)
 
     # Variable lookup time: t_base tracks planner pre-compensation; extra tapers on high speed and large curves.
@@ -519,8 +558,9 @@ class LateralAngleExt:
     # prediction that still sees the curve (→ seg-14 slow unwind) or that snaps when its
     # lookahead window crosses the curve exit (→ seg-17 snap + reverse PSCM hit).
     # Normal gentle curves are unaffected: no PSCM limit, no falling desired → full b=0.60.
-    _pscm_lim = getattr(CS, 'lat_ctl_lim_stat', 0)
-    # In angle mode, LatCtlLim_D_Stat (→ lat_ctl_lim_stat) does not fire.
+    # BluePilot: LatCtlLim_D_Stat is not wired into CarState (it does fire in angle mode, rarely, but
+    # blocking path_angle growth on it would hold the command in post-release stalls), so only the
+    # DBC-limit proximity below gates the saturation handling.
     # Previously used angleState.saturated (CtrSat) as a proxy, but CtrSat fires whenever the car
     # lags the commanded path_angle by > 2.5° — which happens during any normal curve entry.
     # That caused a positive-feedback flat-line: under-steer → CtrSat → path_angle frozen → more under-steer.
@@ -528,7 +568,7 @@ class LateralAngleExt:
     # which is the only condition where the anti-snap unwind rate cap makes physical sense.
     _dbc_sat = (self.path_angle_last >= FORD_DBC_PATH_ANGLE_MAX * 0.90 or
                 self.path_angle_last <= FORD_DBC_PATH_ANGLE_MIN * 0.90)
-    _in_hard_sat = _pscm_lim >= 2 or _dbc_sat
+    _in_hard_sat = _dbc_sat
     # BluePilot: per-call delta threshold. The original 0.002 was authored 2026-05-07 on
     # bp-sid-simple (9c3d000fd), which ran STEER_STEP=1 (true 100Hz, switched 2026-04-22) -- so it
     # was tuned to trigger on planner unwind faster than 0.2 (1/m)/s. Scaled x5 here to restore
@@ -536,7 +576,7 @@ class LateralAngleExt:
     # 0.04 (1/m)/s, collapsing the model blend on mild straightening instead of genuine exits.
     # Same bug class and fix as _PSCM_SAT_UNWIND_RATE and _soft_roc above.
     _desired_falling = abs(desired_curvature) < abs(self._desired_curvature_last) - 0.010
-    _on_exit_near_limit = not _kappa_entering and (_pscm_lim >= 1 or _in_hard_sat or _desired_falling)
+    _on_exit_near_limit = not _kappa_entering and (_in_hard_sat or _desired_falling)
     b_blend = float(clip(b * 0.25, 0.0, 1.0)) if _on_exit_near_limit else b
     requested_curvature = predicted_curvature * b_blend + desired_curvature * (1.0 - b_blend)
     self._desired_curvature_last = desired_curvature
@@ -590,8 +630,8 @@ class LateralAngleExt:
     # here; this brings angle mode's actual steering intent in line with that proven behavior rather
     # than only clipping the value reported to panda (which would make the check a no-op).
     self.bp_curvature_deviation_limited = False
+    _kappa_cmd_pre_error_clip = kappa_cmd
     if v_ego > 9:
-      _kappa_cmd_pre_error_clip = kappa_cmd
       kappa_cmd = float(clip(kappa_cmd, current_curvature - self.bp_curvature_error,
                             current_curvature + self.bp_curvature_error))
       # BluePilot: did this clip actually constrain kappa_cmd this frame (deviation from measured,
@@ -599,8 +639,6 @@ class LateralAngleExt:
       self.bp_curvature_deviation_limited = bool(abs(kappa_cmd - _kappa_cmd_pre_error_clip) > 1e-9)
 
     lateral_uncertainty = 0.0  # no curvature-limit ladder until angle-mode torque display is defined
-
-
 
     # Speed-interpolated gain: at low speed both curves use 1.0; at high speed the params take effect.
     self.low_gain_calc = interp(
@@ -611,14 +649,14 @@ class LateralAngleExt:
     # As the curve gets bigger, we will need a little boost to the signal to to not understeer
     self.curvature_factor = interp(abs(kappa_cmd), [0.0007, 0.001], [self.low_gain_calc, self.high_gain_calc])
 
-    path_angle_calc = kappa_cmd * v_ego * self.curvature_factor
-    path_angle = path_angle_calc
+    # Steady-state wire command in curvature units (path_angle / v).
+    wire_kappa = kappa_cmd * self.curvature_factor
+    self.bp_unwind_clamped = False
+    if self.angle_lead_lag_enabled:
+      wire_kappa = self._shape_wire_kappa(wire_kappa, kappa_cmd, _kappa_cmd_pre_error_clip, current_curvature, v_ego)
+    path_angle = wire_kappa * v_ego
 
-
-    # PSCM authority limit clamp.
-    # On CANFD Fords in angle mode, LatCtlLim_D_Stat does not fire, so _pscm_lim stays 0.
-    # _in_hard_sat (computed above) combines _pscm_lim >= 2 with _dbc_sat (path_angle near ±0.5 rad limit).
-    # LimitClose (_pscm_lim >= 1 only): block magnitude increases — exit-biased blend provides unwind.
+    # PSCM authority limit clamp (_in_hard_sat: path_angle near the ±0.5 rad DBC limit).
     # Hard saturation (_in_hard_sat): block increases AND rate-limit decreases to _PSCM_SAT_UNWIND_RATE.
     #   Without the decrease cap, model+planner drop path_angle at ~0.36 rad/s at a sharp apex,
     #   driving desired steering 30°+ ahead of actual while the PSCM is pinned, causing a snap when released.
@@ -631,8 +669,6 @@ class LateralAngleExt:
       elif _last_mag - _curr_mag > _PSCM_SAT_UNWIND_RATE:  # decreasing too fast — rate-limit
         _limited_mag = _last_mag - _PSCM_SAT_UNWIND_RATE
         path_angle = float(_limited_mag if _last >= 0 else -_limited_mag)
-    elif _pscm_lim >= 1:  # LimitClose (F150/non-angle-mode only): block increases only
-      path_angle = float(clip(path_angle, -abs(self.path_angle_last), abs(self.path_angle_last)))
 
     path_angle = min(FORD_DBC_PATH_ANGLE_MAX, max(FORD_DBC_PATH_ANGLE_MIN, path_angle))
 
@@ -653,12 +689,9 @@ class LateralAngleExt:
     # BluePilot: did the soft ROC clip actually limit the path_angle we wanted to send this frame?
     self.bp_angle_rate_limited = bool(abs(path_angle - _path_angle_pre_roc) > 1e-9)
 
-
-    # c0: target-path offset at the PSCM's preview distance, toward the same target as the lane
-    # centering trim (user bias only when lane positioning is on) -- see pscm_path_offset.py.
-    path_offset = self.pscm_path_offset.update(
-      self.model, v_ego, d_ref, self.custom_path_offset_ang if self.enable_lane_positioning_ang else 0.0,
-      self.lane_change)
+    # c0 stays zero: a lane-offset c0 (PSCM Walkthrough) was road-tested on routes 1a7-1af and
+    # had no measurable effect (|c0| p90 0.09 m, none at post-turn releases).
+    path_offset = 0.0
 
     # Telemetry / state
     self.bp_path_angle_gain_lowC_highV = self.path_angle_gain_lowC_highV
@@ -745,7 +778,6 @@ class LateralAngleExt:
 
     # Immediately (PSCM Walkthrough setting) -- see the module docstring for why it's jump-free.
     ramp_type = 3
-
 
     return LateralResult(
       apply_curvature=0.0,

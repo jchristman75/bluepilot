@@ -27,7 +27,6 @@ from opendbc.sunnypilot.car.ford import lateral_curv_ext
 from opendbc.sunnypilot.car.ford.values_ext import FordSafetyFlagsSP
 from opendbc.sunnypilot.car.ford.lateral_curv_ext import LateralCurvExt
 from opendbc.sunnypilot.car.ford.lateral_angle_ext import LateralAngleExt
-from opendbc.sunnypilot.car.ford.pscm_path_offset import _C0_GAIN, _C0_MAX_M, c0_roc_per_frame
 
 
 def _explorer_cp():
@@ -267,7 +266,7 @@ class TestAngleParams(unittest.TestCase):
     )
 
   def test_high_speed_dampening_is_clamped(self):
-    for raw_value, expected in ((b"0.50", 0.75), (b"1.50", 1.25)):
+    for raw_value, expected in ((b"0.10", 0.25), (b"1.50", 1.25)):
       with self.subTest(raw_value=raw_value):
         self.ext.update_angle_params(_FakeParams({"FordHighSpeedDampening_ang": raw_value}))
         self.assertAlmostEqual(self.ext.user_dampening_factor, expected)
@@ -369,69 +368,93 @@ class TestLaneCenteringIntegration(unittest.TestCase):
     self.assertEqual(self.ext.lane_center_trim.correction, 0.0)
 
 
-class TestPscmPathOffset(unittest.TestCase):
-  """c0 path offset (pscm_path_offset.py) as wired into update_angle_strategy."""
-
-  V_EGO = 20.0
+class TestLeadLagShaping(unittest.TestCase):
+  """Lead-lag command shaping + clip-bound unwind clamp (lateral_angle_ext module docstring)."""
 
   def setUp(self):
     self.CP = _explorer_cp()
     self.ext = _Harness(self.CP)
     self.ext.human_turn_detector = _ForcedDetector(False)
-    self.ext.model = _Model(lane_center_y=0.5)  # lane center 0.5 m to the right, lines trusted
-    self.cs = _CS(vEgoRaw=self.V_EGO, vEgo=self.V_EGO, yawRate=0.0)
+    self.ext.model = _Model()
+    self.cs = _CS()
+
+  def _update(self, plan, measured, v=20.0, lat_active=True):
+    """One 20 Hz tick with the model agreeing with the planner (so the predicted-curvature blend is
+    a no-op) and the car at `measured` curvature."""
+    self.cs.out.vEgoRaw = self.cs.out.vEgo = v
+    self.cs.out.yawRate = -measured * v
+    self.ext.model.orientationRate = _OrientationRate([plan * v] * 33)
+    return self.ext.update_angle_strategy(_CC(latActive=lat_active), self.cs, _Actuators(curvature=plan), self.CP)
+
+  def test_step_is_immediate_share_then_settles_to_static_gain(self):
+    for _ in range(5):
+      self._update(0.0, 0.0)
+    k = 0.001  # small enough that the soft ROC never binds
+    lat = self._update(k, k)
+    K = self.ext.curvature_factor
+    self.assertAlmostEqual(lat.path_angle, 0.70 * K * k * 20.0 + 0.30 * K * k * 20.0 * (0.05 / 0.75), places=6)
+    for _ in range(200):  # 10 s >> tau
+      lat = self._update(k, k)
+    self.assertAlmostEqual(lat.path_angle, K * k * 20.0, places=5)
+
+  def test_disabled_is_the_static_gain(self):
+    self.ext.angle_lead_lag_enabled = False
+    for _ in range(5):
+      self._update(0.0, 0.0)
+    k = 0.001
+    lat = self._update(k, k)
+    self.assertAlmostEqual(lat.path_angle, self.ext.curvature_factor * k * 20.0, places=9)
+
+  def test_reengage_is_seeded_like_the_static_gain(self):
+    k = 0.001
+    for _ in range(100):
+      self._update(k, k)
+    self._update(k, k, lat_active=False)
+    lat = self._update(k, k)
+    self.assertAlmostEqual(lat.path_angle, self.ext.curvature_factor * k * 20.0, places=9)
+
+  def _unwind(self):
+    v, k = 12.0, 0.02
+    for _ in range(100):
+      self._update(k, k, v=v)
+    lats = [self._update(0.0, k, v=v) for _ in range(3)]  # plan unwinds, car still turning
+    return lats, v, k
+
+  def test_clip_bound_unwind_never_commands_more_than_measured(self):
+    lats, v, k = self._unwind()
+    self.assertTrue(self.ext.bp_curvature_deviation_limited)
+    self.assertTrue(self.ext.bp_unwind_clamped)
+    self.assertLessEqual(lats[-1].path_angle, k * v + 1e-9)
+
+  def test_static_gain_locks_the_unwind(self):
+    """Documents the bug the clamp fixes: 1.3 x (measured - tolerance) > measured."""
+    self.ext.angle_lead_lag_enabled = False
+    lats, v, k = self._unwind()
+    self.assertGreater(lats[-1].path_angle, k * v)
+
+  def test_param_toggle(self):
+    self.ext.update_angle_params(_FakeParams({}))
+    self.assertTrue(self.ext.angle_lead_lag_enabled)
+    self.ext.update_angle_params(_FakeParams({"FordAngleLeadLag_ang": b"0"}))
+    self.assertFalse(self.ext.angle_lead_lag_enabled)
+    self.ext.update_angle_params(_FakeParams({"FordAngleLeadLag_ang": b"1"}))
+    self.assertTrue(self.ext.angle_lead_lag_enabled)
+
+
+class TestWireSignals(unittest.TestCase):
+  def setUp(self):
+    self.CP = _explorer_cp()
+    self.ext = _Harness(self.CP)
+    self.ext.human_turn_detector = _ForcedDetector(False)
+    self.ext.model = _Model(lane_center_y=0.5)
+    self.cs = _CS(vEgoRaw=20.0, vEgo=20.0, yawRate=0.0)
 
   def _update(self, lat_active=True):
     return self.ext.update_angle_strategy(_CC(latActive=lat_active), self.cs, _Actuators(curvature=0.0), self.CP)
 
-  def _settle(self, frames=200):
-    lat = None
-    for _ in range(frames):
-      lat = self._update()
-    return lat
-
-  def test_tracks_lane_center_with_model_sign(self):
-    lat = self._settle()
-    self.assertAlmostEqual(lat.path_offset, 0.5 * _C0_GAIN, places=3)  # positive = right, like model y
-
-  def test_capped_below_supervisor_release_threshold(self):
-    self.ext.model = _Model(lane_center_y=3.0)
-    self.assertAlmostEqual(self._settle().path_offset, _C0_MAX_M, places=6)
-
-  def test_zero_below_9_ms(self):
-    self.cs.out.vEgoRaw = self.cs.out.vEgo = 8.5
-    self.assertEqual(self._settle().path_offset, 0.0)
-
-  def test_rate_limited_inside_panda_check(self):
-    self.ext.model = _Model(lane_center_y=3.0)
-    last = 0.0
-    for _ in range(100):
-      c0 = self._update().path_offset
-      self.assertLessEqual(abs(c0 - last), c0_roc_per_frame(self.V_EGO) + 1e-9)
-      last = c0
-
-  def test_lane_change_ramps_to_zero_not_steps(self):
-    before = self._settle().path_offset
-    self.ext.model.meta.laneChangeState = 1
-    after = self._update().path_offset
-    self.assertGreater(after, 0.0)
-    self.assertAlmostEqual(before - after, c0_roc_per_frame(self.V_EGO), places=6)
-    self.assertAlmostEqual(self._settle().path_offset, 0.0, places=6)
-
-  def test_user_bias_only_with_lane_positioning(self):
-    self.ext.custom_path_offset_ang = -0.5  # would cancel the 0.5 m lane-center offset
-    self.assertAlmostEqual(self._settle().path_offset, 0.5 * _C0_GAIN, places=3)
-    self.ext.enable_lane_positioning_ang = True
-    self.assertAlmostEqual(self._settle(400).path_offset, 0.0, places=3)
-
-  def test_mode0_paths_zero_c0_and_restart_from_zero(self):
-    self._settle()
-    self.ext.human_turn_detector = _ForcedDetector(True)
-    self.assertEqual(self._update().path_offset, 0.0)
-    self.ext.human_turn_detector = _ForcedDetector(False)
-    self.assertLessEqual(self._update().path_offset, c0_roc_per_frame(self.V_EGO) + 1e-9)
-    self._settle()
-    self.assertEqual(self._update(lat_active=False).path_offset, 0.0)
+  def test_c0_is_zero(self):
+    for _ in range(50):
+      self.assertEqual(self._update().path_offset, 0.0)
 
   def test_ramp_type_immediate_when_active(self):
     self.assertEqual(self._update().ramp_type, 3)
