@@ -20,7 +20,7 @@ python -m bluepilot.tools.pscm.validate --out /tmp/pscm_validation   # metrics J
 python -m bluepilot.tools.pscm.harness ROUTE_DIR... --out /tmp/h_base --ref HEAD
 python -m bluepilot.tools.pscm.harness ROUTE_DIR... --out /tmp/h_new            # working tree
 python -m bluepilot.tools.pscm.harness ROUTE_DIR... --out /tmp/h_x \
-    --patch "lateral_angle_ext._LEADLAG_TAU_S=(0.5, 1.0)" --set FordAngleSmallCurvGain_ang=0
+    --patch "lateral_angle_ext._LEADLAG_TAU_S=(0.5, 1.0)" --set enable_lane_positioning_ang=1
 python -m bluepilot.tools.pscm.score --paired /tmp/h_base /tmp/h_new /tmp/h_x
 
 # 5. the commaCarSegments Ford fleet (stock curvature mode, CAN-only rlogs)
@@ -49,7 +49,7 @@ A regularized FIR fit of wire path_angle -> yaw rate (hands-free, deviation clip
 R² 0.85-0.97) shows the PSCM's delivery droops: a step reaches ~0.91 in 0.5 s and settles at ~0.75
 by ~1.5 s (20-60 mph); 0.98 -> 0.87 above 60 mph. Identical in LatCtl_D2_Rq 1 and 2. A static
 ~1.33x gain therefore over-drives transients, which is why `lateral_angle_ext.py` now lead-lag shapes
-the wire (`FordAngleLeadLag_ang`). Note `extract.py` must latch the PSCM's 972 on bus 0: at route
+the wire. Note `extract.py` must latch the PSCM's 972 on bus 0: at route
 start a short-lived bus-2 copy can arrive first and freeze LatCtlSte_D_Stat at "Available".
 
 ## Emulator (2026-09-28)
@@ -173,3 +173,35 @@ Committed code vs working tree (lead-lag retune + small-curvature gain), per rou
   (3.6 vs 3.8 per hour).
 - On the highway route alone, the small-curvature gain is a wash: rms path error +2%, p95 -1.8%.
   Watch near-straight highway lane keeping on the road test.
+
+## Road test on the emulator build, and the fixes it led to (2026-09-29, routes 000001b0/000001b1)
+
+- **Settings you tried.** Params changes mid-drive aren't logged, so they were reconstructed by
+  open-loop harness parity under all 8 toggle combinations.
+- **Both on was best.** In same-road harness replays, both-on beat every other combination on path
+  error on both routes. With the small-curvature gain off, the real car fell about 2x further short of
+  the plan near straight.
+- **The toggles are gone.** `FordAngleLeadLag_ang` and `FordAngleSmallCurvGain_ang` were removed; both
+  behaviours are now always on.
+- **What caused the grabs.** Video plus signals for all 25 grabs: most were navigation turns or set-up
+  for them. The road-keeping ones were fast curve exits and S-bends where the car stayed turned.
+- **Why the car stayed turned.** Three stacked causes:
+  1. *Windup at the PSCM ceiling.* Delivered lateral accel bends over at ~1.84 m/s^2 (slope 0.57
+     above it); LatCtlLim_D_Stat marks it. At 000001b1 t=280 the plan wanted 3.45 m/s^2 at 41 mph and
+     the wire asked 4.2 while the car gave 2.6.
+  2. *The clip-bound unwind lock.* A wire equal to the measured curvature holds the turn on a PSCM
+     that delivers ~0.78.
+  3. *A PSCM-internal hold.* After a limit episode the car answers a falling command ~0.2 s later
+     than usual (p50 0.16 vs -0.05 s, n=30 vs 391).
+- **Fixes in `lateral_angle_ext.py`.**
+  - An anti-windup cap at the ceiling, active only while the plan is unwinding.
+  - Unit gain on clip-bound unwinds, so the wire equals the shadow curvature.
+  - A "responding" guard on the reactive stall detector. All 4 road reactive pulses ever logged were
+    false fires mid S-bend.
+- **Result on 000001b1.** Tracking -15%, running wide -13%, false stall pulses 2 -> 0.
+- **What the harness can't show.** The disturbance replay re-inserts the real car's post-limit hold,
+  and the emulator doesn't model that hold. Exit timing at the ceiling is therefore only
+  partly judged here.
+- **Emulator update.** `mache_pscm_params.json` now carries the ceiling (`sat_knee`, `sat_slope`).
+- **The remaining cure is curve speed.** Openpilot longitudinal was off on these drives, so nothing
+  slowed the car for curves that need more than the ~2 m/s^2 angle mode delivers.

@@ -116,13 +116,14 @@ STAGE_A = ([('ff_gain', i, 'log') for i in range(7)] + [('droop_ratio', i, 'lin'
            [('c1_slew', None, 'log'), ('servo_p_scale', None, 'log'), ('servo_rate_scale', None, 'log'),
             ('angle_offset_deg', None, 'lin'), ('bank_comp', None, 'lin'),
             ('small_gain', None, 'lin'), ('small_k0', None, 'log')])
+STAGE_SAT = [('sat_knee', None, 'lin'), ('sat_slope', None, 'lin')]
 STAGE_R = [('release_tau', None, 'log')]
 STAGE_B = [('veh_sr', None, 'log'), ('veh_cf', None, 'log'), ('veh_iz', None, 'log'),
            ('veh_yaw_tau', None, 'log'), ('veh_offset_deg', None, 'lin'), ('veh_roll', None, 'lin')]
 
 
 # physical bounds, applied after the transform, so the optimiser can't wander into an unstable model
-BOUNDS = {'release_tau': (0.02, 5.0), 'small_gain': (-0.5, 1.0), 'small_k0': (5e-5, 0.005), 'ff_gain': (0.3, 4.0), 'droop_ratio': (-0.3, 0.7), 'droop_tau': (0.05, 8.0), 'c1_slew': (0.02, 5.0),
+BOUNDS = {'release_tau': (0.02, 5.0), 'sat_knee': (1.0, 99.0), 'sat_slope': (0.05, 1.0), 'small_gain': (-0.5, 1.0), 'small_k0': (5e-5, 0.005), 'ff_gain': (0.3, 4.0), 'droop_ratio': (-0.3, 0.7), 'droop_tau': (0.05, 8.0), 'c1_slew': (0.02, 5.0),
           'servo_p_scale': (0.1, 3.0), 'servo_rate_scale': (0.05, 5.0),
           'angle_offset_deg': (-5, 5), 'bank_comp': (-40, 40), 'veh_sr': (8, 25), 'veh_cf': (4e4, 5e5), 'veh_iz': (1000, 10000), 'veh_yaw_tau': (0.002, 0.5), 'veh_offset_deg': (-5, 5),
           'veh_roll': (-60, 60)}

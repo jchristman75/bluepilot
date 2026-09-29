@@ -53,6 +53,8 @@ class PSCMParams:
   ff_gain: list = field(default_factory=lambda: [1.0] * 7)       # immediate delivery vs nominal
   droop_ratio: list = field(default_factory=lambda: [0.2] * 7)   # share of ff the droop state removes
   droop_tau: list = field(default_factory=lambda: [0.8] * 7)     # s
+  sat_knee: float = 99.0           # m/s^2: delivered lateral accel where the PSCM's ceiling bends in (99 = off)
+  sat_slope: float = 1.0           # delivered per requested lateral accel above the knee
   small_gain: float = 0.0          # extra delivery for small commands: ff *= 1 + small_gain*exp(-|C1/v|/small_k0)
   small_k0: float = 0.0005         # 1/m, curvature scale of that small-command boost
   delay_s: float = 0.08            # wire -> PSCM internal target transport delay
@@ -129,6 +131,20 @@ class PSCMEmulator:
     self.vy = yaw_rate * (b - p.veh_mass * a * u**2 / (cr * p.veh_wheelbase))
     self.yaw = yaw_rate.copy()
 
+  _SAT_WIDTH = 0.2  # m/s^2, softness of the knee
+
+  def _saturate(self, cmd_deg, v):
+    """Soft lateral-acceleration ceiling on the command-driven part of the target: below the knee
+    unchanged, above it the delivered lateral accel grows at sat_slope. Fitted on the Mach-E, where
+    the PSCM's LatCtlLim flag comes on as delivered accel passes ~2 m/s^2 (routes 1b0/1b1)."""
+    p = self.p
+    if p.sat_knee >= 50:
+      return cmd_deg
+    x = np.abs(v * cmd_deg / self._nominal_deg_per_c1(v))  # steady lateral accel this target delivers
+    w = self._SAT_WIDTH
+    y = x - (1 - p.sat_slope) * w * np.logaddexp(0.0, (x - p.sat_knee) / w)
+    return cmd_deg * np.where(x > 1e-6, np.maximum(y, 0.0) / np.maximum(x, 1e-6), 1.0)
+
   def sync_vehicle(self, yaw_rate, v):
     """Put the car (not the PSCM) on a measured yaw rate, e.g. while a replayed driver is steering."""
     p = self.p
@@ -173,7 +189,7 @@ class PSCMEmulator:
     ff = self._tab('ff_gain', v) * self._nominal_deg_per_c1(v) * self.c1h * boost
     a_b = 1 - np.exp(-DT / np.maximum(self._tab('droop_tau', v), DT))
     self.b = np.where(active, self.b + (self._tab('droop_ratio', v) * ff - self.b) * a_b, 0.0)
-    target = ff - self.b + p.angle_offset_deg + p.bank_comp * roll + bias_deg
+    target = self._saturate(ff - self.b, v) + p.angle_offset_deg + p.bank_comp * roll + bias_deg
 
     # angle servo (Lightning schedule shape, scaled)
     kp = np.minimum(p.servo_p_scale * np.interp(v, _SERVO_V_BP, _SERVO_P), 0.9 / DT)

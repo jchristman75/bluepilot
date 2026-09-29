@@ -294,16 +294,12 @@ class TestSmallCurvatureGain(unittest.TestCase):
     self.assertAlmostEqual(ext.low_gain_calc, lateral_angle_ext._SMALL_CURV_GAIN_CANFD_SUV)
     self.assertAlmostEqual(ext.curvature_factor, ext.low_gain_calc)
 
-  def test_toggle_off_is_the_previous_map(self):
-    ext = self._low_gain(CAR.FORD_MUSTANG_MACH_E_MK1, {"FordAngleSmallCurvGain_ang": b"0"})
-    self.assertAlmostEqual(ext.low_gain_calc, 1.0)
-
   def test_other_platforms_unchanged(self):
     for fp in (CAR.FORD_F_150_MK14, CAR.FORD_EXPLORER_MK6):
       with self.subTest(fp=fp):
-        on = self._low_gain(fp, {})
-        off = self._low_gain(fp, {"FordAngleSmallCurvGain_ang": b"0"})
-        self.assertAlmostEqual(on.low_gain_calc, off.low_gain_calc)
+        ext = self._low_gain(fp, {})
+        self.assertEqual(ext.small_curv_gain, 1.0)
+        self.assertAlmostEqual(ext.low_gain_calc, 1.0)  # below 13.5 m/s the map's low gain is 1.0
 
   def test_never_exceeds_large_curve_gain(self):
     ext = self._low_gain(CAR.FORD_MUSTANG_MACH_E_MK1, {"FordHighSpeedFactor_ang": b"0.9"}, v=30.0)
@@ -437,14 +433,6 @@ class TestLeadLagShaping(unittest.TestCase):
       lat = self._update(k, k)
     self.assertAlmostEqual(lat.path_angle, K * k * 20.0, places=5)
 
-  def test_disabled_is_the_static_gain(self):
-    self.ext.angle_lead_lag_enabled = False
-    for _ in range(5):
-      self._update(0.0, 0.0)
-    k = 0.001
-    lat = self._update(k, k)
-    self.assertAlmostEqual(lat.path_angle, self.ext.curvature_factor * k * 20.0, places=9)
-
   def test_reengage_is_seeded_like_the_static_gain(self):
     k = 0.001
     for _ in range(100):
@@ -460,25 +448,79 @@ class TestLeadLagShaping(unittest.TestCase):
     lats = [self._update(0.0, k, v=v) for _ in range(3)]  # plan unwinds, car still turning
     return lats, v, k
 
-  def test_clip_bound_unwind_never_commands_more_than_measured(self):
+  def test_clip_bound_unwind_commands_the_clipped_intent_at_unit_gain(self):
+    """The wire is the shadow curvature itself (measured - tolerance), below the measured
+    curvature -- "command = measured" held the turn on a PSCM that delivers ~0.78 of it."""
     lats, v, k = self._unwind()
     self.assertTrue(self.ext.bp_curvature_deviation_limited)
     self.assertTrue(self.ext.bp_unwind_clamped)
-    self.assertLessEqual(lats[-1].path_angle, k * v + 1e-9)
+    tol = self.ext.bp_curvature_error
+    self.assertAlmostEqual(lats[-1].path_angle, (k - tol) * v, places=6)
+    self.assertAlmostEqual(self.ext.bp_kappa_cmd, k - tol, places=9)  # wire == shadow
 
-  def test_static_gain_locks_the_unwind(self):
-    """Documents the bug the clamp fixes: 1.3 x (measured - tolerance) > measured."""
-    self.ext.angle_lead_lag_enabled = False
+  def test_leaving_the_clip_is_continuous(self):
     lats, v, k = self._unwind()
-    self.assertGreater(lats[-1].path_angle, k * v)
+    last = lats[-1].path_angle
+    lat = self._update(k - 0.001, k - 0.0015, v=v)  # car caught up: clip no longer binding
+    self.assertFalse(self.ext.bp_unwind_clamped)
+    K = self.ext.curvature_factor
+    self.assertLess(abs(lat.path_angle - last), (K - 1.0) * k * v)  # no jump back up to K x kappa
 
-  def test_param_toggle(self):
-    self.ext.update_angle_params(_FakeParams({}))
-    self.assertTrue(self.ext.angle_lead_lag_enabled)
-    self.ext.update_angle_params(_FakeParams({"FordAngleLeadLag_ang": b"0"}))
-    self.assertFalse(self.ext.angle_lead_lag_enabled)
-    self.ext.update_angle_params(_FakeParams({"FordAngleLeadLag_ang": b"1"}))
-    self.assertTrue(self.ext.angle_lead_lag_enabled)
+
+class TestAntiWindup(unittest.TestCase):
+  """Anti-windup at the PSCM lateral-accel ceiling (lateral_angle_ext._WINDUP_*)."""
+
+  V = 18.0  # 1b1 t=280 shape: 41 mph, plan -0.0103, car saturated at -0.0078 (2.5 m/s^2)
+
+  def setUp(self):
+    self.CP = _explorer_cp()
+    self.ext = _Harness(self.CP)
+    self.ext.human_turn_detector = _ForcedDetector(False)
+    self.ext.path_angle_blend_ratio = 0.0
+    self.cs = _CS(vEgoRaw=self.V, vEgo=self.V)
+
+  def _update(self, plan, measured):
+    self.cs.out.yawRate = -measured * self.V
+    return self.ext.update_angle_strategy(_CC(), self.cs, _Actuators(curvature=plan), self.CP)
+
+  def _saturated_curve(self, frames=60):
+    for _ in range(frames):
+      lat = self._update(-0.0103, -0.0078)
+    return lat
+
+  def test_saturated_hold_is_untouched(self):
+    lat = self._saturated_curve()
+    self.assertFalse(self.ext.bp_windup_released)
+    self.assertLess(lat.path_angle, self.ext.curvature_factor * -0.0078 * self.V)  # asking beyond the car
+
+  def test_unwinding_plan_drops_the_excess(self):
+    self._saturated_curve()
+    plan = -0.0103
+    for _ in range(4):
+      plan += 0.006 * 0.05  # plan easing off at 6e-3 1/m/s, still outside the car
+      lat = self._update(plan, -0.0078)
+    self.assertTrue(self.ext.bp_windup_released)
+    self.assertAlmostEqual(lat.path_angle, self.ext.curvature_factor * -0.0078 * self.V, places=6)
+
+  def test_below_the_ceiling_is_untouched(self):
+    v = 10.0  # same curvature at 10 m/s is 0.8 m/s^2 -- nowhere near the ceiling
+    self.cs.out.vEgoRaw = self.cs.out.vEgo = v
+    self.V = v
+    self._saturated_curve()
+    plan = -0.0103
+    for _ in range(4):
+      plan += 0.006 * 0.05
+      self._update(plan, -0.0078)
+    self.assertFalse(self.ext.bp_windup_released)
+
+  def test_curve_entry_is_untouched(self):
+    for _ in range(20):
+      self._update(0.0, 0.0)
+    plan = 0.0
+    for _ in range(20):
+      plan -= 0.006 * 0.05  # plan tightening
+      self._update(plan, plan * 0.8)
+      self.assertFalse(self.ext.bp_windup_released)
 
 
 class TestWireSignals(unittest.TestCase):
@@ -632,6 +674,36 @@ class TestReactiveStallRealCurveGate(unittest.TestCase):
     self.assertEqual(self.ext.stall_blip_count, 1)
     self.assertEqual(self.ext.angle_stall_blip_source, 2)
     self.assertTrue(self.ext.angle_stall_blip_active)
+
+  def _reversal(self):
+    # Route 000001b1 t=507 shape: the plan has swung to +0.006 faster than the car follows; the
+    # car is still curving the other way but moving toward the plan at 5e-3 1/m/s while the plan
+    # keeps swinging away at 8e-3 1/m/s. The gap grows and the clip binds every frame for 0.9 s.
+    meas, plan = -0.0065, 0.002
+    for _ in range(18):
+      meas += 0.005 * 0.05   # car: 5e-3 1/m/s toward the plan
+      plan += 0.008 * 0.05   # plan: swinging away faster, so the gap grows
+      self.cs.out.yawRate = -meas * self.V_EGO
+      self._update(plan)
+    self.assertLess(meas, -0.001)  # curving against the plan the whole time
+
+  def test_s_curve_reversal_with_car_responding_does_not_fire(self):
+    self._reversal()
+    self.assertEqual(self.ext.stall_blip_count, 0)
+    self.assertEqual(self.ext.angle_stall_blip_source, 0)
+
+  def test_s_curve_reversal_fired_before_the_responding_guard(self):
+    with mock.patch.object(lateral_angle_ext, '_STALL_RESPONDING_RATE', 1e9):
+      self._reversal()
+    self.assertEqual(self.ext.stall_blip_count, 1)
+
+  def test_s_curve_reversal_with_car_stuck_fires(self):
+    # Same geometry, but the car holds -0.004: that is a stall.
+    self.cs.out.yawRate = 0.004 * self.V_EGO
+    for _ in range(14):
+      self._update(0.006)
+    self.assertEqual(self.ext.stall_blip_count, 1)
+    self.assertEqual(self.ext.angle_stall_blip_source, 2)
 
   def test_drift_against_plan_below_reversed_floor_does_not_fire(self):
     # measured +0.0005 is yaw-rate noise territory, not a car curving against the plan.

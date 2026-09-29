@@ -15,21 +15,23 @@ therefore over-drives every transient: 0.3-0.7 Hz planner content arrived 1.2-1.
 ``v·(r·Kκ + (1-r)·lowpass(Kκ, τ))`` -- K is reached in steady state (so the user factors keep
 their meaning) but the immediate response is r·K. Open-loop replay: tracking error 2.7x lower at
 20-60 mph. r and tau are speed-scheduled (see _LEADLAG_*); the low-speed values were retuned in
-closed loop against the PSCM emulator (bluepilot/tools/pscm). Toggle: ``FordAngleLeadLag_ang``
-(off = the previous static gain, bit-for-bit).
+closed loop against the PSCM emulator (bluepilot/tools/pscm) and confirmed on the road
+(routes 000001b0/000001b1: turning it off ran ~30% more weave and cut curve entries harder).
 
 **Small-curvature gain.** Below |kappa| ~0.0007 the gain map used 1.0, but the Mach-E PSCM delivers
 only ~0.85-0.88 of a small command, so near-straight lane keeping ran ~13% short of the plan. On
 the Mach-E platform group that gain is now x1.15 (capped at the large-curve gain); see
-_SMALL_CURV_GAIN_CANFD_SUV. Toggle: ``FordAngleSmallCurvGain_ang``.
+_SMALL_CURV_GAIN_CANFD_SUV. Road A/B on 000001b1: off ran ~2x further short of the plan near straight.
 
 **Deviation clip.** κ is clipped to measured ± bp_curvature_error before the gain (mirrors curvature
 mode and ford.h's shadow-curvature check). Because the gain is applied after the clip, a binding
 clip feeds the car's own yaw back into the command; with the static gain that loop gain was
 ~1.33 x 0.91 ≈ 1.2, and on an unwind 1.33·(meas - tol) stays above meas for any κ > 0.008 -- the car
 could not straighten while the planner asked it to (47-62% of clip-bound unwind time on the
-recorded routes). Lead-lag drops the loop gain below 1, and an explicit unwind clamp keeps a
-clip-bound unwind from commanding more than the measured curvature.
+recorded routes). Lead-lag drops the loop gain below 1. On a clip-bound unwind the wire is the
+clipped κ itself (unit gain): capping it at the measured curvature was not enough, because the PSCM
+holds only ~0.78 of a held command, so "command = measured" still held the turn (road-confirmed on
+000001b1, see _shape_wire_kappa).
 
 **Lane centering trim (``lane_center_trim.py``):** a small correction applied to ``kappa_cmd``
 itself, before the deviation clip / gain / PSCM clamp / soft ROC below, so it inherits every one of
@@ -78,8 +80,7 @@ _GAIN_CANFD_SUV   = (1.00, 1.05)
 # cuts lateral path error 3.7%, 1.15 more, full gain 7.6% at +1.5% weave. The harness replays the
 # planner rather than re-planning, so it can't see planner-loop weave from a higher small-signal
 # gain; 1.15 is the measured delivery's inverse, not the harness optimum. Only the platform group
-# it was measured on; everything else keeps 1.0. Capped at the large-curve gain. Toggle:
-# ``FordAngleSmallCurvGain_ang`` (off = the previous map, bit-for-bit).
+# it was measured on; everything else keeps 1.0. Capped at the large-curve gain.
 _SMALL_CURV_GAIN_CANFD_SUV = 1.15
 
 _CANFD_BOF_CARS = frozenset({
@@ -149,6 +150,24 @@ _STALL_MAX_BLIPS = 3         # give up on a stuck episode; devLim telemetry keep
 # real S-curve reversal closes at.
 _STALL_GAP_TAU = 0.3         # s, smoothing for the |gap| reference
 _STALL_GAP_CLOSING = 0.95
+# ...but when the plan reverses faster than the car can follow, the gap grows while the car is
+# turning the right way. Every reactive pulse ever logged on the road (000001af t=224/229,
+# 000001b1 t=507/510) was that: the car was already moving toward the plan at 3.6-6.4e-3 1/m/s,
+# and the 300 ms mode-0 pulse landed mid S-curve. A car whose (smoothed) curvature moves toward the
+# plan faster than this is responding, not stalled; a real post-release stall holds its curvature.
+_STALL_RESPONDING_RATE = 0.002  # 1/m/s
+# Anti-windup at the PSCM's lateral-acceleration ceiling. Past ~1.8-2.0 m/s^2 delivered the Mach-E
+# PSCM bends over (LatCtlLim_D_Stat comes on; each extra 1 m/s^2 of request buys ~0.5): fitted from
+# steady curves and from 10 s windows up to every grab, knee 1.84 m/s^2 / slope 0.57. A plan that
+# asks for more (000001b1 t=280: 3.45 m/s^2 at 41 mph) piles request above what the car delivers
+# (4.2 vs 2.6 m/s^2 there), and when the plan unwinds that excess has to drain before the car moves
+# at all -- the "saturates in the turn, won't unwind, drifts toward the other lane" grabs. While the
+# car is at the ceiling and the plan is genuinely unwinding, the wire is capped at the command that
+# holds the car's current curvature (K x measured), so the car starts unwinding with the plan.
+# Curve entry and the in-curve request are untouched (the plan isn't unwinding there).
+_WINDUP_AY = 1.8               # m/s^2, measured lateral accel at which the car is at the ceiling
+_WINDUP_PLAN_RATE = 0.002      # 1/m/s, plan curvature easing off at least this fast = unwinding
+_WINDUP_PLAN_TAU = 0.15        # s, smoothing for the plan-rate test
 # Post-release drift: the real-curve floor (|measured| > 2x tolerance) keeps curve entry from
 # straight out of the detector, but entry has the car turning WITH the plan or not yet at all. A
 # car measurably curving AGAINST the plan is the deadlock instead: for ~5 s after the driver lets
@@ -242,13 +261,13 @@ class LateralAngleExt:
     # BluePilot: lead-lag command shaping (see module docstring). _wire_slow is the lagged share of
     # K*kappa, in curvature units; None = unseeded (seeded on the first active frame so
     # re-engagement ramps exactly as before, through the soft ROC).
-    self.angle_lead_lag_enabled = True
     # BluePilot: small-curvature gain (see _SMALL_CURV_GAIN_CANFD_SUV); platform value set in
-    # update_angle_params, applied only while the toggle is on.
-    self.small_curv_gain_enabled = True
+    # update_angle_params.
     self.small_curv_gain = 1.0
     self._wire_slow = None
     self.bp_unwind_clamped = False  # clip-bound unwind clamp actually bit this frame
+    self.bp_windup_released = False  # anti-windup cap at the PSCM ceiling bit this frame
+    self._windup_plan_slow = None    # smoothed planner curvature for the unwinding test
     # Telemetry: variable curvature lookup time used this frame (s)
     self.bp_curvature_lookup_time = _VLT_T_EXTRA_MAX + 0.3725  # warm start at ~0.5s
     # BluePilot: error-clipped kappa path_angle was derived from -- carcontroller.py reads this as
@@ -272,6 +291,7 @@ class LateralAngleExt:
     # carcontroller to force mode 0, exactly like angle_human_turn_active.
     self.stall_blip_hold_s = 0.0      # accumulated deviation-clip-binding time toward a pulse
     self._stall_gap_mag_slow = -1.0   # smoothed |desired - current|; < 0 = unseeded
+    self._stall_meas_slow = None      # smoothed measured curvature (responding test); None = unseeded
     self.stall_blip_frames_left = 0   # remaining pulse frames; > 0 -> mode 0 on the wire
     self.stall_blip_cooldown_s = 0.0  # re-arm delay after a pulse
     self.stall_blip_count = 0         # pulses fired this stall episode
@@ -314,20 +334,6 @@ class LateralAngleExt:
             float(raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw), 0.85, 1.50))
       except Exception:
         pass
-      # BluePilot: lead-lag command shaping A/B toggle (default on).
-      try:
-        raw = params.get("FordAngleLeadLag_ang", return_default=True)
-        if raw is not None and raw != b"":
-          self.angle_lead_lag_enabled = (raw.decode() if isinstance(raw, bytes) else str(raw)).strip() not in ("0", "False", "false")
-      except Exception:
-        pass
-      # BluePilot: small-curvature gain A/B toggle (default on).
-      try:
-        raw = params.get("FordAngleSmallCurvGain_ang", return_default=True)
-        if raw is not None and raw != b"":
-          self.small_curv_gain_enabled = (raw.decode() if isinstance(raw, bytes) else str(raw)).strip() not in ("0", "False", "false")
-      except Exception:
-        pass
       # BluePilot: angle-mode lane centering trim (advanced lane positioning) params.
       try:
         self.enable_lane_positioning_ang = bool(params.get_bool("enable_lane_positioning_ang"))
@@ -359,18 +365,23 @@ class LateralAngleExt:
       self._wire_slow += (_STEER_DT / (tau + _STEER_DT)) * (target - self._wire_slow)
 
     # Clip-bound unwind: the planner wants less turn than the car has, and the deviation clip is
-    # what's holding kappa_cmd at measured - tolerance. Don't let the lagged share keep the turn in,
-    # and never command more than the car is already delivering -- that's the lock that kept the
-    # car turning while the plan unwound (see module docstring).
+    # what's holding kappa_cmd at measured - tolerance. Send that clipped intent itself, at unit
+    # gain, not K x it and not "no more than measured": the PSCM holds only ~0.78 of a held
+    # command, so a wire at the measured curvature just holds the turn, and the command -- tied to
+    # the car by the clip -- waits for a car that waits for it. That was the saturate-then-won't-
+    # unwind drift toward the other lane on routes 000001b1 t=280 (41 mph, wire flat at -7.5e-3 for
+    # 1.5 s while the plan crossed zero) and t=375; the PSCM emulator on the logged wire tracks the
+    # real car through those exits, so the lock is ours, not the PSCM's. The wire now equals the
+    # shadow curvature ford.h checks (kappa_cmd), which leads the car by the full tolerance every
+    # frame. The lagged share restarts from here so leaving the clip is continuous.
     s = 1.0 if current_curvature >= 0.0 else -1.0
     if (self.bp_curvature_deviation_limited and abs(current_curvature) > self.bp_curvature_error
         and (kappa_pre_clip - current_curvature) * s < 0.0):
-      if self._wire_slow * s > target * s:
-        self._wire_slow = target
-      shaped = r * target + (1.0 - r) * self._wire_slow
-      if shaped * s > abs(current_curvature):
-        shaped = current_curvature
+      shaped = r * target + (1.0 - r) * min(self._wire_slow * s, target * s) * s
+      if shaped * s > kappa_cmd * s:
+        shaped = kappa_cmd
         self.bp_unwind_clamped = True
+      self._wire_slow = shaped
       return shaped
     return r * target + (1.0 - r) * self._wire_slow
 
@@ -415,6 +426,8 @@ class LateralAngleExt:
       self._wire_slow = None
       self.stall_blip_hold_s = 0.0
       self._stall_gap_mag_slow = -1.0
+      self._stall_meas_slow = None
+      self._windup_plan_slow = None
       self.stall_blip_frames_left = 0
       self.stall_blip_cooldown_s = 0.0
       self.stall_blip_count = 0
@@ -464,6 +477,8 @@ class LateralAngleExt:
       # a hand-off pulse.
       self.stall_blip_hold_s = 0.0
       self._stall_gap_mag_slow = -1.0
+      self._stall_meas_slow = None
+      self._windup_plan_slow = None
       self.stall_blip_frames_left = 0
       self.stall_blip_cooldown_s = 0.0
       self.stall_blip_count = 0
@@ -680,7 +695,7 @@ class LateralAngleExt:
       v_ego, [13.5, 26.82], [1.0, (self.path_angle_gain_lowC_highV * self.user_dampening_factor)]
     )
     self.high_gain_calc = interp(v_ego, [13.5, 26.82], [(1.30 * self.low_speed_curv_factor), (self.path_angle_gain_highC_highV * self.high_speed_curv_factor)])
-    if self.small_curv_gain_enabled and self.small_curv_gain != 1.0:
+    if self.small_curv_gain != 1.0:
       self.low_gain_calc = min(self.low_gain_calc * self.small_curv_gain, max(self.high_gain_calc, self.low_gain_calc))
 
     # As the curve gets bigger, we will need a little boost to the signal to to not understeer
@@ -689,8 +704,21 @@ class LateralAngleExt:
     # Steady-state wire command in curvature units (path_angle / v).
     wire_kappa = kappa_cmd * self.curvature_factor
     self.bp_unwind_clamped = False
-    if self.angle_lead_lag_enabled:
-      wire_kappa = self._shape_wire_kappa(wire_kappa, kappa_cmd, _kappa_cmd_pre_error_clip, current_curvature, v_ego)
+    wire_kappa = self._shape_wire_kappa(wire_kappa, kappa_cmd, _kappa_cmd_pre_error_clip, current_curvature, v_ego)
+
+    # Anti-windup at the PSCM ceiling (see _WINDUP_AY): the car is at the ceiling, the plan is
+    # unwinding, and we are asking for more than holds the car where it is -> drop the excess now.
+    _plan_prev = self._windup_plan_slow if self._windup_plan_slow is not None else desired_curvature
+    self._windup_plan_slow = _plan_prev + (_STEER_DT / (_STEER_DT + _WINDUP_PLAN_TAU)) * (desired_curvature - _plan_prev)
+    _turn = 1.0 if current_curvature >= 0.0 else -1.0
+    _plan_easing = (self._windup_plan_slow - _plan_prev) / _STEER_DT * _turn < -_WINDUP_PLAN_RATE
+    _hold = self.curvature_factor * current_curvature
+    self.bp_windup_released = False
+    if (_plan_easing and v_ego ** 2 * abs(current_curvature) >= _WINDUP_AY
+        and wire_kappa * _turn > _hold * _turn):
+      wire_kappa = _hold
+      self._wire_slow = _hold
+      self.bp_windup_released = True
     path_angle = wire_kappa * v_ego
 
     # PSCM authority limit clamp (_in_hard_sat: path_angle near the ±0.5 rad DBC limit).
@@ -772,6 +800,10 @@ class LateralAngleExt:
     else:
       _gap_alpha = _STEER_DT / (_STEER_DT + _STALL_GAP_TAU)
       self._stall_gap_mag_slow += _gap_alpha * (abs(_stall_gap) - self._stall_gap_mag_slow)
+    # How fast the car's own curvature is moving toward the plan (smoothed: yawRate is noisy).
+    _meas_prev = self._stall_meas_slow if self._stall_meas_slow is not None else current_curvature
+    self._stall_meas_slow = _meas_prev + (_STEER_DT / (_STEER_DT + _STALL_GAP_TAU)) * (current_curvature - _meas_prev)
+    _toward_plan_rate = (self._stall_meas_slow - _meas_prev) / _STEER_DT * (1.0 if _stall_gap >= 0.0 else -1.0)
     _stalled = (not CS.out.steeringPressed and not self.lane_change and v_ego > 9.0
                 and abs(_stall_gap) > _stall_gap_min
                 # curve entry from straight satisfies the gap test by construction; require a real
@@ -798,7 +830,8 @@ class LateralAngleExt:
                 # reference (frame-to-frame differencing is buried in yawRate noise). The
                 # same-sign case keeps its road-validated behaviour untouched.
                 and (desired_curvature * current_curvature >= 0.0
-                     or abs(_stall_gap) >= _STALL_GAP_CLOSING * self._stall_gap_mag_slow))
+                     or (abs(_stall_gap) >= _STALL_GAP_CLOSING * self._stall_gap_mag_slow
+                         and _toward_plan_rate < _STALL_RESPONDING_RATE)))
     if _stalled:
       if self.bp_curvature_deviation_limited and self.stall_blip_cooldown_s <= 0.0:
         self.stall_blip_hold_s += _STEER_DT
