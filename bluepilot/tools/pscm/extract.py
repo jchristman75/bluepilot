@@ -7,9 +7,11 @@ recent value of every other source (sample-and-hold). Covers what the PSCM study
 commanded on the wire (LateralMotionControl2), what the PSCM reported, what the car did, and what
 BluePilot's controller was doing (controllerStateBP).
 
-Sign convention: lmcPA / lmcOff are the wire values negated back to the controller's internal
-sign (carcontroller sends -lat.path_angle / -lat.path_offset), so they share a sign with
-carControl.actuators.curvature and with -carState.yawRate.
+Sign convention: lmcPA / lmcOff / lmcCurv / lmcCrvRate are the wire values negated back to the
+controller's internal sign (carcontroller sends -lat.path_angle / -lat.path_offset /
+-lat.apply_curvature / -lat.curvature_rate), so they share a sign with
+carControl.actuators.curvature and with -carState.yawRate. tLmc is the send time of the latest
+982 frame, so a consumer can step at the 20 Hz wire cadence rather than the 100 Hz hold.
 
 Usage:
   extract.py [--cache DIR] ROUTE_DIR [ROUTE_DIR ...]
@@ -26,14 +28,16 @@ from opendbc.can.dbc import DBC
 from opendbc.can.parser import get_raw_value
 from openpilot.tools.lib.logreader import LogReader
 
-DEFAULT_CACHE = os.path.expanduser('~/.cache/bp_pscm')
+DEFAULT_CACHE = os.path.expanduser('~/.cache/bp_pscm_v2')  # v2: COLS gained the fields after desireLeft
 
 COLS = ['t', 'v', 'ang', 'tq', 'pressed', 'lblink', 'rblink', 'yaw', 'angrate', 'latActive', 'acurv',
         'htPaused', 'blip', 'blipSrc', 'devLim', 'rocLim', 'latMode', 'blipCnt',
         'lmcMode', 'lmcPA', 'lmcOff', 'lmcRamp',
         'steStat', 'limStat', 'handsOff', 'actDeny', 'cpblty',
         'motorI', 'drvTq', 'drvActv', 'colTq',
-        'llL', 'llR', 'lpL', 'lpR', 'lcState', 'desireLeft']
+        'llL', 'llR', 'lpL', 'lpR', 'lcState', 'desireLeft',
+        'lmcCurv', 'lmcCrvRate', 'lmcPrec', 'lmcHOC', 'tLmc',
+        'aEgo', 'roll', 'angOff', 'srLearned', 'imuYaw', 'imuAy']
 
 _dbc = DBC('ford_lincoln_base_pt')
 
@@ -43,7 +47,11 @@ def _sigs(addr, names):
   return [m.sigs[n] for n in names]
 
 
-_LMC2 = _sigs(982, ['LatCtl_D2_Rq', 'LatCtlPath_An_Actl', 'LatCtlPathOffst_L_Actl', 'LatCtlRampType_D_Rq'])
+_LMC2 = _sigs(982, ['LatCtl_D2_Rq', 'LatCtlPath_An_Actl', 'LatCtlPathOffst_L_Actl', 'LatCtlRampType_D_Rq',
+                    'LatCtlCurv_No_Actl', 'LatCtlCrv_NoRate2_Actl', 'LatCtlPrecision_D_Rq', 'HandsOffCnfm_B_Rq'])
+# CAN (non-FD) platforms send LateralMotionControl (979) instead; same meaning, decoded into the same columns
+_LMC1 = _sigs(979, ['LatCtl_D_Rq', 'LatCtlPath_An_Actl', 'LatCtlPathOffst_L_Actl', 'LatCtlRampType_D_Rq',
+                    'LatCtlCurv_No_Actl', 'LatCtlCurv_NoRate_Actl', 'LatCtlPrecision_D_Rq', 'HandsOffCnfm_B_Rq'])
 _LAD3 = _sigs(972, ['LatCtlSte_D_Stat', 'LatCtlLim_D_Stat', 'LaHandsOff_B_Actl', 'LaActDeny_B_Actl', 'LatCtlCpblty_D_Stat'])
 _EPAS = _sigs(130, ['SteMdule_I_Est', 'DrvSte_Tq_Actl', 'DrvSteActv_B_Stat', 'SteeringColumnTorque'])
 
@@ -59,13 +67,14 @@ def _decode(dat, sigs):
 
 
 def extract_segment(args):
-  seg_dir, cache = args
-  name = os.path.basename(seg_dir.rstrip('/'))
+  seg_dir, cache = args[:2]
+  name = args[2] if len(args) > 2 else os.path.basename(seg_dir.rstrip('/'))
   out = os.path.join(cache, f'{name}.npz')
   if os.path.exists(out):
     return out
   rows = []
   cc, bp, lmc, lad, epas, md = [0, 0.0], [0] * 7, [0] * 4, [0] * 5, [0] * 4, [0] * 6
+  lmc2, lp, pose = [0] * 5, [0.0] * 3, [0.0] * 2
   pscm_bus = None
   try:
     for m in LogReader(os.path.join(seg_dir, 'rlog.zst')):
@@ -74,7 +83,7 @@ def extract_segment(args):
         c = m.carState
         rows.append([m.logMonoTime * 1e-9, c.vEgo, c.steeringAngleDeg, c.steeringTorque, c.steeringPressed,
                      c.leftBlinker, c.rightBlinker, c.yawRate, c.steeringRateDeg,
-                     *cc, *bp, *lmc, *lad, *epas, *md])
+                     *cc, *bp, *lmc, *lad, *epas, *md, *lmc2, c.aEgo, *lp, *pose])
       elif w == 'carControl':
         cc = [m.carControl.latActive, m.carControl.actuators.curvature]
       elif w == 'controllerStateBP':
@@ -83,9 +92,10 @@ def extract_segment(args):
               b.angleRateLimited, b.activeLateralMode.raw, b.stallBlipEpisodeCount]
       elif w == 'sendcan':
         for f in m.sendcan:
-          if f.address == 982 and f.src < 128:
-            v = _decode(f.dat, _LMC2)
+          if f.address in (982, 979) and f.src < 128:
+            v = _decode(f.dat, _LMC2 if f.address == 982 else _LMC1)
             lmc = [v[0], -v[1], -v[2], v[3]]
+            lmc2 = [-v[4], -v[5], v[6], v[7], m.logMonoTime * 1e-9]
       elif w == 'can':
         for f in m.can:
           if f.src >= 128:
@@ -99,6 +109,11 @@ def extract_segment(args):
               lad = _decode(f.dat, _LAD3)
           elif f.address == 130 and (pscm_bus is None or f.src == pscm_bus):
             epas = _decode(f.dat, _EPAS)
+      elif w == 'liveParameters':
+        p = m.liveParameters
+        lp = [p.roll, p.angleOffsetDeg, p.steerRatio]
+      elif w == 'livePose':
+        pose = [m.livePose.angularVelocityDevice.z, m.livePose.accelerationDevice.y]
       elif w == 'modelV2':
         mv = m.modelV2
         if len(mv.laneLines) == 4 and len(mv.laneLines[1].y):

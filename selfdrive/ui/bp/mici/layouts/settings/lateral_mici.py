@@ -29,6 +29,7 @@ class LateralLayoutMici(NavScroller):
       "Lane Change Factor High", "lane_change_factor_high_ang", min=0.85, max=1.50,
     )
     self.angle_lead_lag = BigParamControlBP("Lead-Lag Command Shaping", "FordAngleLeadLag_ang")
+    self.angle_small_curv_gain = BigParamControlBP("Small-Curvature Gain", "FordAngleSmallCurvGain_ang")
     # Lane centering trim — angle mode's "advanced lane positioning" (curvature-domain trim,
     # see opendbc/sunnypilot/car/ford/lane_center_trim.py).
     self.enable_lane_positioning_ang = BigParamControlBP(
@@ -87,6 +88,7 @@ class LateralLayoutMici(NavScroller):
       self.high_speed_dampening,
       self.lane_change_factor_high_ang,
       self.angle_lead_lag,
+      self.angle_small_curv_gain,
       self.enable_lane_positioning_ang,
       self.custom_path_offset_ang,
       self.lane_centering_strength_ang,
@@ -114,6 +116,7 @@ class LateralLayoutMici(NavScroller):
       ("custom_profile_curv", self.custom_profile),
       ("enable_lane_positioning_ang", self.enable_lane_positioning_ang),
       ("FordAngleLeadLag_ang", self.angle_lead_lag),
+      ("FordAngleSmallCurvGain_ang", self.angle_small_curv_gain),
       ("BpShowLateralControl", self.show_lateral_control),
     )
 
@@ -135,6 +138,7 @@ class LateralLayoutMici(NavScroller):
     self.high_speed_dampening.set_visible(is_angle)
     self.lane_change_factor_high_ang.set_visible(is_angle)
     self.angle_lead_lag.set_visible(is_angle)
+    self.angle_small_curv_gain.set_visible(is_angle)
     self.enable_lane_positioning_ang.set_visible(is_angle)
     lane_pos_ang = ui_state.params.get_bool("enable_lane_positioning_ang")
     self.custom_path_offset_ang.set_visible(is_angle)

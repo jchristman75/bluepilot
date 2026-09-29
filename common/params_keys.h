@@ -312,6 +312,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"FordHighSpeedDampening_ang", {PERSISTENT | BACKUP, FLOAT, "1.0"}},
     // BluePilot: angle-mode lead-lag command shaping (opendbc/sunnypilot/car/ford/lateral_angle_ext.py).
     {"FordAngleLeadLag_ang", {PERSISTENT | BACKUP, BOOL, "1"}},
+    // BluePilot: angle-mode small-curvature gain (opendbc/sunnypilot/car/ford/lateral_angle_ext.py).
+    {"FordAngleSmallCurvGain_ang", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"BPLateralSchemeParamsMigratedV1", {PERSISTENT | BACKUP, STRING, "0"}},
 
     // BluePilot: angle-mode lane centering trim (advanced lane positioning) -- see

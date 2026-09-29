@@ -14,7 +14,14 @@ therefore over-drives every transient: 0.3-0.7 Hz planner content arrived 1.2-1.
 (the "jello" weave) and curve entries overshot toward the inside edge. The wire now carries
 ``v·(r·Kκ + (1-r)·lowpass(Kκ, τ))`` -- K is reached in steady state (so the user factors keep
 their meaning) but the immediate response is r·K. Open-loop replay: tracking error 2.7x lower at
-20-60 mph. Toggle: ``FordAngleLeadLag_ang`` (off = the previous static gain, bit-for-bit).
+20-60 mph. r and tau are speed-scheduled (see _LEADLAG_*); the low-speed values were retuned in
+closed loop against the PSCM emulator (bluepilot/tools/pscm). Toggle: ``FordAngleLeadLag_ang``
+(off = the previous static gain, bit-for-bit).
+
+**Small-curvature gain.** Below |kappa| ~0.0007 the gain map used 1.0, but the Mach-E PSCM delivers
+only ~0.85-0.88 of a small command, so near-straight lane keeping ran ~13% short of the plan. On
+the Mach-E platform group that gain is now x1.15 (capped at the large-curve gain); see
+_SMALL_CURV_GAIN_CANFD_SUV. Toggle: ``FordAngleSmallCurvGain_ang``.
 
 **Deviation clip.** κ is clipped to measured ± bp_curvature_error before the gain (mirrors curvature
 mode and ford.h's shadow-curvature check). Because the gain is applied after the clip, a binding
@@ -63,6 +70,17 @@ _GAIN_CAN         = (1.00, 1.15)
 _GAIN_CANFD_BOF   = (0.95, 0.95)
 # CAN-FD unibody SUVs (Mustang Mach-E, Escape MK4.5)
 _GAIN_CANFD_SUV   = (1.00, 1.05)
+
+# Small-curvature gain: multiplies the gain used below |kappa| ~0.0007 (near-straight lane keeping),
+# where the static map used 1.0 -- i.e. no correction for the PSCM's delivery, which measures
+# 0.85-0.88 there on the Mach-E (2 s regression over ~20 h of hands-free angle mode; bound <= 1.2).
+# Closed-loop PSCM-emulator replay (bluepilot/tools/pscm, 42 routes, disturbances replayed): 1.10
+# cuts lateral path error 3.7%, 1.15 more, full gain 7.6% at +1.5% weave. The harness replays the
+# planner rather than re-planning, so it can't see planner-loop weave from a higher small-signal
+# gain; 1.15 is the measured delivery's inverse, not the harness optimum. Only the platform group
+# it was measured on; everything else keeps 1.0. Capped at the large-curve gain. Toggle:
+# ``FordAngleSmallCurvGain_ang`` (off = the previous map, bit-for-bit).
+_SMALL_CURV_GAIN_CANFD_SUV = 1.15
 
 _CANFD_BOF_CARS = frozenset({
   CAR.FORD_F_150_MK14,
@@ -170,13 +188,18 @@ _PRESS_BLIP_PENDING_S = 3.0
 # distance so a hand-off pulse never fires where the recovery would understeer the curve.
 _BLIP_MAX_RAMP_M = 10.0
 # Lead-lag command shaping (see module docstring): the wire carries r*K*kappa immediately and the
-# remaining (1-r)*K*kappa through a first-order lag of tau. Fitted per speed band on routes
-# 41x-45x + 1a7-1af (hands-free, clip not binding): r=0.70/tau=0.7 s is the optimum from 20 to
-# 56 mph (the step response peaks at 0.91 and droops to 0.75); above 60 mph the droop is smaller
-# (0.98 -> 0.87) and the optimum moves to r=0.85/tau=1.0 s.
-_LEADLAG_V_BP = (25.0, 27.0)          # m/s
-_LEADLAG_FAST_RATIO = (0.70, 0.85)    # r: immediate share of the steady-state gain
-_LEADLAG_TAU_S = (0.7, 1.0)           # s: lag on the remaining share
+# remaining (1-r)*K*kappa through a first-order lag of tau. First fitted open-loop on routes
+# 41x-45x + 1a7-1af (r=0.70/tau=0.7 s to 56 mph, r=0.85/tau=1.0 s above 60 mph). Retuned 2026-09-28
+# below 25 m/s in closed loop against the fitted PSCM emulator (bluepilot/tools/pscm: the real
+# controller + ford.h driving the emulator, recorded disturbances replayed, 42 tuning routes, then
+# checked on 32 held-out routes): the emulator's droop (share c, tau_d) inverts to r = 1 - c and a
+# lag of tau_d / (1 - c), with the lag shortened 0.6x in closed loop. That cut lateral path error
+# ~6% and weave ~3% and ran wide less, at ~14% more curve-entry cut (still ~40% less than no
+# shaping). Longer lags ran wider and weaved more; any change above 25 m/s added highway weave, so
+# the highway values are unchanged.
+_LEADLAG_V_BP = (5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0)          # m/s
+_LEADLAG_FAST_RATIO = (0.50, 0.43, 0.42, 0.49, 0.70, 0.85, 0.85)   # r: immediate share of the steady-state gain
+_LEADLAG_TAU_S = (0.40, 0.31, 0.30, 0.33, 0.70, 1.0, 1.0)          # s: lag on the remaining share
 
 # path_angle soft-ROC breakpoints (rad per 20 Hz call) -- shared by the limiter below and the
 # hand-off blip's ramp-recovery distance guard above.
@@ -220,6 +243,10 @@ class LateralAngleExt:
     # K*kappa, in curvature units; None = unseeded (seeded on the first active frame so
     # re-engagement ramps exactly as before, through the soft ROC).
     self.angle_lead_lag_enabled = True
+    # BluePilot: small-curvature gain (see _SMALL_CURV_GAIN_CANFD_SUV); platform value set in
+    # update_angle_params, applied only while the toggle is on.
+    self.small_curv_gain_enabled = True
+    self.small_curv_gain = 1.0
     self._wire_slow = None
     self.bp_unwind_clamped = False  # clip-bound unwind clamp actually bit this frame
     # Telemetry: variable curvature lookup time used this frame (s)
@@ -266,6 +293,7 @@ class LateralAngleExt:
       low, high = _GAIN_CAN
     self.path_angle_gain_lowC_highV = low
     self.path_angle_gain_highC_highV = high
+    self.small_curv_gain = _SMALL_CURV_GAIN_CANFD_SUV if fp in _CANFD_SUV_CARS else 1.0
     if params is not None and hasattr(params, "get"):
       for attr, key, min_value, max_value in (
         ("low_speed_curv_factor", "FordLowSpeedFactor_ang", 0.5, 1.5),
@@ -291,6 +319,13 @@ class LateralAngleExt:
         raw = params.get("FordAngleLeadLag_ang", return_default=True)
         if raw is not None and raw != b"":
           self.angle_lead_lag_enabled = (raw.decode() if isinstance(raw, bytes) else str(raw)).strip() not in ("0", "False", "false")
+      except Exception:
+        pass
+      # BluePilot: small-curvature gain A/B toggle (default on).
+      try:
+        raw = params.get("FordAngleSmallCurvGain_ang", return_default=True)
+        if raw is not None and raw != b"":
+          self.small_curv_gain_enabled = (raw.decode() if isinstance(raw, bytes) else str(raw)).strip() not in ("0", "False", "false")
       except Exception:
         pass
       # BluePilot: angle-mode lane centering trim (advanced lane positioning) params.
@@ -645,6 +680,8 @@ class LateralAngleExt:
       v_ego, [13.5, 26.82], [1.0, (self.path_angle_gain_lowC_highV * self.user_dampening_factor)]
     )
     self.high_gain_calc = interp(v_ego, [13.5, 26.82], [(1.30 * self.low_speed_curv_factor), (self.path_angle_gain_highC_highV * self.high_speed_curv_factor)])
+    if self.small_curv_gain_enabled and self.small_curv_gain != 1.0:
+      self.low_gain_calc = min(self.low_gain_calc * self.small_curv_gain, max(self.high_gain_calc, self.low_gain_calc))
 
     # As the curve gets bigger, we will need a little boost to the signal to to not understeer
     self.curvature_factor = interp(abs(kappa_cmd), [0.0007, 0.001], [self.low_gain_calc, self.high_gain_calc])

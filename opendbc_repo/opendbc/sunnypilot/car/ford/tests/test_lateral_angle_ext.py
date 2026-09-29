@@ -16,6 +16,8 @@ See the LICENSE.md file in the root directory for more details.
 # real measured curvature.
 
 import math
+
+import numpy as np
 import unittest
 from dataclasses import dataclass
 from unittest import mock
@@ -23,7 +25,7 @@ from unittest import mock
 from opendbc.car import structs
 from opendbc.car.ford.values import CAR, CarControllerParams
 from opendbc.car.interfaces import scale_tire_stiffness
-from opendbc.sunnypilot.car.ford import lateral_curv_ext
+from opendbc.sunnypilot.car.ford import lateral_angle_ext, lateral_curv_ext
 from opendbc.sunnypilot.car.ford.values_ext import FordSafetyFlagsSP
 from opendbc.sunnypilot.car.ford.lateral_curv_ext import LateralCurvExt
 from opendbc.sunnypilot.car.ford.lateral_angle_ext import LateralAngleExt
@@ -272,6 +274,42 @@ class TestAngleParams(unittest.TestCase):
         self.assertAlmostEqual(self.ext.user_dampening_factor, expected)
 
 
+class TestSmallCurvatureGain(unittest.TestCase):
+  """Small-curvature gain (lateral_angle_ext._SMALL_CURV_GAIN_CANFD_SUV)."""
+
+  def _low_gain(self, fp, params, v=10.0, kappa=0.0003):
+    CP = _explorer_cp()
+    CP.carFingerprint = fp
+    ext = _Harness(CP)
+    ext.human_turn_detector = _ForcedDetector(False)
+    ext.model = _Model()
+    ext.update_angle_params(_FakeParams(params))
+    cs = _CS(vEgoRaw=v, vEgo=v, yawRate=-kappa * v)
+    ext.model.orientationRate = _OrientationRate([kappa * v] * 33)
+    ext.update_angle_strategy(_CC(), cs, _Actuators(curvature=kappa), CP)
+    return ext
+
+  def test_mache_small_curvature_gain_raised(self):
+    ext = self._low_gain(CAR.FORD_MUSTANG_MACH_E_MK1, {})
+    self.assertAlmostEqual(ext.low_gain_calc, lateral_angle_ext._SMALL_CURV_GAIN_CANFD_SUV)
+    self.assertAlmostEqual(ext.curvature_factor, ext.low_gain_calc)
+
+  def test_toggle_off_is_the_previous_map(self):
+    ext = self._low_gain(CAR.FORD_MUSTANG_MACH_E_MK1, {"FordAngleSmallCurvGain_ang": b"0"})
+    self.assertAlmostEqual(ext.low_gain_calc, 1.0)
+
+  def test_other_platforms_unchanged(self):
+    for fp in (CAR.FORD_F_150_MK14, CAR.FORD_EXPLORER_MK6):
+      with self.subTest(fp=fp):
+        on = self._low_gain(fp, {})
+        off = self._low_gain(fp, {"FordAngleSmallCurvGain_ang": b"0"})
+        self.assertAlmostEqual(on.low_gain_calc, off.low_gain_calc)
+
+  def test_never_exceeds_large_curve_gain(self):
+    ext = self._low_gain(CAR.FORD_MUSTANG_MACH_E_MK1, {"FordHighSpeedFactor_ang": b"0.9"}, v=30.0)
+    self.assertLessEqual(ext.low_gain_calc, max(ext.high_gain_calc, 1.0) + 1e-12)
+
+
 class TestInitializeFord(unittest.TestCase):
   def test_safety_param_stays_a_plain_int(self):
     """card serializes CP_SP to capnp, which rejects enum subclasses of int -- an
@@ -392,7 +430,9 @@ class TestLeadLagShaping(unittest.TestCase):
     k = 0.001  # small enough that the soft ROC never binds
     lat = self._update(k, k)
     K = self.ext.curvature_factor
-    self.assertAlmostEqual(lat.path_angle, 0.70 * K * k * 20.0 + 0.30 * K * k * 20.0 * (0.05 / 0.75), places=6)
+    r = float(np.interp(20.0, lateral_angle_ext._LEADLAG_V_BP, lateral_angle_ext._LEADLAG_FAST_RATIO))
+    tau = float(np.interp(20.0, lateral_angle_ext._LEADLAG_V_BP, lateral_angle_ext._LEADLAG_TAU_S))
+    self.assertAlmostEqual(lat.path_angle, r * K * k * 20.0 + (1 - r) * K * k * 20.0 * (0.05 / (tau + 0.05)), places=6)
     for _ in range(200):  # 10 s >> tau
       lat = self._update(k, k)
     self.assertAlmostEqual(lat.path_angle, K * k * 20.0, places=5)
