@@ -139,6 +139,16 @@ def _make_controller(CP, CP_SP):
   return Controller()
 
 
+def _pinion_frame(dat, angle_deg):
+  """Rewrite StePinComp_An_Est (22|15@0+, 0.1 deg, offset -1600) in SteeringPinion_Data (0x7E).
+  ford.h checks this message's counter and quality flag only, both left as logged."""
+  d = bytearray(dat)
+  raw = max(0, min(0x7FFF, int(round((angle_deg + 1600.0) / 0.1))))
+  d[2] = (d[2] & 0x80) | ((raw >> 8) & 0x7F)
+  d[3] = raw & 0xFF
+  return bytes(d)
+
+
 def _yaw_frame(dat, yaw):
   """Rewrite VehYaw_W_Actl (bytes 2-3, 0.0002 rad/s, offset -6.5) and the Yaw_Data_FD1 checksum."""
   d = bytearray(dat)
@@ -151,7 +161,7 @@ def _yaw_frame(dat, yaw):
 
 
 COLS = ('t', 'v', 'latActive', 'pressed', 'acurv', 'yaw_emu', 'ang_emu', 'yaw_log', 'ang_log', 'c1', 'c1_log',
-        'mode', 'devLim', 'unwind', 'blipSrc', 'htActive', 'blocked', 'forced', 'lcState', 'bias', 'lat_delay')
+        'mode', 'devLim', 'unwind', 'windup', 'blipSrc', 'htActive', 'blocked', 'forced', 'lcState', 'bias', 'lat_delay')
 
 
 def apply_patches(patches):
@@ -164,7 +174,7 @@ def apply_patches(patches):
 
 
 def run_route(route_dir, ref=None, overrides=None, open_loop=False, bias=0.0, emu_params=None, ideal=False,
-              patches=None, bias_clear_on_mode0=False):
+              patches=None, bias_clear_on_mode0=False, pinion=False):
   """Returns a dict of per-tick arrays (COLS) for one route."""
   install_ref(ref)
   apply_patches(patches)
@@ -196,6 +206,7 @@ def run_route(route_dir, ref=None, overrides=None, open_loop=False, bias=0.0, em
   c1_log = 0.0
   emu_ready = False
   yaw_seen = None          # the yaw rate the controller last saw; ford.h must see the same one
+  ang_seen = None          # likewise the steering angle (pinion-sourced angle_meas, --pinion)
   press_s, last_press_curv, bias_t = 0.0, 0.0, 1e9
   rows = []
 
@@ -241,11 +252,20 @@ def run_route(route_dir, ref=None, overrides=None, open_loop=False, bias=0.0, em
           dat = f.dat
           if f.address == 0x91 and f.src == 0 and not open_loop and yaw_seen is not None:
             dat = _yaw_frame(dat, yaw_seen)
+          elif f.address == 0x7E and f.src == 0 and not open_loop and ang_seen is not None:
+            dat = _pinion_frame(dat, ang_seen)
           safety.safety_rx_hook(libsafety_py.make_CANPacket(f.address, f.src % 4, dat))
       elif w == 'carState':
         if CP is None or CC is None or not params:
           continue
         if ctrl is None:
+          if pinion:  # FordPrefSteerAngleCurvature: flag + Mach-E geometry index, as the car interface packs it
+            from opendbc.sunnypilot.car.ford.values_ext import (FordSafetyFlagsSP, FORD_PINION_GEOMETRY_INDEX,
+                                                                FORD_PINION_GEOMETRY_SHIFT)
+            from opendbc.car.ford.values import CAR
+            sp = (int(getattr(CP_SP, 'safetyParam', 0)) | FordSafetyFlagsSP.STEER_ANGLE_CURVATURE
+                  | (FORD_PINION_GEOMETRY_INDEX[CAR(CP.carFingerprint)] << FORD_PINION_GEOMETRY_SHIFT))
+            CP_SP = type('CPSP', (), {'safetyParam': sp})()
           ctrl = _make_controller(CP, CP_SP)
           CAN = fordcan.CanBus(CP)
           cfg = CP.safetyConfigs[-1]
@@ -301,6 +321,7 @@ def run_route(route_dir, ref=None, overrides=None, open_loop=False, bias=0.0, em
           yaw_e, ang_e = float(o['yawRate'][0]), float(o['steeringAngleDeg'][0])
 
         yaw_seen = yaw_e
+        ang_seen = ang_e
 
         # 2. CS as the controller sees it
         out = cs_log.as_builder()
@@ -335,6 +356,7 @@ def run_route(route_dir, ref=None, overrides=None, open_loop=False, bias=0.0, em
         rows.append((m.logMonoTime * 1e-9, v, CC.latActive, pressed, CC.actuators.curvature, yaw_e, ang_e,
                      cs_log.yawRate, cs_log.steeringAngleDeg, -wire[1] if wire[0] else 0.0, c1_log, wire[0],
                      ctrl.bp_curvature_deviation_limited, getattr(ctrl, 'bp_unwind_clamped', False),
+                     getattr(ctrl, 'bp_windup_released', False),
                      ctrl.angle_stall_blip_source, ctrl.angle_human_turn_active, blocked, forced,
                      model.meta.laneChangeState.raw if model is not None else 0, bias_k,
                      ctrl.sm.msgs['liveDelay'].lateralDelay))
@@ -367,6 +389,8 @@ def main():
   ap.add_argument('--bias', type=float, default=0.0, help='post-release bias disturbance, 1/m')
   ap.add_argument('--bias-clear-on-mode0', action='store_true',
                   help='the injected bias ends at the first mode-0 frame (i.e. a stall blip fixes it)')
+  ap.add_argument('--pinion', action='store_true',
+                  help='FordPrefSteerAngleCurvature: steering-angle curvature source in controller and ford.h')
   ap.add_argument('--emu', default=None, help='emulator params file (default mache_pscm_params.json)')
   ap.add_argument('--ideal', action='store_true', help='no replayed disturbances (clean emulated car)')
   ap.add_argument('--patch', action='append', default=[],
@@ -375,7 +399,7 @@ def main():
   a = ap.parse_args()
   os.makedirs(a.out, exist_ok=True)
   kw = dict(ref=a.ref, overrides=dict(s.split('=', 1) for s in a.set), open_loop=a.open_loop, bias=a.bias, ideal=a.ideal,
-            bias_clear_on_mode0=a.bias_clear_on_mode0, emu_params=a.emu,
+            bias_clear_on_mode0=a.bias_clear_on_mode0, emu_params=a.emu, pinion=a.pinion,
             patches={k: ast.literal_eval(v) for k, v in (p.split('=', 1) for p in a.patch)})
   with Pool(a.j, maxtasksperchild=1) as p:
     for path in p.imap_unordered(_job, [(r, a.out, kw) for r in a.routes]):

@@ -74,3 +74,12 @@ def test_harness_params_are_typed_like_openpilot():
   assert p.get('a') == 1 and isinstance(p.get('a'), int)
   assert p.get('b') == 1.13 and p.get('c') == 'main_en' and p.get('missing') is None
   assert p.get_bool('a') and not p.get_bool('d') and not p.get_bool('missing')
+
+
+def test_harness_pinion_frame_matches_ford_h_decode():
+  from bluepilot.tools.pscm.harness import _pinion_frame
+  dat = bytes([0x11, 0x22, 0xB3, 0x44, 0x55, 0x66, 0x77, 0x88])
+  out = _pinion_frame(dat, -123.4)
+  raw = ((out[2] & 0x7F) << 8) | out[3]           # ford.h: StePinComp_An_Est
+  assert abs(raw * 0.1 - 1600.0 - (-123.4)) < 0.051
+  assert out[2] & 0x80 == dat[2] & 0x80 and out[:2] == dat[:2] and out[4:] == dat[4:]

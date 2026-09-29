@@ -165,6 +165,13 @@ _STALL_RESPONDING_RATE = 0.002  # 1/m/s
 # car is at the ceiling and the plan is genuinely unwinding, the wire is capped at the command that
 # holds the car's current curvature (K x measured), so the car starts unwinding with the plan.
 # Curve entry and the in-curve request are untouched (the plan isn't unwinding there).
+# Deviation-clip speed gate. ford.h enforces the shadow-curvature band only above
+# angle_error_min_speed = 10.0 m/s (FORD_LIMITS, same Veh_V_ActlBrk speed as vEgoRaw); clipping from
+# 9 m/s (curvature mode's gate) cost angle mode the 9-10 m/s band where tight residential curves
+# live -- 2 of the 3 road-keeping grabs on 000001b2 (t=155 at 9.1 m/s, t=523 at 9.2 m/s) had the
+# clip binding there with the car short of the plan. 0.2 m/s margin keeps the clip engaged before
+# the panda starts checking.
+_DEVIATION_CLIP_MIN_SPEED = 9.8  # m/s
 _WINDUP_AY = 1.8               # m/s^2, measured lateral accel at which the car is at the ceiling
 _WINDUP_PLAN_RATE = 0.002      # 1/m/s, plan curvature easing off at least this fast = unwinding
 _WINDUP_PLAN_TAU = 0.15        # s, smoothing for the plan-rate test
@@ -666,13 +673,13 @@ class LateralAngleExt:
     # BluePilot: the planner has first claim on the deviation budget clipped below; the trim takes
     # what is left. Symmetric -- a one-sided form lets the trim subtract authority while the planner
     # is already clipped short in a curve.
-    if v_ego > 9:
+    if v_ego > _DEVIATION_CLIP_MIN_SPEED:
       _room = max(self.bp_curvature_error - abs(_kappa_planner - current_curvature), 0.0)
       kappa_cmd = _kappa_planner + float(clip(kappa_cmd - _kappa_planner, -_room, _room))
 
     # BluePilot: clip kappa_cmd to current_curvature (measured) +- bp_curvature_error,
-    # mirroring lateral_curv_ext.py's apply_ford_curvature_limits_ext exactly (same formula, same
-    # v_ego > 9 gate, same tolerance). Without this, kappa_cmd
+    # mirroring lateral_curv_ext.py's apply_ford_curvature_limits_ext (same formula, same tolerance;
+    # gated at _DEVIATION_CLIP_MIN_SPEED, just under ford.h's 10 m/s). Without this, kappa_cmd
     # (and therefore path_angle, and the shadow_curvature sent to ford.h) can legitimately lead the
     # measured curvature by more than ford.h's angle-error tolerance during normal curve entry/exit
     # -- the shadow-curvature deviation check (ford_shadow_curvature_error_check) would then block
@@ -681,7 +688,7 @@ class LateralAngleExt:
     # than only clipping the value reported to panda (which would make the check a no-op).
     self.bp_curvature_deviation_limited = False
     _kappa_cmd_pre_error_clip = kappa_cmd
-    if v_ego > 9:
+    if v_ego > _DEVIATION_CLIP_MIN_SPEED:
       kappa_cmd = float(clip(kappa_cmd, current_curvature - self.bp_curvature_error,
                             current_curvature + self.bp_curvature_error))
       # BluePilot: did this clip actually constrain kappa_cmd this frame (deviation from measured,

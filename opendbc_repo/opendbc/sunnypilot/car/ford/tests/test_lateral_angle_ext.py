@@ -467,6 +467,26 @@ class TestLeadLagShaping(unittest.TestCase):
     self.assertLess(abs(lat.path_angle - last), (K - 1.0) * k * v)  # no jump back up to K x kappa
 
 
+class TestDeviationClipSpeedGate(unittest.TestCase):
+  """The clip starts just under ford.h's 10 m/s angle_error_min_speed, not at 9 m/s."""
+
+  def _clipped(self, v):
+    CP = _explorer_cp()
+    ext = _Harness(CP)
+    ext.human_turn_detector = _ForcedDetector(False)
+    ext.path_angle_blend_ratio = 0.0
+    cs = _CS(vEgoRaw=v, vEgo=v, yawRate=-0.01 * v)  # car at +0.010
+    ext.update_angle_strategy(_CC(), cs, _Actuators(curvature=0.030), CP)
+    return ext.bp_curvature_deviation_limited
+
+  def test_not_clipped_below_the_panda_gate(self):
+    self.assertFalse(self._clipped(9.5))
+
+  def test_clipped_before_the_panda_checks(self):
+    self.assertLess(lateral_angle_ext._DEVIATION_CLIP_MIN_SPEED, 10.0)
+    self.assertTrue(self._clipped(9.9))
+
+
 class TestAntiWindup(unittest.TestCase):
   """Anti-windup at the PSCM lateral-accel ceiling (lateral_angle_ext._WINDUP_*)."""
 
