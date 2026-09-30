@@ -471,7 +471,7 @@ class SelfdriveD(CruiseHelper):
       if logs != self.logged_comm_issue:
         # BluePilot: elapsed time since process start, so system/sentry.py's commIssue filter can
         # tell a transient still-warming-up blip (common in the first ~20s after init, while
-        # peripheral streams like modelV2/liveCalibration/liveDelay are still catching up) from a
+        # peripheral streams like modelV2/extrinsicsCalibration/lateralDelay are still catching up) from a
         # genuine mid-drive regression. Deliberately NOT part of `logs` above — dt changes every
         # frame, which would defeat the dedup comparison against self.logged_comm_issue and log
         # every single frame instead of once per distinct invalid/not_alive/not_freq_ok state.
