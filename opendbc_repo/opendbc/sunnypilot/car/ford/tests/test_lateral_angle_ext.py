@@ -641,6 +641,50 @@ class TestHandoffBlipDebounce(unittest.TestCase):
     self.assertEqual(self.ext.stall_blip_frames_left, 0)
 
 
+class TestHandoffBlipPlanGate(unittest.TestCase):
+  """The hand-off pulse lets the wheel self-centre, so it only fires while the plan asks for less
+  than _BLIP_PLAN_MEAS_RATIO of the car's curvature (or is near straight): a manual-turn exit
+  fires at once, a release into a curve the plan still wants waits until the plan eases."""
+
+  V_EGO = 15.0
+
+  def setUp(self):
+    self.CP = _explorer_cp()
+    self.ext = _Harness(self.CP)
+    self.ext.human_turn_detector = _ForcedDetector(False)
+    self.ext.path_angle_blend_ratio = 0.0
+    self.cs = _CS(vEgoRaw=self.V_EGO, vEgo=self.V_EGO, yawRate=0.0)
+
+  def _update(self, plan, meas, pressed=False):
+    self.cs.out.steeringPressed = pressed
+    self.cs.out.yawRate = -meas * self.V_EGO  # measured curvature = -yawRate / v
+    return self.ext.update_angle_strategy(_CC(latActive=True), self.cs, _Actuators(curvature=plan), self.CP)
+
+  def _press_then_release(self, plan, meas, ticks=12):
+    for _ in range(12):
+      self._update(plan, meas, pressed=True)
+    for _ in range(ticks):
+      self._update(plan, meas)
+      if self.ext.angle_stall_blip_source == 1:  # hand-off pulse (2 = the reactive detector)
+        return True
+    return False
+
+  def test_manual_turn_exit_fires(self):
+    self.assertTrue(self._press_then_release(plan=0.001, meas=0.006))
+
+  def test_near_straight_fires(self):
+    self.assertTrue(self._press_then_release(plan=0.0005, meas=0.0))
+
+  def test_release_into_wanted_curve_waits_for_plan(self):
+    self.assertFalse(self._press_then_release(plan=0.004, meas=0.004))
+    self.assertGreater(self.ext.press_blip_pending_s, 0.0)  # still pending, not dropped
+    self._update(plan=0.0005, meas=0.003)
+    self.assertEqual(self.ext.angle_stall_blip_source, 1)
+
+  def test_reversal_into_opposite_curve_waits(self):
+    self.assertFalse(self._press_then_release(plan=-0.004, meas=0.003))
+
+
 class TestReactiveStallRealCurveGate(unittest.TestCase):
   """The reactive stall detector's real-curve floor: straight-line entry (small measured
   curvature) satisfies the gap test by construction and must not fire; a tight curve with

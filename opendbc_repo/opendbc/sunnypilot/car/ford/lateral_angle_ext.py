@@ -213,6 +213,15 @@ _PRESS_BLIP_PENDING_S = 3.0
 # curve and the ramp adds ~0.6 s of unassisted steering (~15 m). Cap the ramp-recovery
 # distance so a hand-off pulse never fires where the recovery would understeer the curve.
 _BLIP_MAX_RAMP_M = 10.0
+# A mode-0 pulse lets the wheel self-centre (12 -> 1 deg in 0.3 s at 14 m/s, 000001b1 t=910), and the
+# PSCM then takes ~0.5 s to answer again -- up to ~1 s in LatCtlLim after a large command. That is the
+# right move when the driver hands back a turn the plan no longer wants (manual-turn exit: the free
+# wheel straightens the car at once, where a clip-bound unwind takes ~2 s -- 000001af t=223, 000001b4
+# t=177). It is the wrong move when the plan still wants a curve: the pulse throws it away and the
+# car re-acquires it late (000001b1 t=507/910, 000001b2 t=591, 000001b4 t=762 -> driver re-grab).
+# Only fire while the plan asks for less than this share of the car's curvature, or is near straight.
+_BLIP_PLAN_MEAS_RATIO = 0.3
+_BLIP_PLAN_STRAIGHT = 0.001  # 1/m
 # Lead-lag command shaping (see module docstring): the wire carries r*K*kappa immediately and the
 # remaining (1-r)*K*kappa through a first-order lag of tau. First fitted open-loop on routes
 # 41x-45x + 1a7-1af (r=0.70/tau=0.7 s to 56 mph, r=0.85/tau=1.0 s above 60 mph). Retuned 2026-09-28
@@ -533,7 +542,9 @@ class LateralAngleExt:
           and abs(self.path_angle_last) < _BLIP_MAX_PATH_ANGLE
           # ramp-recovery distance guard: straight (path_angle ~0) always passes; curves
           # scale with speed through the soft ROC
-          and (abs(self.path_angle_last) / _soft_roc_rad_per_s(v_ego)) * v_ego < _BLIP_MAX_RAMP_M):
+          and (abs(self.path_angle_last) / _soft_roc_rad_per_s(v_ego)) * v_ego < _BLIP_MAX_RAMP_M
+          and abs(actuators.curvature) <= max(_BLIP_PLAN_STRAIGHT,
+                                              _BLIP_PLAN_MEAS_RATIO * abs(self.get_current_curvature(CS)))):
         self.stall_blip_frames_left = _STALL_BLIP_FRAMES
         self.angle_stall_blip_source = 1
         self.press_blip_pending_s = 0.0
