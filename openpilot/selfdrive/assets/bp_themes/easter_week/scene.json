@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "sky": {
+    "camera_tint_alpha": 40
+  },
+  "layers": [
+    {
+      "type": "backdrop",
+      "style": "eggs",
+      "tint": "#2C2044",
+      "horizon_frac": 0.46,
+      "height_frac": 0.24,
+      "alpha_minimal": 235,
+      "alpha_camera": 70,
+      "celestial": "sun",
+      "celestial_pos": [
+        0.8,
+        0.15
+      ],
+      "celestial_tint": "#FFF2C8",
+      "celestial_size_frac": 0.14
+    },
+    {
+      "type": "particles",
+      "sprite": "petal",
+      "mode": "fall",
+      "count": 36,
+      "camera_count_scale": 0.4,
+      "size_px": [
+        20,
+        41
+      ],
+      "fall_speed": [
+        0.03,
+        0.06
+      ],
+      "sway_amp": [
+        0.008,
+        0.02
+      ],
+      "sway_freq_hz": [
+        0.15,
+        0.5
+      ],
+      "spin_dps": [
+        -25,
+        25
+      ],
+      "tints": [
+        "#F5A0C3",
+        "#AF87E1",
+        "#FFCD8C",
+        "#FFFAD7"
+      ],
+      "minimal_alpha": 225,
+      "camera_alpha": 110,
+      "speed_scale": 0.5,
+      "depth_split": 0.6,
+      "blend": "alpha"
+    },
+    {
+      "type": "decor",
+      "sprite": "petal",
+      "anchor": "top_left",
+      "size_frac": 0.05,
+      "spacing_frac": 0.06,
+      "droop_frac": 0.025,
+      "tints": [
+        "#F5A0C3"
+      ],
+      "alpha_minimal": 225,
+      "alpha_camera": 90,
+      "idle": "none"
+    },
+    {
+      "type": "decor",
+      "sprite": "petal",
+      "anchor": "top_right",
+      "size_frac": 0.05,
+      "spacing_frac": 0.06,
+      "droop_frac": 0.025,
+      "tints": [
+        "#AF87E1"
+      ],
+      "alpha_minimal": 225,
+      "alpha_camera": 90,
+      "idle": "none"
+    },
+    {
+      "type": "hero",
+      "x_frac": 0.5,
+      "y_frac": 0.8,
+      "alpha_minimal": 235,
+      "alpha_camera": 120,
+      "sprite": "bunny",
+      "size_frac": 0.15
+    }
+  ],
+  "foreground": {
+    "particles_over_hud": true,
+    "corner_accents": true,
+    "corner_alpha": 50
+  }
+}

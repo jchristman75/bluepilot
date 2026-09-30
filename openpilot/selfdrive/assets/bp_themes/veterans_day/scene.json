@@ -1,0 +1,133 @@
+{
+  "version": 1,
+  "sky": {
+    "camera_tint_alpha": 35
+  },
+  "layers": [
+    {
+      "type": "backdrop",
+      "style": "flags",
+      "tint": "#FFFFFF",
+      "horizon_frac": 0.46,
+      "height_frac": 0.26,
+      "alpha_minimal": 235,
+      "alpha_camera": 70,
+      "celestial": "sun",
+      "celestial_pos": [
+        0.82,
+        0.14
+      ],
+      "celestial_tint": "#FFD9A0",
+      "celestial_size_frac": 0.15
+    },
+    {
+      "type": "particles",
+      "sprite": "poppy",
+      "mode": "fall",
+      "count": 18,
+      "camera_count_scale": 0.4,
+      "size_px": [
+        20,
+        40
+      ],
+      "fall_speed": [
+        0.04,
+        0.09
+      ],
+      "sway_amp": [
+        0.004,
+        0.012
+      ],
+      "sway_freq_hz": [
+        0.12,
+        0.4
+      ],
+      "spin_dps": [
+        -40,
+        40
+      ],
+      "tints": [
+        "#FFFFFF"
+      ],
+      "minimal_alpha": 225,
+      "camera_alpha": 105,
+      "speed_scale": 0.5,
+      "depth_split": 0.6,
+      "blend": "alpha"
+    },
+    {
+      "type": "particles",
+      "sprite": "star5",
+      "mode": "fall",
+      "count": 10,
+      "camera_count_scale": 0.4,
+      "size_px": [
+        14,
+        26
+      ],
+      "fall_speed": [
+        0.03,
+        0.06
+      ],
+      "sway_amp": [
+        0.003,
+        0.008
+      ],
+      "sway_freq_hz": [
+        0.1,
+        0.3
+      ],
+      "spin_dps": [
+        -25,
+        25
+      ],
+      "tints": [
+        "#FFD966",
+        "#F0F0F5",
+        "#E03C31"
+      ],
+      "minimal_alpha": 210,
+      "camera_alpha": 95,
+      "speed_scale": 0.5,
+      "depth_split": 0.6,
+      "blend": "alpha"
+    },
+    {
+      "type": "decor",
+      "sprite": "star5",
+      "anchor": "top_left",
+      "size_frac": 0.05,
+      "tints": [
+        "#FFD966"
+      ],
+      "alpha_minimal": 225,
+      "alpha_camera": 100,
+      "idle": "twinkle"
+    },
+    {
+      "type": "decor",
+      "sprite": "star5",
+      "anchor": "top_right",
+      "size_frac": 0.05,
+      "tints": [
+        "#FFD966"
+      ],
+      "alpha_minimal": 225,
+      "alpha_camera": 100,
+      "idle": "twinkle"
+    },
+    {
+      "type": "hero",
+      "x_frac": 0.5,
+      "y_frac": 0.8,
+      "alpha_minimal": 235,
+      "alpha_camera": 120,
+      "sprite": "usflag",
+      "size_frac": 0.15
+    }
+  ],
+  "foreground": {
+    "particles_over_hud": true,
+    "corner_accents": false
+  }
+}

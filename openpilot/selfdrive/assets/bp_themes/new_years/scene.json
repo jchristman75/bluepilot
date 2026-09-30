@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "sky": {
+    "camera_tint_alpha": 40
+  },
+  "layers": [
+    {
+      "type": "backdrop",
+      "style": "skyline",
+      "tint": "#37406E",
+      "horizon_frac": 0.46,
+      "height_frac": 0.26,
+      "alpha_minimal": 235,
+      "alpha_camera": 70
+    },
+    {
+      "type": "balldrop",
+      "x_frac": 0.5,
+      "top_frac": 0.06,
+      "bottom_frac": 0.3,
+      "period_s": 24,
+      "ball_frac": 0.085,
+      "tint": "#FFE066",
+      "pole_tint": "#9AA4B8",
+      "alpha_minimal": 235,
+      "alpha_camera": 90
+    },
+    {
+      "type": "burst",
+      "period_s": [
+        1.0,
+        2.0
+      ],
+      "particles_per_burst": 30,
+      "radial_speed": [
+        0.12,
+        0.26
+      ],
+      "gravity": 0.12,
+      "fade_s": [
+        1.2,
+        2.0
+      ],
+      "region": [
+        0.06,
+        0.03,
+        0.88,
+        0.3
+      ],
+      "tints": [
+        "#FFD700",
+        "#FFFFFF",
+        "colors:Accent"
+      ],
+      "blend": "additive"
+    },
+    {
+      "type": "particles",
+      "sprite": "spark",
+      "mode": "fall",
+      "count": 14,
+      "camera_count_scale": 0.4,
+      "size_px": [
+        10,
+        20
+      ],
+      "fall_speed": [
+        0.03,
+        0.06
+      ],
+      "sway_amp": [
+        0.004,
+        0.015
+      ],
+      "sway_freq_hz": [
+        0.15,
+        0.5
+      ],
+      "spin_dps": [
+        0,
+        0
+      ],
+      "tints": [
+        "#FFD700",
+        "#F0F0FF"
+      ],
+      "minimal_alpha": 200,
+      "camera_alpha": 90,
+      "speed_scale": 0.5,
+      "depth_split": 0.6,
+      "blend": "additive"
+    },
+    {
+      "type": "decor",
+      "sprite": "bulb",
+      "anchor": "top_edge",
+      "size_frac": 0.028,
+      "spacing_frac": 0.05,
+      "droop_frac": 0.028,
+      "tints": [
+        "#FFD700",
+        "#FFFFFF",
+        "#F0E68C"
+      ],
+      "alpha_minimal": 225,
+      "alpha_camera": 90,
+      "idle": "twinkle"
+    },
+    {
+      "type": "hero",
+      "x_frac": 0.5,
+      "y_frac": 0.8,
+      "alpha_minimal": 235,
+      "alpha_camera": 120,
+      "sprite": "orb",
+      "size_frac": 0.12,
+      "tint": "#FFD966"
+    }
+  ],
+  "foreground": {
+    "particles_over_hud": true,
+    "corner_accents": true,
+    "corner_alpha": 60
+  }
+}

@@ -216,6 +216,21 @@ class TestBluePilotLateralSchemeSplit:
     assert keys.index("disable_BP_lat_UI") < keys.index("FordLowSpeedFactor_ang")
     assert keys.index("disable_BP_lat_UI") < keys.index("enable_human_turn_detection_curv")
 
+  def test_high_speed_low_curve_adjustment_contract(self, schema):
+    items = schema["vehicle_settings"]["ford"]["items"]
+    keys = [item["key"] for item in items]
+    item = _find_item(schema, "FordHighSpeedDampening_ang")
+    assert item is not None
+    assert keys.index("FordHighSpeedDampening_ang") == keys.index("FordHighSpeedFactor_ang") + 1
+    assert item["title"] == "[Lateral Tuning] High Speed Low Curve Adjustment Factor (Angle)"
+    expected_description = " ".join((
+      "Tune adjustment factor for low curve straightaways (highways) at high speeds.",
+      "If oversteering, reduce. If understeering, increase",
+    ))
+    assert item["description"] == expected_description
+    assert (item["min"], item["max"], item["step"]) == (0.75, 1.25, 0.01)
+    assert self._mode_gate(item) == 1
+
 
 class TestValidator:
   def test_validator_accepts_real_json(self):

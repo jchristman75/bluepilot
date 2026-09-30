@@ -109,7 +109,9 @@ function launch {
   # start manager
   cd openpilot/system/manager
   if [ ! -f $DIR/prebuilt ]; then
-    ./build.py
+    # BluePilot: verbose build UI (progress + live scons line + failure log). Falls back to the
+    # stock build if bp_build.py can't start, so a UI bug can't leave the device unable to build.
+    ./bp_build.py || ./build.py
   fi
   ./manager.py
 

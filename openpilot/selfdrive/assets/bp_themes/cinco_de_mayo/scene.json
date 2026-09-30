@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "sky": {
+    "camera_tint_alpha": 40
+  },
+  "layers": [
+    {
+      "type": "backdrop",
+      "style": "mesas",
+      "tint": "#A0522D",
+      "horizon_frac": 0.46,
+      "height_frac": 0.26,
+      "alpha_minimal": 235,
+      "alpha_camera": 70,
+      "celestial": "sun",
+      "celestial_pos": [
+        0.22,
+        0.16
+      ],
+      "celestial_tint": "#FFCF6E",
+      "celestial_size_frac": 0.16
+    },
+    {
+      "type": "particles",
+      "sprite": "pennant",
+      "mode": "fall",
+      "count": 38,
+      "camera_count_scale": 0.4,
+      "size_px": [
+        17,
+        34
+      ],
+      "fall_speed": [
+        0.07,
+        0.13
+      ],
+      "sway_amp": [
+        0.004,
+        0.015
+      ],
+      "sway_freq_hz": [
+        0.15,
+        0.5
+      ],
+      "spin_dps": [
+        -120,
+        120
+      ],
+      "tints": [
+        "#009650",
+        "#FFFFFF",
+        "#D72837"
+      ],
+      "minimal_alpha": 225,
+      "camera_alpha": 110,
+      "speed_scale": 0.5,
+      "depth_split": 0.6,
+      "blend": "alpha"
+    },
+    {
+      "type": "decor",
+      "sprite": "pennant",
+      "anchor": "top_edge",
+      "size_frac": 0.03,
+      "spacing_frac": 0.05,
+      "droop_frac": 0.028,
+      "tints": [
+        "#009650",
+        "#FFFFFF",
+        "#D72837"
+      ],
+      "alpha_minimal": 220,
+      "alpha_camera": 90,
+      "idle": "none"
+    },
+    {
+      "type": "hero",
+      "x_frac": 0.5,
+      "y_frac": 0.8,
+      "alpha_minimal": 235,
+      "alpha_camera": 120,
+      "sprite": "sombrero",
+      "size_frac": 0.15
+    }
+  ],
+  "foreground": {
+    "particles_over_hud": true,
+    "corner_accents": false
+  }
+}

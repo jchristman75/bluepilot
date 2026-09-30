@@ -1,0 +1,105 @@
+{
+  "version": 1,
+  "sky": {
+    "camera_tint_alpha": 40
+  },
+  "layers": [
+    {
+      "type": "backdrop",
+      "style": "farmland",
+      "tint": "#3A2410",
+      "horizon_frac": 0.46,
+      "height_frac": 0.24,
+      "alpha_minimal": 235,
+      "alpha_camera": 70,
+      "celestial": "sun",
+      "celestial_pos": [
+        0.2,
+        0.18
+      ],
+      "celestial_tint": "#FFC873",
+      "celestial_size_frac": 0.17
+    },
+    {
+      "type": "particles",
+      "sprite": "leaf",
+      "mode": "fall",
+      "count": 34,
+      "camera_count_scale": 0.4,
+      "size_px": [
+        29,
+        61
+      ],
+      "fall_speed": [
+        0.05,
+        0.1
+      ],
+      "sway_amp": [
+        0.008,
+        0.02
+      ],
+      "sway_freq_hz": [
+        0.15,
+        0.5
+      ],
+      "spin_dps": [
+        -90,
+        90
+      ],
+      "tints": [
+        "#B95F23",
+        "#E69632",
+        "#D25A23",
+        "#F5D28C"
+      ],
+      "minimal_alpha": 225,
+      "camera_alpha": 110,
+      "speed_scale": 0.5,
+      "depth_split": 0.6,
+      "blend": "alpha"
+    },
+    {
+      "type": "decor",
+      "sprite": "leaf",
+      "anchor": "top_left",
+      "size_frac": 0.055,
+      "spacing_frac": 0.06,
+      "droop_frac": 0.025,
+      "tints": [
+        "#E69632",
+        "#B95F23"
+      ],
+      "alpha_minimal": 225,
+      "alpha_camera": 90,
+      "idle": "none"
+    },
+    {
+      "type": "decor",
+      "sprite": "leaf",
+      "anchor": "top_right",
+      "size_frac": 0.055,
+      "spacing_frac": 0.06,
+      "droop_frac": 0.025,
+      "tints": [
+        "#D25A23",
+        "#F5D28C"
+      ],
+      "alpha_minimal": 225,
+      "alpha_camera": 90,
+      "idle": "none"
+    },
+    {
+      "type": "hero",
+      "x_frac": 0.5,
+      "y_frac": 0.8,
+      "alpha_minimal": 235,
+      "alpha_camera": 120,
+      "sprite": "turkey",
+      "size_frac": 0.15
+    }
+  ],
+  "foreground": {
+    "particles_over_hud": true,
+    "corner_accents": false
+  }
+}

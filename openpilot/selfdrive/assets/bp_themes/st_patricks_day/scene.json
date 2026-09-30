@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "sky": {
+    "camera_tint_alpha": 40
+  },
+  "layers": [
+    {
+      "type": "backdrop",
+      "style": "clover_hills",
+      "tint": "#0C3018",
+      "horizon_frac": 0.46,
+      "height_frac": 0.24,
+      "alpha_minimal": 235,
+      "alpha_camera": 70,
+      "rainbow": true
+    },
+    {
+      "type": "particles",
+      "sprite": "clover",
+      "mode": "fall",
+      "count": 34,
+      "camera_count_scale": 0.4,
+      "size_px": [
+        26,
+        54
+      ],
+      "fall_speed": [
+        0.04,
+        0.08
+      ],
+      "sway_amp": [
+        0.004,
+        0.015
+      ],
+      "sway_freq_hz": [
+        0.15,
+        0.5
+      ],
+      "spin_dps": [
+        -45,
+        45
+      ],
+      "tints": [
+        "#3CD26E",
+        "#5ADC78",
+        "#2AA050",
+        "#FFBE3C"
+      ],
+      "minimal_alpha": 225,
+      "camera_alpha": 110,
+      "speed_scale": 0.5,
+      "depth_split": 0.6,
+      "blend": "alpha"
+    },
+    {
+      "type": "decor",
+      "sprite": "clover",
+      "anchor": "top_left",
+      "size_frac": 0.055,
+      "spacing_frac": 0.06,
+      "droop_frac": 0.025,
+      "tints": [
+        "#3CD26E"
+      ],
+      "alpha_minimal": 225,
+      "alpha_camera": 90,
+      "idle": "none"
+    },
+    {
+      "type": "decor",
+      "sprite": "clover",
+      "anchor": "top_right",
+      "size_frac": 0.055,
+      "spacing_frac": 0.06,
+      "droop_frac": 0.025,
+      "tints": [
+        "#5ADC78"
+      ],
+      "alpha_minimal": 225,
+      "alpha_camera": 90,
+      "idle": "none"
+    },
+    {
+      "type": "hero",
+      "x_frac": 0.5,
+      "y_frac": 0.8,
+      "alpha_minimal": 235,
+      "alpha_camera": 120,
+      "sprite": "pot_gold",
+      "size_frac": 0.14
+    }
+  ],
+  "foreground": {
+    "particles_over_hud": true,
+    "corner_accents": true,
+    "corner_alpha": 50
+  }
+}

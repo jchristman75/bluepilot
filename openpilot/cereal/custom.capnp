@@ -548,6 +548,16 @@ struct ControllerStateBP @0xcd96dafb67a082d0 {
   # --- Fingerprint (not a menu item, but requested alongside the settings snapshot) ---
   bmsFingerprintForced @52 :Bool;  # true when CarParams.fingerprintSource == fixed (CarPlatformBundle / FINGERPRINT env)
   bmsFingerprint @53 :Text;  # CarParams.carFingerprint
+
+  # BluePilot: lateral mode the car controller actually ran this frame (not the param).
+  # Only published by Ford BP, so other cars show nothing.
+  activeLateralMode @54 :LateralMode;
+
+  enum LateralMode {
+    openpilot @0;  # BP lateral bypassed (disable_BP_lat_UI)
+    curvature @1;
+    angle @2;
+  }
 }
 
 struct CarStateBP @0xb057204d7deadf3f {
@@ -570,7 +580,7 @@ struct CarStateBP @0xb057204d7deadf3f {
     voltHighLimit @1 :Float32;
     voltLowLimit @2 :Float32;
     voltActual @3 :Float32;
-    ampsActual @4 :Float32;
+    ampsActual @4 :Float32;  # from MtrTracData_1_FD1; Battery_Traction_1 carries no current on Mach-E
     socMinPerc @5 :Float32;
     socMaxPerc @6 :Float32;
     socActual @7 :Float32;

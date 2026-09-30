@@ -10,7 +10,6 @@ from openpilot.system.ui.widgets.list_view import ButtonAction
 from openpilot.system.ui.widgets.scroller_tici import Scroller
 
 from openpilot.selfdrive.ui.sunnypilot.layouts.settings.vehicle.brands.factory import BrandSettingsFactory
-from openpilot.selfdrive.ui.sunnypilot.layouts.settings.vehicle.platform_selector import PlatformSelector, LegendWidget
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.sunnypilot.widgets.list_view import ListItemSP
 
@@ -21,12 +20,14 @@ class VehicleLayout(Widget):
     self._brand_settings = None
     self._brand_items = []
     self._current_brand = None
-    self._platform_selector = PlatformSelector(self._update_brand_settings)
+    # local import: bp module imports .platform_selector, re-entering this package mid-init
+    from openpilot.selfdrive.ui.bp.widgets.platform_selector_bp import PlatformSelectorBP, LegendWidgetBP
+    self._platform_selector = PlatformSelectorBP(self._update_brand_settings)
 
     self._vehicle_item = ListItemSP(title=self._platform_selector.text, action_item=ButtonAction(text=tr("SELECT")),
                                     callback=self._platform_selector._on_clicked)
     self._vehicle_item.title_color = self._platform_selector.color
-    self._legend_widget = LegendWidget(self._platform_selector)
+    self._legend_widget = LegendWidgetBP(self._platform_selector)
 
     self.items = [self._vehicle_item, self._legend_widget]
     self._scroller = Scroller(self.items, line_separator=True, spacing=0)

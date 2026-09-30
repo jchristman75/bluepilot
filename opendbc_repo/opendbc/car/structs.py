@@ -236,3 +236,10 @@ class ControllerStateBP:
   # --- Fingerprint ---
   bmsFingerprintForced: bool = False
   bmsFingerprint: str = ""
+  # --- Lateral mode the car controller actually ran (not the param) ---
+  activeLateralMode: 'ControllerStateBP.LateralMode' = field(default_factory=lambda: ControllerStateBP.LateralMode.openpilot)
+
+  class LateralMode(StrEnum):
+    openpilot = auto()  # BP lateral bypassed
+    curvature = auto()
+    angle = auto()

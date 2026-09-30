@@ -22,8 +22,22 @@ class LateralLayoutMici(NavScroller):
     self.high_speed_factor = BigParamFloatControl(
       "High Speed Adjustment Factor", "FordHighSpeedFactor_ang", min=0.5, max=1.5, step=0.01,
     )
+    self.high_speed_dampening = BigParamFloatControl(
+      "High Speed Low Curve Adjustment Factor", "FordHighSpeedDampening_ang", min=0.25, max=1.25, step=0.01,
+    )
     self.lane_change_factor_high_ang = BigParamFloatControl(
       "Lane Change Factor High", "lane_change_factor_high_ang", min=0.85, max=1.50,
+    )
+    # Lane centering trim — angle mode's "advanced lane positioning" (curvature-domain trim,
+    # see opendbc/sunnypilot/car/ford/lane_center_trim.py).
+    self.enable_lane_positioning_ang = BigParamControlBP(
+      "Enable Lane Positioning", "enable_lane_positioning_ang",
+    )
+    self.custom_path_offset_ang = BigParamFloatControl(
+      "In-Lane Offset", "custom_path_offset_ang", min=-0.5, max=0.5, step=0.01,
+    )
+    self.lane_centering_strength_ang = BigParamFloatControl(
+      "Lane Centering Strength", "lane_centering_strength_ang", min=0.0, max=1.0, step=0.05,
     )
 
     # --- Always-visible items ---
@@ -69,7 +83,11 @@ class LateralLayoutMici(NavScroller):
     self._scroller.add_widgets([
       self.low_speed_factor,
       self.high_speed_factor,
+      self.high_speed_dampening,
       self.lane_change_factor_high_ang,
+      self.enable_lane_positioning_ang,
+      self.custom_path_offset_ang,
+      self.lane_centering_strength_ang,
       self.disable_lane_change_under_speed,
       self.blinker_min_speed,
       self.lane_change_factor_high_curv,
@@ -92,6 +110,7 @@ class LateralLayoutMici(NavScroller):
       ("enable_lane_positioning_curv", self.enable_lane_positioning),
       ("enable_lane_full_mode_curv", self.enable_lane_full_mode),
       ("custom_profile_curv", self.custom_profile),
+      ("enable_lane_positioning_ang", self.enable_lane_positioning_ang),
       ("BpShowLateralControl", self.show_lateral_control),
     )
 
@@ -110,7 +129,14 @@ class LateralLayoutMici(NavScroller):
     is_curv = not is_angle
     self.low_speed_factor.set_visible(is_angle)
     self.high_speed_factor.set_visible(is_angle)
+    self.high_speed_dampening.set_visible(is_angle)
     self.lane_change_factor_high_ang.set_visible(is_angle)
+    self.enable_lane_positioning_ang.set_visible(is_angle)
+    lane_pos_ang = ui_state.params.get_bool("enable_lane_positioning_ang")
+    self.custom_path_offset_ang.set_visible(is_angle)
+    self.custom_path_offset_ang.set_enabled(lane_pos_ang)
+    self.lane_centering_strength_ang.set_visible(is_angle)
+    self.lane_centering_strength_ang.set_enabled(lane_pos_ang)
     self.blinker_min_speed.set_enabled(ui_state.params.get_bool("BlinkerPauseLaneChange"))
     for item in (
       self.lane_change_factor_high_curv,

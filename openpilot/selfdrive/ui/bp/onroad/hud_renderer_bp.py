@@ -1,6 +1,6 @@
 import pyray as rl
 from openpilot.common.params import Params
-from opendbc.sunnypilot.car.ford.lateral_curv_ext import PrimaryLateralControl
+from opendbc.car.structs import ControllerStateBP
 from openpilot.bluepilot.ui.lib.bp_shaders import draw_shader_circle_gradient
 from openpilot.selfdrive.ui.onroad.hud_renderer import UI_CONFIG, FONT_SIZES, COLORS
 from openpilot.selfdrive.ui.sunnypilot.onroad.hud_renderer import HudRendererSP
@@ -8,6 +8,8 @@ from openpilot.selfdrive.ui.bp.onroad.exp_button_bp import ExpButtonBP
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.selfdrive.ui.bp.lib.ui_debug_logger import bp_ui_log
+
+LateralMode = ControllerStateBP.LateralMode
 
 # BluePilot: Y center for speed display (matching upstream hardcoded values)
 SPEED_CENTER_Y = 180
@@ -36,8 +38,8 @@ class HudRendererBP(HudRendererSP):
     self._show_brake_status = self._bp_params.get_bool("ShowBrakeStatus")
     self._hide_v_ego_ui = self._bp_params.get_bool("HideVEgoUI")
     self._show_lateral_control = self._bp_params.get_bool("BpShowLateralControl")
-    self._disable_bp_lat = self._bp_params.get_bool("disable_BP_lat_UI")
-    self._primary_control = PrimaryLateralControl(self._bp_params.get("FordPrefLateralControl") or 0)
+    # BluePilot: actual mode from controllerStateBP (None = not published, e.g. non-Ford)
+    self._lateral_mode = None
 
   def set_gradient_rect(self, rect: rl.Rectangle):
     """Set full-width rect for header gradient (when HUD renders offset for confidence ball)."""
@@ -56,9 +58,10 @@ class HudRendererBP(HudRendererSP):
       self._show_brake_status = self._bp_params.get_bool("ShowBrakeStatus")
       self._hide_v_ego_ui = self._bp_params.get_bool("HideVEgoUI")
       self._show_lateral_control = self._bp_params.get_bool("BpShowLateralControl")
-      if self._show_lateral_control:
-        self._disable_bp_lat = self._bp_params.get_bool("disable_BP_lat_UI")
-        self._primary_control = PrimaryLateralControl(self._bp_params.get("FordPrefLateralControl") or 0)
+
+    if self._show_lateral_control:
+      sm = ui_state.sm
+      self._lateral_mode = sm['controllerStateBP'].activeLateralMode if sm.alive['controllerStateBP'] else None
 
     # Check brake status if enabled
     if self._show_brake_status:
@@ -111,16 +114,16 @@ class HudRendererBP(HudRendererSP):
 
   def _draw_lateral_control_overlay(self, center_x: float, center_y: float, wheel_size: int) -> None:
     """Draw the current lateral control mode over the steering wheel icon."""
-    if not self._show_lateral_control:
+    if not self._show_lateral_control or self._lateral_mode is None:
       return
 
     text_size = int(wheel_size * 0.4)
-    if self._disable_bp_lat:
-      letter, color = "OP", rl.Color(100, 100, 100, 220)
-    elif self._primary_control == PrimaryLateralControl.angle:
+    if self._lateral_mode == LateralMode.angle:
       letter, color = "A", rl.Color(50, 100, 255, 220)
-    else:
+    elif self._lateral_mode == LateralMode.curvature:
       letter, color = "C", rl.Color(255, 165, 0, 220)
+    else:
+      letter, color = "OP", rl.Color(100, 100, 100, 220)
 
     text_dims = measure_text_cached(self._font_bold, letter, text_size)
     text_pos = rl.Vector2(center_x - text_dims.x / 2, center_y - text_dims.y / 2)

@@ -19,6 +19,8 @@ from openpilot.selfdrive.ui.bp.lib.steering_wheel_style import (
   get_steering_wheel_icon_style,
   SteeringWheelIconStyle,
 )
+# BluePilot: seasonal theme packs
+from openpilot.selfdrive.ui.bp.lib import theme_pack
 from openpilot.selfdrive.ui.bp.lib.dm_icon_style import (
   DMIconStyle,
   ensure_dm_icon_style_initialized,
@@ -80,7 +82,6 @@ class BluePilotLayout(Widget):
       ("FordPrefSteerAngleCurvature", self._steer_angle_curvature),
       ("BPDisableLaneLineStatusColor", self._disable_lane_line_status_color),
       ("BPHideCameraView", self._hide_camera_view),
-      ("BPRadRacerTheme", self._rad_racer_theme),
       ("BPRainbowLines", self._rainbow_lane_lines),
       ("ShowBlindspotOverlay", self._show_blindspot),
       ("ShowBrakeStatus", self._show_brake_status),
@@ -96,6 +97,7 @@ class BluePilotLayout(Widget):
       ("enable_lane_positioning_curv", self._enable_lane_positioning),
       ("enable_lane_full_mode_curv", self._enable_lane_full_mode),
       ("custom_profile_curv", self._custom_profile),
+      ("enable_lane_positioning_ang", self._enable_lane_positioning_ang),
       ("disable_BP_lat_UI", self._disable_BP_lat),
       ("disable_BP_long_UI", self._disable_BP_long),
       ("disable_downhill_comp_UI", self._disable_dowhill_comp),
@@ -145,15 +147,6 @@ class BluePilotLayout(Widget):
       lambda: tr("Disable camera feed & only show lane lines and model path."),
       initial_state=self._safe_get_bool(self._params, "BPHideCameraView"),
       callback=lambda state: self._toggle_callback(state, "BPHideCameraView"),
-      icon="chffr_wheel.png"
-    )
-
-    # Rad Racer 8-bit theme toggle
-    self._rad_racer_theme = toggle_item(
-      lambda: tr("8-Bit Racer Theme"),
-      lambda: tr("Retro racing game onroad view: hides the camera, draws the road as green game lines, and shows a bottom gauge cluster."),
-      initial_state=self._safe_get_bool(self._params, "BPRadRacerTheme"),
-      callback=lambda state: self._toggle_callback(state, "BPRadRacerTheme"),
       icon="chffr_wheel.png"
     )
 
@@ -209,6 +202,30 @@ class BluePilotLayout(Widget):
       initial_state=self._safe_get_bool(self._params, "BPAnimateSteeringWheel"),
       callback=lambda state: self._toggle_callback(state, "BPAnimateSteeringWheel"),
       icon="chffr_wheel.png"
+    )
+
+    # BluePilot: one theme selector for everything (8-Bit Racer + seasonal packs),
+    # same entries and param as the MICI page — see theme_pack.selector_entries().
+    # A dialog (not a button row) so any number of packs stays inside the item box.
+    self._theme_entries = theme_pack.selector_entries()
+    self._theme_dialog: MultiOptionDialog | None = None
+    self._theme_action = ButtonAction(lambda: tr("SELECT"))
+    self._theme_action.set_value(lambda: self._get_theme_display())
+    self._theme_pack_btn = ListItem(
+      lambda: tr("Theme"),
+      description=lambda: tr("8-Bit Racer game view, or a seasonal theme pack (recolors the road and the wheel icon)."),
+      action_item=self._theme_action,
+      callback=self._select_theme,
+    )
+
+    # Auto seasonal: date-driven pack during holiday weeks; the manual Theme
+    # selection above still applies outside those windows.
+    self._theme_auto_seasonal = toggle_item(
+      lambda: tr("Auto Seasonal Theme"),
+      lambda: tr("During a holiday week, switch to that seasonal theme pack automatically. Outside holiday weeks the Theme selection above applies."),
+      initial_state=self._safe_get_bool(self._params, "BPThemeAutoSeasonal"),
+      callback=lambda state: self._toggle_callback(state, "BPThemeAutoSeasonal"),
+      icon="warning.png"
     )
 
     wheel_style_idx = int(ensure_steering_wheel_icon_style_initialized(self._params, SteeringWheelIconStyle.COMMA_3X))
@@ -532,6 +549,47 @@ class BluePilotLayout(Widget):
       step=0.01,
       icon="chffr_wheel.png"
     )
+    self._high_speed_dampening = float_control_item(
+      lambda: tr("High Speed Low Curve Adjustment Factor"),
+      lambda: tr("Tune adjustment factor for low curve straightaways (highways) at high speeds. If oversteering, reduce. If understeering, increase"),
+      param="FordHighSpeedDampening_ang",
+      min_value=0.25,
+      max_value=1.25,
+      step=0.01,
+      icon="chffr_wheel.png"
+    )
+
+    # Lane centering trim — angle mode's "advanced lane positioning" (curvature-domain trim,
+    # see lane_center_trim.py). Mirrors the curv-mode items below, one-to-one, but scoped to
+    # its own _ang params.
+    self._enable_lane_positioning_ang = toggle_item(
+      lambda: tr("Enable Lane Positioning"),
+      lambda: tr("Nudge the vehicle toward true lane-line center (plus optional bias) while in angle-primary control."),
+      initial_state=self._safe_get_bool(self._params, "enable_lane_positioning_ang"),
+      callback=lambda state: self._toggle_callback(state, "enable_lane_positioning_ang"),
+      icon="chffr_wheel.png"
+    )
+    self._custom_path_offset_ang = float_control_item(
+      lambda: tr("In-Lane Offset"),
+      lambda: tr("Adjust the in-lane offset (-0.5 to 0.5)."),
+      param="custom_path_offset_ang",
+      min_value=-0.5,
+      max_value=0.5,
+      step=0.01,
+      enabled=lambda: self._safe_get_bool(self._params, "enable_lane_positioning_ang"),
+      icon="chffr_wheel.png"
+    )
+    self._lane_centering_strength_ang = float_control_item(
+      lambda: tr("Lane Centering Strength"),
+      lambda: tr("How much authority the lane centering trim has vs. the model's own path (0.0-1.0)."),
+      param="lane_centering_strength_ang",
+      min_value=0.0,
+      max_value=1.0,
+      step=0.05,
+      enabled=lambda: self._safe_get_bool(self._params, "enable_lane_positioning_ang"),
+      icon="chffr_wheel.png"
+    )
+
     # Disable BP lateral control toggle
     self._disable_BP_lat = toggle_item(
       lambda: tr("Disable BP Lateral Control"),
@@ -614,7 +672,11 @@ class BluePilotLayout(Widget):
     angle_items = [
       self._low_speed_curv_factor,
       self._high_speed_curv_factor,
+      self._high_speed_dampening,
       self._lane_change_factor_high_ang,
+      self._enable_lane_positioning_ang,
+      self._custom_path_offset_ang,
+      self._lane_centering_strength_ang,
     ]
     angle_header = CollapsibleSectionHeader(tr("Angle Tuning"))
     angle_header.set_items(angle_items)
@@ -674,7 +736,8 @@ class BluePilotLayout(Widget):
         self._hide_onroad_border,
         self._disable_lane_line_status_color,
         self._hide_camera_view,
-        self._rad_racer_theme,
+        self._theme_pack_btn,
+        self._theme_auto_seasonal,
         self._rainbow_lane_lines,
         self._show_blindspot,
         self._show_brake_status,
@@ -853,6 +916,7 @@ class BluePilotLayout(Widget):
     self._primary_lateral_control_btn.action_item.set_selected_button(plat_idx)
     custom_prof = fresh.get("custom_profile_curv") if "custom_profile_curv" in fresh else self._safe_get_bool(ui_state.params, "custom_profile_curv")
     lane_pos = fresh.get("enable_lane_positioning_curv") if "enable_lane_positioning_curv" in fresh else self._safe_get_bool(ui_state.params, "enable_lane_positioning_curv")
+    lane_pos_ang = fresh.get("enable_lane_positioning_ang") if "enable_lane_positioning_ang" in fresh else self._safe_get_bool(ui_state.params, "enable_lane_positioning_ang")
     pause_lc = fresh.get("BlinkerPauseLaneChange") if "BlinkerPauseLaneChange" in fresh else self._safe_get_bool(ui_state.params, "BlinkerPauseLaneChange")
     is_angle = (plat_idx == PrimaryLateralControl.angle)
     is_curv = not is_angle
@@ -861,7 +925,11 @@ class BluePilotLayout(Widget):
     # Angle-mode items: always visible (Angle Tuning section), greyed out when curvature mode is active
     self._low_speed_curv_factor.action_item.set_enabled(is_angle)
     self._high_speed_curv_factor.action_item.set_enabled(is_angle)
+    self._high_speed_dampening.action_item.set_enabled(is_angle)
     self._lane_change_factor_high_ang.action_item.set_enabled(is_angle)
+    self._enable_lane_positioning_ang.action_item.set_enabled(is_angle)
+    self._custom_path_offset_ang.action_item.set_enabled(is_angle and lane_pos_ang)
+    self._lane_centering_strength_ang.action_item.set_enabled(is_angle and lane_pos_ang)
     # Curvature-mode items: always visible (Curvature Tuning section), greyed out when angle mode is active
     self._lane_change_factor_high_curv.action_item.set_enabled(is_curv)
     self._enable_human_turn_detection.action_item.set_enabled(is_curv)
@@ -1003,6 +1071,30 @@ class BluePilotLayout(Widget):
   def _set_overlay_size(self, button_index: int):
     """Handle overlay size button selection."""
     self._params.put("FordPrefRadarOverlaySize", button_index)
+
+  def _get_theme_display(self) -> str:
+    """Label of the currently selected theme entry (falls back to Off)."""
+    stored = self._safe_get(self._params, theme_pack.PARAM_KEY) or ""
+    if isinstance(stored, bytes):
+      stored = stored.decode("utf-8", errors="replace")
+    return next((label for label, v in self._theme_entries if v and v.lower() == stored.lower()), tr("Off"))
+
+  def _select_theme(self):
+    """Open a scrollable option dialog; stores the selected entry's param value."""
+    def handle_selection(result: DialogResult):
+      if result == DialogResult.CONFIRM and self._theme_dialog is not None:
+        selection = self._theme_dialog.selection
+        value = next((v for label, v in self._theme_entries if label == selection), "")
+        self._params.put(theme_pack.PARAM_KEY, value)
+      self._theme_dialog = None
+
+    self._theme_dialog = MultiOptionDialog(
+      tr("Select Theme"),
+      [label for label, _ in self._theme_entries],
+      self._get_theme_display(),
+      callback=handle_selection,
+    )
+    gui_app.push_widget(self._theme_dialog)
 
   def _set_wheel_icon_style(self, button_index: int):
     """Handle wheel icon style: 0 = comma 4, 1 = comma 3X."""

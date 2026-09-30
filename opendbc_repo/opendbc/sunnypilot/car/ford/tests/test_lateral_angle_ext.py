@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from unittest import mock
 
 from opendbc.car import structs
-from opendbc.car.ford.values import CarControllerParams
+from opendbc.car.ford.values import CAR, CarControllerParams
 from opendbc.car.interfaces import scale_tire_stiffness
 from opendbc.sunnypilot.car.ford import lateral_curv_ext
 from opendbc.sunnypilot.car.ford.values_ext import FordSafetyFlagsSP
@@ -69,6 +69,61 @@ class _ForcedDetector:
     pass
 
 
+class _FakeParams:
+  def __init__(self, values):
+    self.values = values
+
+  def get(self, key, return_default=False):
+    return self.values.get(key)
+
+  def get_bool(self, key):
+    return bool(self.values.get(key, False))
+
+
+class _XY:
+  def __init__(self, x, y):
+    self.x = x
+    self.y = y
+
+
+class _Position:
+  def __init__(self, x, y):
+    self.x = x
+    self.y = y
+
+
+class _Meta:
+  laneChangeState = 0
+  laneChangeDirection = 0
+
+
+class _OrientationRate:
+  def __init__(self, z):
+    self.z = z
+
+
+class _Model:
+  """Minimal fake modelV2, just the fields lateral_angle_ext / lane_center_trim read."""
+
+  def __init__(self, lane_center_y=0.0, model_y=0.0, width=3.7, lane_change_state=0):
+    xs = list(range(0, 60, 2))
+    half = width / 2.0
+    self.laneLines = [
+      _XY(xs, [lane_center_y - half - 3.7] * len(xs)),
+      _XY(xs, [lane_center_y - half] * len(xs)),
+      _XY(xs, [lane_center_y + half] * len(xs)),
+      _XY(xs, [lane_center_y + half + 3.7] * len(xs)),
+    ]
+    self.laneLineProbs = [0.9, 0.9, 0.9, 0.9]
+    self.laneLineStds = [0.1, 0.1, 0.1, 0.1]
+    self.position = _Position(xs, [model_y] * len(xs))
+    # len must match ModelConstants.T_IDXS (33) -- update_angle_strategy interps orientationRate.z
+    # against T_IDXS for the variable-lookup-time predicted-curvature blend.
+    self.orientationRate = _OrientationRate([0.0] * 33)
+    self.meta = _Meta()
+    self.meta.laneChangeState = lane_change_state
+
+
 @dataclass
 class _CSOut:
   vEgoRaw: float = 15.0
@@ -98,6 +153,7 @@ class _Harness(LateralCurvExt, LateralAngleExt):
   """Mirrors CarController's mixin composition (see carcontroller.py)."""
 
   def __init__(self, CP, CP_SP=None):
+    self.CP = CP  # CarControllerBase initializes this before the lateral mixins.
     with mock.patch.object(lateral_curv_ext.messaging, 'SubMaster', _FakeSubMaster):
       LateralCurvExt.__init__(self, CP, CP_SP)
     LateralAngleExt.__init__(self, CP, CP_SP)
@@ -188,6 +244,34 @@ class TestMeasurementSelection(unittest.TestCase):
     self.assertNotAlmostEqual(ext.get_current_curvature(cs), -0.75 / self.V_EGO)
 
 
+class TestAngleParams(unittest.TestCase):
+  def setUp(self):
+    self.ext = _Harness(_explorer_cp())
+
+  def test_high_speed_dampening_preserves_platform_gain(self):
+    CP = _explorer_cp()
+    CP.carFingerprint = CAR.FORD_F_150_MK14
+    ext = _Harness(CP)
+    ext.update_angle_params(_FakeParams({"FordHighSpeedDampening_ang": b"1.12"}))
+    self.assertAlmostEqual(ext.path_angle_gain_lowC_highV, 0.95)
+    self.assertAlmostEqual(ext.user_dampening_factor, 1.12)
+
+  def test_high_speed_dampening_multiplies_low_curvature_high_speed_gain(self):
+    self.ext.update_angle_params(_FakeParams({"FordHighSpeedDampening_ang": b"1.12"}))
+    cs = _CS(vEgoRaw=26.82, vEgo=26.82)
+    self.ext.update_angle_strategy(_CC(), cs, _Actuators(), self.ext.CP)
+    self.assertAlmostEqual(
+      self.ext.low_gain_calc,
+      self.ext.path_angle_gain_lowC_highV * self.ext.user_dampening_factor,
+    )
+
+  def test_high_speed_dampening_is_clamped(self):
+    for raw_value, expected in ((b"0.50", 0.75), (b"1.50", 1.25)):
+      with self.subTest(raw_value=raw_value):
+        self.ext.update_angle_params(_FakeParams({"FordHighSpeedDampening_ang": raw_value}))
+        self.assertAlmostEqual(self.ext.user_dampening_factor, expected)
+
+
 class TestInitializeFord(unittest.TestCase):
   def test_safety_param_stays_a_plain_int(self):
     """card serializes CP_SP to capnp, which rejects enum subclasses of int -- an
@@ -200,6 +284,88 @@ class TestInitializeFord(unittest.TestCase):
     _initialize_ford(CP, CP_SP, {"FordPrefSteerAngleCurvature": True})
     self.assertEqual(CP_SP.safetyParam, 0xb)  # flag | (explorer index 5 << 1)
     self.assertIs(type(CP_SP.safetyParam), int)
+
+
+class TestLaneCenteringIntegration(unittest.TestCase):
+  """Lane centering trim (advanced lane positioning) as wired into update_angle_strategy --
+  see lane_center_trim.py for the isolated unit tests of the trim itself."""
+
+  V_EGO = 15.0
+
+  def setUp(self):
+    self.CP = _explorer_cp()
+    self.ext = _Harness(self.CP)
+    self.ext.human_turn_detector = _ForcedDetector(False)
+    self.ext.model = _Model()
+    self.cs = _CS(vEgoRaw=self.V_EGO, vEgo=self.V_EGO, yawRate=0.0)
+
+  def _update(self, lat_active=True):
+    return self.ext.update_angle_strategy(_CC(latActive=lat_active), self.cs, _Actuators(curvature=0.0), self.CP)
+
+  def test_disabled_by_default(self):
+    for _ in range(50):
+      self._update()
+    self.assertEqual(self.ext.lane_center_trim.correction, 0.0)
+
+  def test_enabling_with_offset_produces_correction(self):
+    self.ext.enable_lane_positioning_ang = True
+    self.ext.custom_path_offset_ang = 5.0
+    self.ext.lane_centering_strength_ang = 1.0
+    for _ in range(500):
+      self._update()
+    self.assertNotEqual(self.ext.lane_center_trim.correction, 0.0)
+
+  def test_strength_param_scales_correction(self):
+    self.ext.enable_lane_positioning_ang = True
+    self.ext.custom_path_offset_ang = 5.0
+    self.ext.lane_centering_strength_ang = 1.0
+    for _ in range(500):
+      self._update()
+    full_gain_correction = self.ext.lane_center_trim.correction
+
+    self.ext.lane_center_trim.reset()
+    self.ext.lane_centering_strength_ang = 0.5
+    for _ in range(500):
+      self._update()
+    half_gain_correction = self.ext.lane_center_trim.correction
+
+    self.assertAlmostEqual(half_gain_correction, full_gain_correction * 0.5, places=3)
+
+  def test_lane_change_resets_correction(self):
+    self.ext.enable_lane_positioning_ang = True
+    self.ext.custom_path_offset_ang = 5.0
+    self.ext.lane_centering_strength_ang = 1.0
+    for _ in range(200):
+      self._update()
+    self.assertNotEqual(self.ext.lane_center_trim.correction, 0.0)
+
+    self.ext.model.meta.laneChangeState = 1  # laneChangeStarting
+    self._update()
+    self.assertEqual(self.ext.lane_center_trim.correction, 0.0)
+
+  def test_human_turn_resets_correction(self):
+    self.ext.enable_lane_positioning_ang = True
+    self.ext.custom_path_offset_ang = 5.0
+    self.ext.lane_centering_strength_ang = 1.0
+    for _ in range(200):
+      self._update()
+    self.assertNotEqual(self.ext.lane_center_trim.correction, 0.0)
+
+    self.ext.human_turn_detector = _ForcedDetector(True)
+    self._update()
+    self.assertTrue(self.ext.angle_human_turn_active)
+    self.assertEqual(self.ext.lane_center_trim.correction, 0.0)
+
+  def test_inactive_resets_correction(self):
+    self.ext.enable_lane_positioning_ang = True
+    self.ext.custom_path_offset_ang = 5.0
+    self.ext.lane_centering_strength_ang = 1.0
+    for _ in range(200):
+      self._update()
+    self.assertNotEqual(self.ext.lane_center_trim.correction, 0.0)
+
+    self._update(lat_active=False)
+    self.assertEqual(self.ext.lane_center_trim.correction, 0.0)
 
 
 if __name__ == '__main__':

@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "sky": {
+    "camera_tint_alpha": 40
+  },
+  "layers": [
+    {
+      "type": "backdrop",
+      "style": "zigzag",
+      "tint": "#3C1450",
+      "horizon_frac": 0.46,
+      "height_frac": 0.24,
+      "alpha_minimal": 235,
+      "alpha_camera": 70
+    },
+    {
+      "type": "particles",
+      "sprite": "pennant",
+      "mode": "fall",
+      "count": 44,
+      "camera_count_scale": 0.4,
+      "size_px": [
+        17,
+        34
+      ],
+      "fall_speed": [
+        0.08,
+        0.16
+      ],
+      "sway_amp": [
+        0.008,
+        0.025
+      ],
+      "sway_freq_hz": [
+        0.15,
+        0.5
+      ],
+      "spin_dps": [
+        -180,
+        180
+      ],
+      "tints": [
+        "#B446D2",
+        "#00C8C8",
+        "#FFF078",
+        "#FF8C00"
+      ],
+      "minimal_alpha": 225,
+      "camera_alpha": 110,
+      "speed_scale": 0.5,
+      "depth_split": 0.6,
+      "blend": "alpha"
+    },
+    {
+      "type": "decor",
+      "sprite": "pennant",
+      "anchor": "top_edge",
+      "size_frac": 0.03,
+      "spacing_frac": 0.05,
+      "droop_frac": 0.028,
+      "tints": [
+        "#B446D2",
+        "#00C8C8",
+        "#FFF078",
+        "#FF8C00"
+      ],
+      "alpha_minimal": 225,
+      "alpha_camera": 90,
+      "idle": "none"
+    },
+    {
+      "type": "hero",
+      "x_frac": 0.5,
+      "y_frac": 0.8,
+      "alpha_minimal": 235,
+      "alpha_camera": 120,
+      "sprite": "jester_hat",
+      "size_frac": 0.15
+    }
+  ],
+  "foreground": {
+    "particles_over_hud": true,
+    "corner_accents": false
+  }
+}

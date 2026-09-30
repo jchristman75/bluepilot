@@ -309,7 +309,14 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"LC_PID_gain_UI_curv", {PERSISTENT | BACKUP, FLOAT, "3.0"}},
     {"FordLowSpeedFactor_ang", {PERSISTENT | BACKUP, FLOAT, "1.0"}},
     {"FordHighSpeedFactor_ang", {PERSISTENT | BACKUP, FLOAT, "1.0"}},
+    {"FordHighSpeedDampening_ang", {PERSISTENT | BACKUP, FLOAT, "1.0"}},
     {"BPLateralSchemeParamsMigratedV1", {PERSISTENT | BACKUP, STRING, "0"}},
+
+    // BluePilot: angle-mode lane centering trim (advanced lane positioning) -- see
+    // opendbc/sunnypilot/car/ford/lane_center_trim.py.
+    {"enable_lane_positioning_ang", {PERSISTENT | BACKUP, BOOL, "0"}},
+    {"custom_path_offset_ang", {PERSISTENT | BACKUP, FLOAT, "0.0"}},
+    {"lane_centering_strength_ang", {PERSISTENT | BACKUP, FLOAT, "0.25"}},
 
     {"disable_BP_lat_UI", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"disable_BP_long_UI", {PERSISTENT | BACKUP, BOOL, "0"}},
@@ -334,6 +341,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"BPHideOnroadBorder", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"BPHideCameraView", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"BPRadRacerTheme", {PERSISTENT | BACKUP, BOOL, "0"}},
+    {"BPThemePack", {PERSISTENT | BACKUP, STRING, ""}},
+    {"BPThemeAutoSeasonal", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"BPRainbowLines", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"BPShowConfidenceBall", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"BPAnimateSteeringWheel", {PERSISTENT | BACKUP, BOOL, "1"}},

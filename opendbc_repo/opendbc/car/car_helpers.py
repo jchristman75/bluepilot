@@ -167,7 +167,11 @@ def get_car(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_multip
                                                                           fixed_fingerprint)
 
   if candidate is None:
-    carlog.error({"event": "car doesn't match any fingerprints", "fingerprints": repr(fingerprints)})
+    # BluePilot: include vin so a "no fingerprint" report is actually actionable — without it we
+    # can't tell a VIN-query failure (vin == VIN_UNKNOWN, i.e. "0"*17) from a case where the VIN
+    # was read fine but nothing (VIN-based or CAN/FW) matched it.
+    carlog.error({"event": "car doesn't match any fingerprints", "fingerprints": repr(fingerprints), "vin": vin})
+    # End BluePilot
     candidate = "MOCK"
 
   CarInterface = interfaces[candidate]
