@@ -253,11 +253,11 @@ export const CerealDataPanel = ({ route, currentSegment, videoCurrentTime = 0 }:
                 <optgroup label="Perception">
                   <option value="modelV2">modelV2 - ML model outputs</option>
                   <option value="radarState">radarState - Radar detections</option>
-                  <option value="liveTracks">liveTracks - Tracked objects</option>
+                  <option value="radarTracks">radarTracks - Tracked objects</option>
                 </optgroup>
                 <optgroup label="Localization">
-                  <option value="liveCalibration">liveCalibration - Camera calibration</option>
-                  <option value="livePose">livePose - Vehicle pose</option>
+                  <option value="extrinsicsCalibration">extrinsicsCalibration - Camera calibration</option>
+                  <option value="deviceMotion">deviceMotion - Vehicle pose</option>
                   <option value="gpsLocation">gpsLocation - GPS data</option>
                 </optgroup>
                 <optgroup label="Driver Monitoring">

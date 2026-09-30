@@ -24,11 +24,11 @@ class SettingsLayoutSP(OP.SettingsLayout):
   def __init__(self):
     OP.SettingsLayout.__init__(self)
 
-    sunnylink_panel = SunnylinkLayoutMici(back_callback=gui_app.pop_widget)
+    sunnylink_panel = SunnylinkLayoutMici()
     sunnylink_btn = BigButton("sunnylink", "", gui_app.texture("icons_mici/settings/developer/ssh.png", ICON_SIZE, ICON_SIZE))
     sunnylink_btn.set_click_callback(lambda: gui_app.push_widget(sunnylink_panel))
 
-    models_panel = ModelsLayoutMici(back_callback=gui_app.pop_widget)
+    models_panel = ModelsLayoutMici()
     models_btn = BigButton("models", "", gui_app.texture("../../sunnypilot/selfdrive/assets/offroad/icon_models.png", ICON_SIZE, ICON_SIZE))
     models_btn.set_click_callback(lambda: gui_app.push_widget(models_panel))
 

@@ -119,6 +119,8 @@ def build() -> None:
     if scons.returncode == 0:
       break
 
+  os.sync()
+
   if scons.returncode != 0:
     error_s = b"\n".join(compile_output).decode('utf8', 'replace')
     print(error_s)

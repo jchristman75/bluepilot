@@ -16,7 +16,7 @@ import openpilot.cereal.messaging as messaging
 from openpilot.common.gpio import gpio_init, gpio_set
 from openpilot.common.utils import retry
 from openpilot.common.time_helpers import system_time_valid
-from openpilot.common.hardware.tici.pins import GPIO
+from openpilot.common.hardware.comma.pins import GPIO
 # BluePilot: SerialException is used by the diag-port fault recovery below. Upstream dropped
 # pyserial (#38311); openpilot.common.serial provides an OSError-derived replacement.
 from openpilot.common.serial import Serial, SerialException

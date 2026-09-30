@@ -17,6 +17,10 @@ from openpilot.system.ui.lib.application import gui_app
 
 if gui_app.sunnypilot_ui():
   from openpilot.selfdrive.ui.sunnypilot.mici.layouts.settings import SettingsLayoutSP as SettingsLayout
+  # BluePilot: BpMiciHomeLayout (imported above) already extends the SP home layout
+  if not is_bluepilot():
+    from openpilot.selfdrive.ui.sunnypilot.mici.layouts.home import MiciHomeLayoutSP as MiciHomeLayout
+  # End BluePilot
 
 
 ONROAD_DELAY = 2.5  # seconds
@@ -26,7 +30,7 @@ class MiciMainLayout(Scroller):
   def __init__(self):
     super().__init__(snap_items=True, spacing=0, pad=0, scroll_indicator=False, edge_shadows=False)
 
-    self._pm = messaging.PubMaster(['bookmarkButton'])
+    self._pm = messaging.PubMaster(['bookmarkButton', 'userBookmark'])
 
     self._prev_onroad = False
     self._prev_standstill = False
@@ -126,9 +130,9 @@ class MiciMainLayout(Scroller):
       self._scroll_to(self._home_layout)
 
   def _on_bookmark_clicked(self):
-    user_bookmark = messaging.new_message('bookmarkButton')
-    user_bookmark.valid = True
-    self._pm.send('bookmarkButton', user_bookmark)
+    for service in ('bookmarkButton', 'userBookmark'):
+      msg = messaging.new_message(service, valid=True)
+      self._pm.send(service, msg)
 
 # BluePilot: comma body is not a BluePilot target. Upstream's _on_body_changed and the
 # _car_onroad_layout / _body_onroad_layout split were removed here deliberately; re-adding them

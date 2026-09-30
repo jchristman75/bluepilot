@@ -24,6 +24,10 @@ if gui_app.sunnypilot_ui():
   from openpilot.selfdrive.ui.sunnypilot.layouts.settings.settings import SettingsLayoutSP as SettingsLayout
   from openpilot.selfdrive.ui.layouts.settings import settings as _settings_module
   PanelType = _settings_module.PanelType
+  # BluePilot: HomeLayoutBP (imported above) must win over the SP home layout
+  if not is_bluepilot():
+    from openpilot.selfdrive.ui.sunnypilot.layouts.home import HomeLayoutSP as HomeLayout
+  # End BluePilot
 
 
 class MainState(IntEnum):
@@ -36,7 +40,7 @@ class MainLayout(Widget):
   def __init__(self):
     super().__init__()
 
-    self._pm = messaging.PubMaster(['bookmarkButton'])
+    self._pm = messaging.PubMaster(['bookmarkButton', 'userBookmark'])
 
     self._sidebar = Sidebar()
     self._current_mode = MainState.HOME
@@ -123,9 +127,9 @@ class MainLayout(Widget):
     self.open_settings(PanelType.DEVICE)
 
   def _on_bookmark_clicked(self):
-    user_bookmark = messaging.new_message('bookmarkButton')
-    user_bookmark.valid = True
-    self._pm.send('bookmarkButton', user_bookmark)
+    for service in ('bookmarkButton', 'userBookmark'):
+      msg = messaging.new_message(service, valid=True)
+      self._pm.send(service, msg)
 
   def _on_onroad_clicked(self):
     # BluePilot: suppress onroad clicks when debug panel is visible

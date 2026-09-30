@@ -15,7 +15,7 @@ import json
 import os
 from typing import Any
 
-import pytest
+from openpilot.common.parameterized import parameterized
 
 from openpilot.sunnypilot.sunnylink.tools.generate_settings_schema import (
   DEFINITION_PATH,
@@ -24,6 +24,7 @@ from openpilot.sunnypilot.sunnylink.tools.generate_settings_schema import (
   _load_torque_versions,
   generate_schema,
 )
+from openpilot.common.test import OpenpilotTestCase
 
 
 SCHEMA_VALIDATOR_PATH = os.path.join(os.path.dirname(DEFINITION_PATH), "settings_ui.schema.json")
@@ -105,12 +106,11 @@ def _references_capability_field(rules: list[dict[str, Any]] | None, field: str)
   return found
 
 
-@pytest.fixture(scope="module")
 def schema():
   return generate_schema()
 
 
-class TestMadsBrandGates:
+class TestMadsBrandGates(OpenpilotTestCase):
   def test_mads_main_cruise_has_brand_gate(self, schema):
     """MadsMainCruiseAllowed must gate on brand and tesla_has_vehicle_bus."""
     item = _find_item(schema, "MadsMainCruiseAllowed")
@@ -126,7 +126,7 @@ class TestMadsBrandGates:
     assert _references_capability_field(item.get("enablement"), "tesla_has_vehicle_bus")
 
 
-class TestTestManeuversSection:
+class TestTestManeuversSection(OpenpilotTestCase):
   def test_lateral_maneuver_mode_in_test_maneuvers(self, schema):
     section = _find_section(schema, "developer", "test_maneuvers")
     assert section is not None, "developer.test_maneuvers section missing"
@@ -153,7 +153,7 @@ class TestTestManeuversSection:
       "test_maneuvers must gate ShowAdvancedControls via enablement"
 
 
-class TestBluePilotVehicleVisuals:
+class TestBluePilotVehicleVisuals(OpenpilotTestCase):
   def test_rainbow_lane_lines_ordered_with_visual_toggles(self, schema):
     items = schema["vehicle_settings"]["ford"]["items"]
     keys = [item["key"] for item in items]
@@ -166,7 +166,7 @@ class TestBluePilotVehicleVisuals:
     assert item["description"] == "Inner lane lines become rainbow colored when longitudinal control is active."
 
 
-class TestBluePilotLateralSchemeSplit:
+class TestBluePilotLateralSchemeSplit(OpenpilotTestCase):
   """The Ford lateral-tuning params are split by control scheme (_curv/_ang suffixes) and every
   scheme-specific item must be visibility-gated on FordPrefLateralControl so the remote UI never
   offers a control that the other scheme silently ignores (e.g. In-Lane Offset in angle mode)."""
@@ -232,10 +232,13 @@ class TestBluePilotLateralSchemeSplit:
     assert self._mode_gate(item) == 1
 
 
-class TestValidator:
+class TestValidator(OpenpilotTestCase):
   def test_validator_accepts_real_json(self):
     """settings_ui.json validates against settings_ui.schema.json."""
-    jsonschema = pytest.importorskip("jsonschema")
+    try:
+      import jsonschema
+    except ImportError:
+      self.skipTest("jsonschema not installed")
     with open(DEFINITION_PATH) as f:
       data = json.load(f)
     with open(SCHEMA_VALIDATOR_PATH) as f:
@@ -243,7 +246,7 @@ class TestValidator:
     jsonschema.validate(instance=data, schema=validator)
 
 
-class TestTorqueOptionGeneration:
+class TestTorqueOptionGeneration(OpenpilotTestCase):
   def test_torque_versions_match_generated_options(self, schema):
     versions = _load_torque_versions()
     assert versions, "latcontrol_torque_versions.json must have at least one version"
@@ -258,11 +261,11 @@ class TestTorqueOptionGeneration:
     )
 
 
-class TestReleaseBranchGates:
-  @pytest.mark.parametrize("key", [
+class TestReleaseBranchGates(OpenpilotTestCase):
+  @parameterized.expand([
     "EnableGithubRunner",
     "QuickBootToggle",
-  ])
+  ], names=["key"])
   def test_sp_dev_items_gate_on_is_sp_release(self, schema, key):
     """sunnypilot dev items must hide on sunnypilot release branches (is_sp_release gate)."""
     item = _find_item(schema, key)
@@ -271,7 +274,7 @@ class TestReleaseBranchGates:
     assert _references_capability_field(rules, "is_sp_release"), f"{key} missing is_sp_release gate"
 
 
-class TestSpuriousOffroadGatesDropped:
+class TestSpuriousOffroadGatesDropped(OpenpilotTestCase):
   def test_disengage_on_accelerator_has_no_offroad_only(self, schema):
     item = _find_item(schema, "DisengageOnAccelerator")
     assert item is not None
@@ -283,12 +286,12 @@ class TestSpuriousOffroadGatesDropped:
     assert "offroad_only" not in _flatten_rule_types(item.get("enablement"))
 
 
-class TestNotEngagedReplacement:
-  @pytest.mark.parametrize("key", [
+class TestNotEngagedReplacement(OpenpilotTestCase):
+  @parameterized.expand([
     "AlphaLongitudinalEnabled",
     "ToyotaEnforceStockLongitudinal",
     "ToyotaStopAndGoHack",
-  ])
+  ], names=["key"])
   def test_offroad_only_replaced_with_not_engaged(self, schema, key):
     """These items should use not_engaged, not offroad_only."""
     item = _find_item(schema, key)

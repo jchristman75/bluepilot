@@ -11,7 +11,7 @@
 *.wav filter=lfs diff=lfs merge=lfs -text
 
 openpilot/selfdrive/car/tests/test_models_segs.txt filter=lfs diff=lfs merge=lfs -text
-openpilot/common/hardware/tici/updater filter=lfs diff=lfs merge=lfs -text
+openpilot/common/hardware/comma/updater filter=lfs diff=lfs merge=lfs -text
 
 # BluePilot: keep BP-owned binaries as raw git objects (not LFS) so they need no LFS hosting
 # Scoped to the extensions the LFS rules above claim. Text files under bluepilot/
