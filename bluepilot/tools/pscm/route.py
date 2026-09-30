@@ -15,6 +15,7 @@ import numpy as np
 from bluepilot.tools.pscm.extract import COLS, DEFAULT_CACHE
 
 _IDX = {c: i for i, c in enumerate(COLS)}
+_LMC_COLS = [_IDX[c] for c in ('lmcMode', 'lmcPA', 'lmcOff', 'lmcRamp', 'lmcCurv', 'lmcCrvRate', 'lmcPrec', 'lmcHOC', 'tLmc')]
 
 
 def route_ids(cache=DEFAULT_CACHE, pattern='*'):
@@ -32,6 +33,12 @@ class Route:
     arrs = [a for a in (np.load(f)['a'] for f in files) if len(a)]
     if not arrs:
       raise FileNotFoundError(f'no extracted segments for {rid} in {cache}')
+    # Segments are extracted independently, so each one starts with the wire columns zeroed (mode 0)
+    # until its first 982 frame (~30 ms): a fake mode 2->0->2 at every 60 s boundary. Carry the
+    # previous segment's last wire frame over those rows (tLmc == 0 means none seen yet).
+    for prev, a in zip(arrs, arrs[1:]):
+      fresh = a[:, _IDX['tLmc']] == 0
+      a[np.ix_(fresh, _LMC_COLS)] = prev[-1, _LMC_COLS]
     self.rid = rid
     self.a = np.concatenate(arrs)
     for c, i in _IDX.items():

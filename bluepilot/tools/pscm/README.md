@@ -23,7 +23,13 @@ python -m bluepilot.tools.pscm.harness ROUTE_DIR... --out /tmp/h_x \
     --patch "lateral_angle_ext._LEADLAG_TAU_S=(0.5, 1.0)" --set enable_lane_positioning_ang=1
 python -m bluepilot.tools.pscm.score --paired /tmp/h_base /tmp/h_new /tmp/h_x
 
-# 5. the commaCarSegments Ford fleet (stock curvature mode, CAN-only rlogs)
+# 5. a new road test: grab table + per-grab sheets (plan/car/wire curvature, flags, qcamera frames)
+python -m bluepilot.tools.pscm.review /mnt/j/CommaRoutes/c4/<branch>(<commit>)_<route>/ --sheets /tmp/sheets
+
+# 6. mode-0 behaviour (release_tau), fitted on stall/hand-off pulses -- fit.py's windows exclude mode 0
+python -m bluepilot.tools.pscm.fit_mode0 [--write]
+
+# 7. the commaCarSegments Ford fleet (stock curvature mode, CAN-only rlogs)
 python -m bluepilot.tools.pscm.extract_fleet /mnt/j/CommaRoutes/Ford
 python -m bluepilot.tools.pscm.fleet --params-dir bluepilot/tools/pscm/fleet_params
 ```
@@ -101,8 +107,13 @@ R² by speed band is flat (0.96-0.97 from 5 to 40 m/s). Step response: ~1.0 at 0
   some releases (mean |yaw offset| 0.17 deg/s, but a few cases like 00000442 t=153 are ~1.7 deg/s).
   It isn't predictable from the pre-release state (corr 0.05). The harness should inject it as a
   disturbance, not expect the emulator to produce it.
-- Mode 0 (stall blip, human-turn pause): the wheel is modelled as holding its angle
-  (release_tau fitted to its 5 s bound). There is little hands-free mode-0 data.
+- Mode 0 (stall blip, human-turn pause): hands-free, the wheel self-centres with release_tau 0.3 s
+  (`fit_mode0.py`, 885 pulses on 138 routes; angle rms 2.84 -> 2.39 deg, held-out 2.96 -> 2.38). The mode
+  bit now goes through the same 60 ms transport delay as C1. Until 2026-09-30 release_tau sat at its
+  5 s bound (the wheel held its angle), so the harness hid what a pulse costs mid-curve.
+- Not modelled: after a pulse fired with a large command (|C1| >~ 0.04 rad), the PSCM sometimes sits
+  in LatCtlLim for ~0.5-1 s and barely moves the wheel (000001b1 t=507/910, 000001b2 t=591,
+  000001b4 t=762). Too few cases to fit.
 - The yaw rate is the weaker output (dynamics R² 0.62), because PSCM and vehicle errors compound.
 
 Since then the emulator gained a small-command boost: small commands are delivered up to 21% more,
@@ -205,3 +216,35 @@ Committed code vs working tree (lead-lag retune + small-curvature gain), per rou
 - **Emulator update.** `mache_pscm_params.json` now carries the ceiling (`sat_knee`, `sat_slope`).
 - **The remaining cure is curve speed.** Openpilot longitudinal was off on these drives, so nothing
   slowed the car for curves that need more than the ~2 m/s^2 angle mode delivers.
+
+## Road test 000001b4 (2026-09-30, c55aa4ba) and what it changed
+
+- **The code that ran.** Open-loop parity is 91% within one wire LSB (0.5 mrad) and ±2 frames. The
+  device's "dirty" flag was a logo change. Compare the quantized wire: the harness's `c1` is
+  pre-packer, so exact-match parity undercounts.
+- **17 grabs** (`review.py`, presses under 1 s apart merged). None was the controller losing the road:
+  - nav turns and set-ups;
+  - driver lane moves with the blinker on (laneChangeState stayed 0);
+  - room for a jogger;
+  - one re-grab (t=763), after a hand-off pulse, when the car didn't turn back into the plan's curve.
+- **Hand-off pulse, measured over every pulse on record.**
+  - During the 300 ms mode 0 the wheel self-centres. Median loss is 2.6 deg; with |C1| >= 0.05 it is
+    6.3 deg (p90 16.5).
+  - After re-entry the PSCM takes ~0.5 s to move again, and ~50% of large-command pulses then sit in
+    LatCtlLim.
+  - Releases with and without a pulse show the same post-release delivery, matched for wheel angle and
+    press length (0.94 vs 0.98, n=249/40). The PSCM "attenuation reset" it was built for doesn't show up.
+  - Its real value is on manual-turn exits: the free wheel straightens the car at once, where a
+    clip-bound unwind takes ~2 s (000001af t=223, 000001b4 t=177). Removing it cost weave and tracking
+    on exactly those.
+- **Change:** `_BLIP_PLAN_MEAS_RATIO` / `_BLIP_PLAN_STRAIGHT`. The pulse waits, inside its existing 3 s
+  pending window, until the plan asks for less than 0.3x the car's curvature or is near straight.
+  - Hand-off pulses on routes 1a7-1b4 drop from 92 to 67; most of the rest move to the straight after
+    the curve.
+  - No-replay harness: post-release drift -4.1%, tracking -0.4%, weave -0.8%.
+  - With disturbance replay it is neutral. The replay re-inserts the logged pulses' effects, so it
+    can't show the gain.
+  - Watch cut-in on curve entry: +8.8% on one route (000001b2), no replay only.
+- **Emulator:** `release_tau` 5.0 -> 0.3 s (`fit_mode0.py`), and the mode bit is now delayed like C1.
+  Hands-free validation is unchanged; release angle rms 1.93 -> 1.87 deg.
+- **`route.Route`** no longer shows a fake mode 2->0->2 at every 60 s segment boundary.

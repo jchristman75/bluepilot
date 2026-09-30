@@ -63,7 +63,7 @@ class PSCMParams:
   servo_rate_scale: float = 1.0    # x the Lightning requested-rate bound
   angle_offset_deg: float = 0.0    # PSCM target offset (carState sign)
   bank_comp: float = 0.0           # deg of target per rad of road roll the PSCM adds by itself
-  release_tau: float = 0.5         # s, mode 0: angle relaxes toward the free-wheel angle
+  release_tau: float = 0.5         # s, mode 0: angle relaxes toward the free-wheel angle (fit_mode0.py)
   # vehicle: linear single-track model. Mass, wheelbase and CG from the Mach-E CarSpecs. The steady
   # state is pinned to the measured ang = CK*(1+KUS v^2)*k (steer ratio and understeer gradient; a free
   # dynamic fit let high-speed understeer drift 14% off it), the dynamic terms are fitted.
@@ -119,6 +119,7 @@ class PSCMEmulator:
     v = np.broadcast_to(np.asarray(v, float), (n,))
     c1 = np.zeros(n) if c1 is None else np.broadcast_to(np.asarray(c1, float), (n,)).copy()
     self.fifo = np.repeat(c1[None], self._nd + 1, axis=0)
+    self.mfifo = np.ones((self._nd + 1, n), dtype=bool)  # mode > 0, delayed like C1
     self.c1h = c1.copy()
     ff = self._tab('ff_gain', v) * self._nominal_deg_per_c1(v) * c1
     self.b = self._tab('droop_ratio', v) * ff
@@ -174,13 +175,15 @@ class PSCMEmulator:
     c1 = np.broadcast_to(np.asarray(c1, float), (self.n,))
     v = np.broadcast_to(np.asarray(v, float), (self.n,))
     roll = np.broadcast_to(np.asarray(roll, float), (self.n,))
-    active = mode > 0
 
-    # transport delay, then held copy slews toward the delayed wire value
+    # transport delay (mode and C1 alike), then held copy slews toward the delayed wire value
     self.fifo = np.roll(self.fifo, -1, axis=0)
+    self.mfifo = np.roll(self.mfifo, -1, axis=0)
     c2 = np.broadcast_to(np.asarray(c2, float), (self.n,))
-    self.fifo[-1] = np.where(active, c1 + v * c2, 0.0)
+    self.fifo[-1] = np.where(mode > 0, c1 + v * c2, 0.0)
+    self.mfifo[-1] = mode > 0
     c1d = self.fifo[0]
+    active = self.mfifo[0]
     step = p.c1_slew * DT
     self.c1h = np.where(active, self.c1h + np.clip(c1d - self.c1h, -step, step), 0.0)
 

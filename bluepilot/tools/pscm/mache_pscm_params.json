@@ -48,7 +48,7 @@
   "servo_rate_scale": 1.0,
   "angle_offset_deg": -0.7393075608155438,
   "bank_comp": 16.228237207431327,
-  "release_tau": 5.0,
+  "release_tau": 0.3,
   "veh_mass": 2200.0,
   "veh_wheelbase": 2.984,
   "veh_cg_front": 0.44,
@@ -170,6 +170,10 @@
    "angle_rms_deg": 1.945375044974319,
    "yaw_rms_degps": 0.4657195984350395,
    "yaw_mean_offset_abs_degps": 0.179973289505964
+  },
+  "mode0_fit": {
+   "episodes": 885,
+   "best": 0.3
   }
  }
 }
