@@ -56,9 +56,8 @@ class MainLayout(Widget):
       self._debug_toggled_this_frame = False
       self._charging_panel = ChargingOverlayPanel()
       self._charging_toggled_this_frame = False
-      self._charging_panel_was_rendered = False
       # BluePilot: a charge session starting (or the UI coming up mid-charge) opens the panel
-      charging_auto_open.set_opener(lambda: self._charging_panel.show_panel(reason="charging_started"))
+      charging_auto_open.set_opener(self._charging_panel.show_panel)
 
     # Set callbacks
     self._setup_callbacks()
@@ -151,8 +150,6 @@ class MainLayout(Widget):
   def _on_charging_clicked(self):
     self._charging_panel.toggle_visibility()
     self._charging_toggled_this_frame = True
-    print(f"[ChargingPanel] icon clicked -> visible_state={self._charging_panel._visible_state} "
-          f"current_mode={self._current_mode.name} sidebar_visible={self._sidebar.is_visible}")
 
   def _render_main_content(self):
     # Render sidebar
@@ -170,12 +167,5 @@ class MainLayout(Widget):
     # MainState.ONROAD - charging is typically detected while parked (car "on" but
     # not driving), which can leave _current_mode at HOME/SETTINGS. The overlay
     # renders on top of whatever content is currently showing.
-    if is_bluepilot():
-      should_render_charging = self._charging_panel.is_panel_visible
-      if should_render_charging != self._charging_panel_was_rendered:
-        print(f"[ChargingPanel] render state changed -> rendering={should_render_charging} "
-              f"current_mode={self._current_mode.name} sidebar_visible={self._sidebar.is_visible} "
-              f"content_rect=({content_rect.x:.0f},{content_rect.y:.0f},{content_rect.width:.0f},{content_rect.height:.0f})")
-        self._charging_panel_was_rendered = should_render_charging
-      if should_render_charging:
-        self._charging_panel.render(content_rect)
+    if is_bluepilot() and self._charging_panel.is_panel_visible:
+      self._charging_panel.render(content_rect)

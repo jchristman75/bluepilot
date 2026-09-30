@@ -51,14 +51,13 @@ class ChargingOverlayPanel(Widget):
   def toggle_visibility(self):
     self._set_visible(not self._visible_state)
 
-  def show_panel(self, reason: str = "auto"):
+  def show_panel(self):
     """Open the panel from outside (charge-session auto-open); no-op if already open."""
-    self._set_visible(True, reason=reason)
+    self._set_visible(True)
 
-  def _set_visible(self, visible: bool, reason: str = "toggle"):
+  def _set_visible(self, visible: bool):
     if visible == self._visible_state:
       return
-    print(f"[ChargingPanel] _set_visible({visible}) reason={reason}")
     self._visible_state = visible
     if visible:
       self._prev_charging_active = None
@@ -92,14 +91,14 @@ class ChargingOverlayPanel(Widget):
       # making the sidebar icon look like it does nothing when clicked.
       in_drive = is_in_drive()
       if self._prev_in_drive and in_drive:
-        self._set_visible(False, reason="drive_engaged")
+        self._set_visible(False)
         return
       self._prev_in_drive = in_drive
 
       # Auto-dismiss when the charging session ends (active -> inactive transition)
       charging_active = charge_session_history.is_active
       if self._prev_charging_active and not charging_active:
-        self._set_visible(False, reason="charging_session_ended")
+        self._set_visible(False)
         return
       self._prev_charging_active = charging_active
 
@@ -223,7 +222,7 @@ class ChargingOverlayPanel(Widget):
     for mouse_event in gui_app.mouse_events:
       if mouse_event.left_released:
         if rl.check_collision_point_rec(mouse_event.pos, close_rect):
-          self._set_visible(False, reason="close_button")
+          self._set_visible(False)
           self._consumed_click = True
 
   def _consume_mouse_events(self, panel_rect: rl.Rectangle):

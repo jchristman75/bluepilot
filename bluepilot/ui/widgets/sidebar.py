@@ -201,7 +201,6 @@ class SidebarBP(Widget):
       self._on_debug_click()
 
   def _handle_charging_click(self):
-    print(f"[ChargingIcon] clicked, callback_set={self._on_charging_click is not None}")
     if self._on_charging_click:
       self._on_charging_click()
 
@@ -241,18 +240,13 @@ class SidebarBP(Widget):
     self._update_metric_cards()
 
     # Charging button visibility follows whether the car is reporting charging telemetry
-    prev_charging_data_available = self._charging_data_available
     try:
       charging = sm['carStateBP'].charging
       self._charging_data_available = bool(charging.dataAvailable)
       self._charging_btn.set_glow(bool(charging.chargingActive))
-    except (KeyError, AttributeError, TypeError) as e:
+    except (KeyError, AttributeError, TypeError):
       self._charging_data_available = False
       self._charging_btn.set_glow(False)
-      if prev_charging_data_available:
-        print(f"[ChargingIcon] carStateBP access failed, hiding icon: {e}")
-    if prev_charging_data_available != self._charging_data_available:
-      print(f"[ChargingIcon] visibility changed -> available={self._charging_data_available}")
 
   def _update_network_status(self, device_state):
     """Update network type and strength"""
