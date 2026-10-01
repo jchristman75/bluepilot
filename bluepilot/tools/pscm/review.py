@@ -25,8 +25,22 @@ For each one:
 Each sheet (--sheets DIR) has plan / car / wire curvature, speed and PSCM flags over -8 s .. +3 s
 and five qcamera frames (needs qcamera.ts beside each rlog).
 
+--releases reviews the hand-back instead: one row per grab, from its last release, while lateral
+stays active --
+
+  settle      s until |plan - car| stays within max(1.5e-3, 25% of plan) for 1 s (plan taken
+              REL_LAG_S earlier, the planner's delay)
+  drift       worst lateral offset (m) the curvature error builds within 6 s (2 s leak)
+  mode0       s of mode 0 on the wire in the first 3 s (human-turn tail + pulses)
+  pulse_s     when a stall/hand-off pulse fired after the release (s), nan if none
+  devlim/lim  share of the first 3 s with the deviation clip binding / LatCtlLim_D_Stat set
+  regrab      s until the next grab
+
+and, with --sheets, a release-centred sheet (-4 .. +7 s) that also marks mode 0 and pulses and
+plots the wheel angle and driver torque.
+
 Usage:
-  review.py ROUTE_DIR [--cache DIR] [--sheets DIR] [--min-press 0.4]
+  review.py ROUTE_DIR [--cache DIR] [--sheets DIR] [--min-press 0.4] [--releases]
   (ROUTE_DIR is the CommaRoutes folder that extract.py was run on)
 """
 import argparse
@@ -40,6 +54,8 @@ from bluepilot.tools.pscm.extract import DEFAULT_CACHE
 from bluepilot.tools.pscm.route import Route
 
 PRE_S = 3.0
+REL_LAG_S = 0.2   # planner -> car delay used when comparing after a release
+REL_S = 6.0
 MERGE_S = 1.0     # presses closer than this are one grab
 ONSET_TQ = 1.0    # Nm; hands-free |steeringTorque| p99.9 is ~1.6, p99 ~0.7
 
@@ -89,6 +105,39 @@ def grabs(r, min_press=0.4):
                     lag_s=_lag(r.acurv[pre6], car[pre6], r.dt), ay_max=float(np.max(ay)) if len(ay) else 0.0,
                     lane_off=(r.llL[i0] + r.llR[i0]) / 2, devlim=float(np.mean(r.devLim[pre] > 0)),
                     lim=float(np.mean(r.limStat[pre] > 0)), kind=kind))
+  return out
+
+
+def releases(r, min_press=0.4):
+  car = -r.yaw / np.maximum(r.v, 0.5)
+  plan = np.roll(r.acurv, int(REL_LAG_S / r.dt))
+  gl = grabs(r, min_press)
+  out = []
+  for k, g in enumerate(gl):
+    i = g['i1']
+    j = min(i + int(REL_S / r.dt), len(r))
+    if j - i < int(1.0 / r.dt) or not r.latActive[i:min(i + 50, len(r))].all():
+      continue
+    e = (plan - car)[i:j]
+    ok = np.abs(e) < np.maximum(1.5e-3, 0.25 * np.abs(plan[i:j]))
+    settle, run = np.nan, 0
+    for n, o in enumerate(ok):
+      run = run + 1 if o else 0
+      if run >= int(1.0 / r.dt):
+        settle = (n - run + 1) * r.dt
+        break
+    h = y = worst = 0.0
+    for n in range(i, j):  # heading and lateral offset from the curvature error, 2 s leak
+      h += (r.v[n] * e[n - i] - h / 2.0) * r.dt
+      y += (r.v[n] * h - y / 2.0) * r.dt
+      worst = max(worst, abs(y))
+    w3 = slice(i, min(i + int(3.0 / r.dt), len(r)))
+    pulses = np.flatnonzero(r.blipSrc[i:j] > 0)
+    out.append(dict(i=i, t=r.tr[i], grab_t=g['t'], v=r.v[i], ang=r.ang[i], plan=plan[i] * 1e3, car=car[i] * 1e3,
+                    settle=settle, drift=worst, mode0=float(np.sum(r.lmcMode[w3] == 0) * r.dt),
+                    pulse_s=pulses[0] * r.dt if len(pulses) else np.nan, devlim=float(np.mean(r.devLim[w3] > 0)),
+                    lim=float(np.mean(r.limStat[w3] > 0)),
+                    regrab=(gl[k + 1]['i0'] - i) * r.dt if k + 1 < len(gl) else np.nan, kind=g['kind']))
   return out
 
 
@@ -153,15 +202,83 @@ def sheet(r, g, cam, path, title):
   plt.close(fig)
 
 
+def release_sheet(r, rel, cam, path, title):
+  import matplotlib
+  matplotlib.use('Agg')
+  import matplotlib.pyplot as plt
+  i = rel['i']
+  s = slice(max(i - int(4 / r.dt), 0), min(i + int(7 / r.dt), len(r)))
+  t = r.tr[s] - rel['t']
+  v = np.maximum(r.v[s], 0.5)
+  fig = plt.figure(figsize=(16, 10))
+  gs = fig.add_gridspec(4, 5, height_ratios=[2.2, 1.1, 1, 1.4])
+  ax = fig.add_subplot(gs[0, :])
+  ax.plot(t, r.acurv[s] * 1e3, label='plan', lw=1.6)
+  ax.plot(t, -r.yaw[s] / v * 1e3, label='car (yaw/v)', lw=1.6)
+  ax.plot(t, r.lmcPA[s] / v * 1e3, label='wire C1/v', lw=1)
+  for a, b in _runs(r.pressed[s] > 0):
+    ax.axvspan(t[a], t[b - 1], color='k', alpha=0.08)
+  for col, c, y0 in (('devLim', 'tab:red', 0.95), ('limStat', 'tab:purple', 0.9)):
+    for a, b in _runs(getattr(r, col)[s] > 0):
+      ax.axvspan(t[a], t[b - 1], ymin=y0, ymax=y0 + 0.05, color=c)
+  for a, b in _runs(r.lmcMode[s] == 0):
+    ax.axvspan(t[a], t[b - 1], ymin=0.85, ymax=0.9, color='tab:orange')
+  for a, b in _runs(r.blipSrc[s] > 0):
+    ax.axvspan(t[a], t[b - 1], ymin=0.8, ymax=0.85, color='tab:green')
+  ax.axvline(0, color='k', lw=0.8)
+  ax.set_ylabel('curvature 1e-3 1/m')
+  ax.legend(loc='lower left')
+  ax.grid(alpha=0.3)
+  ax.set_title(title + '   [grey: pressed, red: dev clip, purple: PSCM limit, orange: mode 0, green: pulse]')
+  ax2 = fig.add_subplot(gs[1, :], sharex=ax)
+  ax2.plot(t, r.ang[s], label='wheel deg')
+  ax2b = ax2.twinx()
+  ax2b.plot(t, r.tq[s], color='tab:red', lw=0.8, label='driver Nm')
+  ax2.legend(loc='upper left')
+  ax2b.legend(loc='upper right')
+  ax2.grid(alpha=0.3)
+  ax3 = fig.add_subplot(gs[2, :], sharex=ax)
+  ax3.plot(t, r.v[s], color='k', label='v m/s')
+  ax3.plot(t, (r.llL[s] + r.llR[s]) / 2 * 10, color='tab:green', label='lane offset x10 (m)')
+  ax3.legend(loc='upper left')
+  ax3.grid(alpha=0.3)
+  for k, dt in enumerate((-1, 0.5, 1.5, 3, 5)):
+    fr = cam.frame(rel['t'] + dt)
+    a = fig.add_subplot(gs[3, k])
+    if fr is not None:
+      a.imshow(fr)
+    a.set_title(f'{dt:+.1f} s')
+    a.axis('off')
+  fig.tight_layout()
+  fig.savefig(path, dpi=75)
+  plt.close(fig)
+
+
 def main():
   ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
   ap.add_argument('route_dir')
   ap.add_argument('--cache', default=DEFAULT_CACHE)
   ap.add_argument('--sheets', default=None)
   ap.add_argument('--min-press', type=float, default=0.4)
+  ap.add_argument('--releases', action='store_true', help='review what happens after each release instead')
   a = ap.parse_args()
   rid = os.path.basename(a.route_dir.rstrip('/')).split('_')[-1]
   r = Route(a.cache, rid)
+  if a.releases:
+    rl = releases(r, a.min_press)
+    hdr = ('grab_t', 't', 'v', 'ang', 'plan', 'car', 'settle', 'drift', 'mode0', 'pulse_s', 'devlim', 'lim', 'regrab', 'kind')
+    print(f'{rid}: {len(rl)} releases')
+    print(' '.join(f'{h:>8}' for h in hdr))
+    for x in rl:
+      print(' '.join(f'{x[h]:8.2f}' if isinstance(x[h], float) else f'{str(x[h]):>8}' for h in hdr))
+    if a.sheets:
+      os.makedirs(a.sheets, exist_ok=True)
+      cam = _QCam(a.route_dir, rid)
+      for x in rl:
+        release_sheet(r, x, cam, os.path.join(a.sheets, f'{rid}_rel{x["t"]:06.1f}.png'),
+                      f'{rid} release t={x["t"]:.1f}  v={x["v"]:.1f} m/s')
+      print('sheets ->', a.sheets)
+    return
   gl = grabs(r, a.min_press)
   eng = (r.latActive > 0).sum() * r.dt / 60
   print(f'{rid}: {r.tr[-1] / 60:.1f} min, {eng:.1f} engaged, {len(gl)} grabs')
