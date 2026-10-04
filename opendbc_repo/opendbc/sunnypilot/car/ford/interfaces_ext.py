@@ -13,7 +13,11 @@ Includes:
 """
 
 from opendbc.car import Bus, structs
-from opendbc.car.ford.values import DBC, FordFlags, RADAR, FordSafetyFlags
+from opendbc.car.ford.values import CAR, DBC, FordFlags, RADAR, FordSafetyFlags
+
+
+# BluePilot: platforms whose 0x7B pack-power signal has been checked against real data (see below).
+HV_POWER_VERIFIED_CARS = frozenset({CAR.FORD_MUSTANG_MACH_E_MK1, CAR.FORD_F_150_LIGHTNING_MK1})
 
 
 def apply_ford_ext_params(ret: structs.CarParams, CP, car_fw, fingerprint, alpha_long: bool) -> None:
@@ -64,9 +68,18 @@ def apply_ford_ext_params(ret: structs.CarParams, CP, car_fw, fingerprint, alpha
   if 0x07A in fingerprint[CAN.main] and 0x24B in fingerprint[CAN.main] and 0x24C in fingerprint[CAN.main]:
     ret.flags |= int(FordFlags.HEV_BATTERY_DATA)
 
-  # BluePilot: BEV/PHEV charging telemetry
-  # Battery_Traction_5 (0x24D) has instantaneous charge power; MtrTrac_Data2 (0x442) has charge status
-  if 0x24D in fingerprint[CAN.main] and 0x442 in fingerprint[CAN.main]:
+  # BluePilot: real HV pack power (HV_Battery_Power_BP, 0x7B). Reverse-engineered on a Mach-E (97.5-98.2
+  # kWh per 100% SOC driving and DC charging = ER gross pack), then checked on the commaCarSegments fleet:
+  # battery power vs m*a*v under acceleration has the same slope on 6 Mach-Es (1.83-2.13, ours 1.95) and
+  # 6 F-150 Lightnings (1.74-1.94), so it is the same signal and scale on both. No ICE/hybrid Ford in the
+  # fleet sends 0x7B. Platforms not verified keep reporting the charge-power limit (see carstate_ext).
+  if candidate in HV_POWER_VERIFIED_CARS and 0x7B in fingerprint[CAN.main]:
+    ret.flags |= int(FordFlags.HV_POWER_DATA)
+
+  # BluePilot: BEV/PHEV charging telemetry. MtrTrac_Data2 (0x442) has charge status; the power comes from
+  # Battery_Traction_5 (0x24D, the pack's charge power limits) or from 0x7B above. The F-150 Lightning
+  # sends 0x442 and 0x7B but no 0x24D.
+  if 0x442 in fingerprint[CAN.main] and (0x24D in fingerprint[CAN.main] or ret.flags & FordFlags.HV_POWER_DATA):
     ret.flags |= int(FordFlags.CHARGING_DATA)
 
 

@@ -99,10 +99,11 @@ class ChargingLayoutMici(NavWidget):
         'active': charging.chargingActive,
         'status': charging.statusText,
         'kw': charging.powerKw,
+        'limit_kw': charging.powerLimitKw,
         'soc': hybrid_battery.socActual if hybrid_battery.dataAvailable else 0.0,
       }
     except (KeyError, AttributeError, TypeError):
-      return {'available': False, 'active': False, 'status': "", 'kw': 0.0, 'soc': 0.0}
+      return {'available': False, 'active': False, 'status': "", 'kw': 0.0, 'limit_kw': 0.0, 'soc': 0.0}
 
   def _render(self, rect: rl.Rectangle) -> None:
     # Charge curve fills the entire background
@@ -165,12 +166,21 @@ class ChargingLayoutMici(NavWidget):
               time_text, font_size=int(32 * scale), font_weight=FontWeight.MEDIUM, color=BPColors.WHITE,
               alignment=rl.GuiTextAlignment.TEXT_ALIGN_CENTER)
 
-    # kW in the hero font, SOC alongside it (no Amps column -- see the module docstring).
-    col_w = (rect.width - 2 * pad) / 2
-    self._draw_stat(rl.Rectangle(rect.x + pad, readout_y, col_w, readout_h),
+    # kW in the hero font, SOC alongside it (no Amps column -- see the module docstring). Max kW is
+    # what the pack will accept right now (powerLimitKw); it gets a column only when reported (the
+    # F-150 Lightning sends no limit) and it differs from kW -- on a platform without a verified
+    # pack-power signal, kW *is* the limit. kW keeps half the row so the hero number never shrinks.
+    row_w = rect.width - 2 * pad
+    hero_w = row_w / 2
+    small = [(f"{data['soc']:.0f}%", "SOC")]
+    if data['limit_kw'] > 0.05 and abs(data['limit_kw'] - data['kw']) > 0.05:
+      small.insert(0, (f"{data['limit_kw']:.0f}", "Max kW"))
+    self._draw_stat(rl.Rectangle(rect.x + pad, readout_y, hero_w, readout_h),
                     f"{data['kw']:.1f}", "kW", scale, value_font=HERO_VALUE_FONT)
-    self._draw_stat(rl.Rectangle(rect.x + pad + col_w, readout_y, col_w, readout_h),
-                    f"{data['soc']:.0f}%", "SOC", scale)
+    small_w = (row_w - hero_w) / len(small)
+    for i, (value, label) in enumerate(small):
+      self._draw_stat(rl.Rectangle(rect.x + pad + hero_w + i * small_w, readout_y, small_w, readout_h),
+                      value, label, scale)
 
   def _draw_stat(self, rect: rl.Rectangle, value: str, label: str, scale: float = 1.0,
                  value_font: int = VALUE_FONT) -> None:

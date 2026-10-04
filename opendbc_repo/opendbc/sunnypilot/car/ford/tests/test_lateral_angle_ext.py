@@ -305,6 +305,17 @@ class TestSmallCurvatureGain(unittest.TestCase):
     ext = self._low_gain(CAR.FORD_MUSTANG_MACH_E_MK1, {"FordHighSpeedFactor_ang": b"0.9"}, v=30.0)
     self.assertLessEqual(ext.low_gain_calc, max(ext.high_gain_calc, 1.0) + 1e-12)
 
+  def test_faded_out_at_highway_speed(self):
+    # highF 1.13 lifts the large-curve cap to ~1.19, so without the fade the full x1.15 would apply
+    ext = self._low_gain(CAR.FORD_MUSTANG_MACH_E_MK1, {"FordHighSpeedFactor_ang": b"1.13"}, v=30.0)
+    self.assertAlmostEqual(ext.low_gain_calc, 1.0)
+
+  def test_partial_inside_the_fade(self):
+    lo, hi = lateral_angle_ext._SMALL_CURV_GAIN_FADE_V
+    ext = self._low_gain(CAR.FORD_MUSTANG_MACH_E_MK1, {"FordHighSpeedFactor_ang": b"1.13"}, v=(lo + hi) / 2)
+    self.assertGreater(ext.low_gain_calc, 1.0)
+    self.assertLess(ext.low_gain_calc, lateral_angle_ext._SMALL_CURV_GAIN_CANFD_SUV)
+
 
 class TestInitializeFord(unittest.TestCase):
   def test_safety_param_stays_a_plain_int(self):
@@ -683,6 +694,28 @@ class TestHandoffBlipPlanGate(unittest.TestCase):
 
   def test_reversal_into_opposite_curve_waits(self):
     self.assertFalse(self._press_then_release(plan=-0.004, meas=0.003))
+
+
+class TestHandoffBlipSpeedGates(TestHandoffBlipPlanGate):
+  """Above _BLIP_MAX_SPEED no hand-off pulse fires; below it, "near straight" also has to hold in
+  lateral accel (route 00000463 t=3085: 0.9 m/s^2 at 34.5 m/s passed the 0.001 1/m test)."""
+
+  def _at_speed(self, v):
+    self.V_EGO = v
+    self.cs.out.vEgoRaw = self.cs.out.vEgo = v
+
+  def test_no_pulse_at_highway_speed(self):
+    self._at_speed(lateral_angle_ext._BLIP_MAX_SPEED + 3.0)
+    self.assertFalse(self._press_then_release(plan=0.0, meas=0.0))
+
+  def test_curvature_straight_but_real_lateral_accel_waits(self):
+    self._at_speed(20.0)
+    plan = 0.0009  # under _BLIP_PLAN_STRAIGHT, but 0.36 m/s^2 at 20 m/s
+    self.assertFalse(self._press_then_release(plan=plan, meas=plan))
+
+  def test_straight_at_speed_still_fires(self):
+    self._at_speed(20.0)
+    self.assertTrue(self._press_then_release(plan=0.0004, meas=0.0))  # 0.16 m/s^2
 
 
 class TestReactiveStallRealCurveGate(unittest.TestCase):

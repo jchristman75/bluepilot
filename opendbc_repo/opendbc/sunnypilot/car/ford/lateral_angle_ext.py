@@ -22,6 +22,7 @@ closed loop against the PSCM emulator (bluepilot/tools/pscm) and confirmed on th
 only ~0.85-0.88 of a small command, so near-straight lane keeping ran ~13% short of the plan. On
 the Mach-E platform group that gain is now x1.15 (capped at the large-curve gain); see
 _SMALL_CURV_GAIN_CANFD_SUV. Road A/B on 000001b1: off ran ~2x further short of the plan near straight.
+It fades out between 22 and 27 m/s (_SMALL_CURV_GAIN_FADE_V): on the highway it added straight-road weave.
 
 **Deviation clip.** κ is clipped to measured ± bp_curvature_error before the gain (mirrors curvature
 mode and ford.h's shadow-curvature check). Because the gain is applied after the clip, a binding
@@ -82,6 +83,13 @@ _GAIN_CANFD_SUV   = (1.00, 1.05)
 # gain; 1.15 is the measured delivery's inverse, not the harness optimum. Only the platform group
 # it was measured on; everything else keeps 1.0. Capped at the large-curve gain.
 _SMALL_CURV_GAIN_CANFD_SUV = 1.15
+# ...faded out at highway speed. The cap above is 1.05 x FordHighSpeedFactor_ang, so with a typical
+# highF (1.13) the full x1.15 applied on highway straights, where the near-straight gain had been
+# 1.00 -- and the PSCM droops least there (0.98 -> 0.87 above 60 mph), so it needs the boost least.
+# Road test 2026-10-03 (routes 458/463/464 vs the Sept highway routes 41b/434, same settings): wire/plan
+# gain 1.08-1.14 vs 0.92-0.97, straight-road yaw weave +20% at 0.2-0.25 Hz, and the plan itself moving
+# 20-30% more -- the planner loop the harness can't see. Full gain to 22 m/s, none from 27 m/s.
+_SMALL_CURV_GAIN_FADE_V = (22.0, 27.0)  # m/s
 
 _CANFD_BOF_CARS = frozenset({
   CAR.FORD_F_150_MK14,
@@ -222,6 +230,14 @@ _BLIP_MAX_RAMP_M = 10.0
 # Only fire while the plan asks for less than this share of the car's curvature, or is near straight.
 _BLIP_PLAN_MEAS_RATIO = 0.3
 _BLIP_PLAN_STRAIGHT = 0.001  # 1/m
+# "Near straight" must also hold in lateral accel: 0.001 1/m is 1.2 m/s^2 at 77 mph. Route 00000463
+# t=3085 (34.5 m/s, plan 0.9 m/s^2 into an S-bend) passed the curvature test, the pulse freed the wheel,
+# the PSCM came back in LatCtlLim and the car overshot ~0.7 m toward the next lane.
+_BLIP_PLAN_STRAIGHT_AY = 0.3  # m/s^2
+# No hand-off pulse at highway speed. Its value is manual-turn exits, which don't happen there, and
+# over every logged release above 22 m/s a pulse brought no tracking gain but more re-grabs within
+# 3 s (65-82% vs 47-57% without). An earned pulse just waits out its pending window.
+_BLIP_MAX_SPEED = 22.0  # m/s
 # Lead-lag command shaping (see module docstring): the wire carries r*K*kappa immediately and the
 # remaining (1-r)*K*kappa through a first-order lag of tau. First fitted open-loop on routes
 # 41x-45x + 1a7-1af (r=0.70/tau=0.7 s to 56 mph, r=0.85/tau=1.0 s above 60 mph). Retuned 2026-09-28
@@ -537,14 +553,16 @@ class LateralAngleExt:
     # An earned pulse waits for a frame where every guard is clear instead of being dropped.
     if self.press_blip_pending_s > 0.0:
       self.press_blip_pending_s = max(0.0, self.press_blip_pending_s - _STEER_DT)
+      _plan = abs(actuators.curvature)
+      _plan_straight = _plan <= min(_BLIP_PLAN_STRAIGHT, _BLIP_PLAN_STRAIGHT_AY / max(v_ego, 1.0) ** 2)
       if (self.stall_blip_cooldown_s <= 0.0
           and self.stall_blip_frames_left <= 0
+          and v_ego <= _BLIP_MAX_SPEED
           and abs(self.path_angle_last) < _BLIP_MAX_PATH_ANGLE
           # ramp-recovery distance guard: straight (path_angle ~0) always passes; curves
           # scale with speed through the soft ROC
           and (abs(self.path_angle_last) / _soft_roc_rad_per_s(v_ego)) * v_ego < _BLIP_MAX_RAMP_M
-          and abs(actuators.curvature) <= max(_BLIP_PLAN_STRAIGHT,
-                                              _BLIP_PLAN_MEAS_RATIO * abs(self.get_current_curvature(CS)))):
+          and (_plan_straight or _plan <= _BLIP_PLAN_MEAS_RATIO * abs(self.get_current_curvature(CS)))):
         self.stall_blip_frames_left = _STALL_BLIP_FRAMES
         self.angle_stall_blip_source = 1
         self.press_blip_pending_s = 0.0
@@ -713,8 +731,9 @@ class LateralAngleExt:
       v_ego, [13.5, 26.82], [1.0, (self.path_angle_gain_lowC_highV * self.user_dampening_factor)]
     )
     self.high_gain_calc = interp(v_ego, [13.5, 26.82], [(1.30 * self.low_speed_curv_factor), (self.path_angle_gain_highC_highV * self.high_speed_curv_factor)])
-    if self.small_curv_gain != 1.0:
-      self.low_gain_calc = min(self.low_gain_calc * self.small_curv_gain, max(self.high_gain_calc, self.low_gain_calc))
+    _small_gain = float(interp(v_ego, _SMALL_CURV_GAIN_FADE_V, [self.small_curv_gain, 1.0]))
+    if _small_gain != 1.0:
+      self.low_gain_calc = min(self.low_gain_calc * _small_gain, max(self.high_gain_calc, self.low_gain_calc))
 
     # As the curve gets bigger, we will need a little boost to the signal to to not understeer
     self.curvature_factor = interp(abs(kappa_cmd), [0.0007, 0.001], [self.low_gain_calc, self.high_gain_calc])

@@ -41,6 +41,13 @@ MACH_E_CURVE = [
 ]
 
 
+def charge_limit_kw(soc: float, power_kw: float) -> float:
+  """What the pack will accept (powerLimitKw). On a real Mach-E it sits above the delivered power and
+  rises with SOC through a fast charge (route 00000464: 122 -> 135 kW from 32 -> 68% while the pack
+  took 115 -> 89 kW), so the two are visibly different on screen."""
+  return max(power_kw, 112.0 + 0.33 * soc)
+
+
 def charge_power_kw(soc: float) -> float:
   """Piecewise-linear interpolation over MACH_E_CURVE."""
   soc = max(0.0, min(100.0, soc))
@@ -68,7 +75,7 @@ if __name__ == "__main__":
       msg.carStateBP.charging.statusText = "Charging (Parked)"
       msg.carStateBP.charging.statusValue = 1
       msg.carStateBP.charging.powerKw = power_kw
-      msg.carStateBP.charging.powerLimitKw = 150.0
+      msg.carStateBP.charging.powerLimitKw = charge_limit_kw(soc, power_kw)
 
       msg.carStateBP.hybridBattery.dataAvailable = True
       msg.carStateBP.hybridBattery.voltHighLimit = 410.0

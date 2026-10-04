@@ -112,11 +112,12 @@ class ChargingOverlayPanel(Widget):
         'active': charging.chargingActive,
         'status': charging.statusText,
         'kw': charging.powerKw,
+        'limit_kw': charging.powerLimitKw,
         'amps': hybrid_battery.ampsActual if hybrid_battery.dataAvailable else 0.0,
         'soc': hybrid_battery.socActual if hybrid_battery.dataAvailable else 0.0,
       }
     except (KeyError, AttributeError, TypeError):
-      return {'available': False, 'active': False, 'status': "", 'kw': 0.0, 'amps': 0.0, 'soc': 0.0}
+      return {'available': False, 'active': False, 'status': "", 'kw': 0.0, 'limit_kw': 0.0, 'amps': 0.0, 'soc': 0.0}
 
   def _render(self, rect: rl.Rectangle):
     if self._animation_progress < 0.01:
@@ -163,9 +164,13 @@ class ChargingOverlayPanel(Widget):
     # tile was only ever a zero (see charge_session_history.amps_reported).
     readout_y = rect.y + pad + 130
     readout_h = READOUT_H
+    # Max kW is what the pack will accept right now (powerLimitKw). Shown only when reported (the
+    # F-150 Lightning sends no limit) and when it differs from kW: on a platform without a verified pack-power signal, kW *is* the limit.
     columns = [(f"{data['kw']:.1f}", "kW", HERO_VALUE_FONT), (f"{data['soc']:.0f}%", "SOC", VALUE_FONT)]
     if charge_session_history.amps_reported:
       columns.insert(1, (f"{data['amps']:.0f}", "Amps", VALUE_FONT))
+    if data['limit_kw'] > 0.05 and abs(data['limit_kw'] - data['kw']) > 0.05:
+      columns.insert(1, (f"{data['limit_kw']:.0f}", "Max kW", VALUE_FONT))
     col_w = (rect.width - 2 * pad) / len(columns)
     for i, (value, label, font_size) in enumerate(columns):
       self._draw_stat(rl.Rectangle(rect.x + pad + i * col_w, readout_y, col_w, readout_h),

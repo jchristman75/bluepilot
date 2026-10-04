@@ -442,7 +442,7 @@ class CarStateExt:
           # 0x07A arrives at 100 Hz on bus 0 the whole time and BattTrac_U_Actl in the same frame
           # tracks 361.5 -> 369.0 V, while the 15-bit current field is raw 0 in every frame. No
           # other HV current signal in the DBC is live either, so there is no pack current to be
-          # had on this platform -- the charging UI shows kW alone (see charging/session.py).
+          # had on this platform. Pack power is (HV_Battery_Power_BP, see the charging block below).
           if self.CP.carFingerprint == CAR.FORD_MUSTANG_MACH_E_MK1:
             # motor current is positive when motoring; UI wants positive = charging, so negate
             hybrid_battery.ampsActual = -cp.vl["MtrTracData_1_FD1"]["MtrTrac2_I_Actl"]
@@ -466,8 +466,16 @@ class CarStateExt:
           charging.statusValue = status_value
           charging.statusText = get_charge_status_text(status_value)
           charging.chargingActive = status_value in (1, 2)  # ChargingInParkingState, ChargingInDrivingState
-          charging.powerKw = batt_data5["BattTrac2_Pw_ChrgInst"] / 1000.0
-          charging.powerLimitKw = batt_data5["BattTrac2_Pw_LimChrg"] / 1000.0
+          # Battery_Traction_5's four signals are charge/discharge power LIMITS, not flow: ChrgInst
+          # reads 50-127 kW while driving, and on a DC fast charge (route 00000464) it rose
+          # 122 -> 135 kW while the pack actually took 115 -> 89 kW. It is what the pack will accept.
+          charging.powerLimitKw = batt_data5["BattTrac2_Pw_ChrgInst"] / 1000.0
+          if self.CP.flags & FordFlags.HV_POWER_DATA:
+            # Real pack power (HV_Battery_Power_BP, + = discharge); report charging as positive.
+            charging.powerKw = max(0.0, -cp.vl["HV_Battery_Power_BP"]["BattTracPw_Actl_BP"])
+          else:
+            # No verified pack-power signal on this platform: the limit is the best there is.
+            charging.powerKw = charging.powerLimitKw
     except (KeyError, AttributeError):
       pass
 
