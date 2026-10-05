@@ -206,8 +206,10 @@ class CarState(CarStateBase, MadsCarState, CarStateExt):
       pt_messages.append(("Battery_Traction_5_FD1", float('nan')))
       pt_messages.append(("MtrTrac_Data2_FD1", float('nan')))
 
-    if CP.flags & FordFlags.HV_POWER_DATA:
-      pt_messages.append(("HV_Battery_Power_BP", float('nan')))
+    if CP.flags & FordFlags.HV_CURRENT_DATA:
+      pt_messages.append(("HV_Battery_Current_BP", float('nan')))
+      if not CP.flags & FordFlags.HEV_BATTERY_DATA:
+        pt_messages.append(("Battery_Traction_1_FD1", float('nan')))  # pack voltage, for charge power
 
     if CP.flags & FordFlags.ALT_STEER_ANGLE:
       pt_messages += [

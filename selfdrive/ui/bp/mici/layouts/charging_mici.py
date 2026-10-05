@@ -1,9 +1,8 @@
 """BluePilot MICI: Charging screen — the charge curve fills the whole background,
 with live status/kW/SOC/time-to-80% overlaid on top.
 
-kW carries the display: pack current is not shown because ampsActual is motor current on the
-Mach-E (MtrTrac2_I_Actl), flat 0.0 A for an entire parked charge (route 0000041c: 5569 charging
-samples, none non-zero), and that platform's own BattTrac_I_Actl is dead -- see carstate_ext.py.
+kW carries the display. Pack current (hybridBattery.ampsActual) is left to the larger tici
+panel: this screen's readout row has room for kW, Max kW and SOC only.
 """
 
 from collections.abc import Callable

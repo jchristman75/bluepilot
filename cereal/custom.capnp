@@ -602,7 +602,7 @@ struct CarStateBP @0xb057204d7deadf3f {
     chargingActive @1 :Bool;  # true when ChrgStat_D_ActlMntr indicates an active charge (parked or driving)
     statusText @2 :Text;
     statusValue @3 :UInt8;  # Raw numeric value for PlotJuggler compatibility
-    powerKw @4 :Float32;  # power into the HV pack while charging (Mach-E, F-150 Lightning: HV_Battery_Power_BP; else = powerLimitKw)
+    powerKw @4 :Float32;  # power into the HV pack while charging (Mach-E, F-150 Lightning: pack V x HV_Battery_Current_BP; else = powerLimitKw)
     powerLimitKw @5 :Float32;  # what the pack will accept right now (BattTrac2_Pw_ChrgInst)
   }
 }

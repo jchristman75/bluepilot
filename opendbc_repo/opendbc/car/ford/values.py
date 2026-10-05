@@ -55,7 +55,7 @@ class FordFlags(IntFlag):
   HEV_CLUSTER_DATA = 4
   HEV_BATTERY_DATA = 8
   CHARGING_DATA = 16
-  HV_POWER_DATA = 32  # BluePilot: HV_Battery_Power_BP (0x7B), real pack power -- Mach-E, F-150 Lightning
+  HV_CURRENT_DATA = 32  # BluePilot: HV_Battery_Current_BP (0x7B), real pack current -- Mach-E, F-150 Lightning
 
 
 class RADAR:

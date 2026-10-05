@@ -36,11 +36,10 @@ ESTIMATE_WINDOW_S = 120.0  # only use the most recent N seconds of samples for t
 # view that auto-dismisses on "session ended".
 CHARGING_INACTIVE_GRACE_S = 15.0
 
-# hybridBattery.ampsActual is motor current on the Mach-E (MtrTrac2_I_Actl), which reads a
-# flat 0.0 A for an entire parked charge -- route 0000041c: 5569 charging samples, not one of
-# them non-zero -- and that platform's pack current (BattTrac_I_Actl) is dead too. Other Ford
-# BEV/PHEVs may report real current, so rather than dropping the readout everywhere, track
-# whether this session has ever seen current and let the UI hide a tile that says nothing.
+# hybridBattery.ampsActual is real pack current on the Mach-E and F-150 Lightning
+# (HV_Battery_Current_BP, 0x7B). Elsewhere it may be motor current, which reads a flat 0.0 A for
+# an entire parked charge (route 0000041c), so track whether this session has ever seen current
+# and let the UI hide a tile that says nothing.
 AMPS_REPORTING_MIN_A = 0.5
 
 

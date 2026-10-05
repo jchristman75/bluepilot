@@ -442,8 +442,11 @@ class CarStateExt:
           # 0x07A arrives at 100 Hz on bus 0 the whole time and BattTrac_U_Actl in the same frame
           # tracks 361.5 -> 369.0 V, while the 15-bit current field is raw 0 in every frame. No
           # other HV current signal in the DBC is live either, so there is no pack current to be
-          # had on this platform. Pack power is (HV_Battery_Power_BP, see the charging block below).
-          if self.CP.carFingerprint == CAR.FORD_MUSTANG_MACH_E_MK1:
+          # had on this platform from the DBC. The real pack current is HV_Battery_Current_BP (0x7B).
+          if self.CP.flags & FordFlags.HV_CURRENT_DATA:
+            # pack current is + when discharging; UI wants positive = charging, so negate
+            hybrid_battery.ampsActual = -cp.vl["HV_Battery_Current_BP"]["BattTracI_Actl_BP"]
+          elif self.CP.carFingerprint == CAR.FORD_MUSTANG_MACH_E_MK1:
             # motor current is positive when motoring; UI wants positive = charging, so negate
             hybrid_battery.ampsActual = -cp.vl["MtrTracData_1_FD1"]["MtrTrac2_I_Actl"]
           else:
@@ -470,9 +473,12 @@ class CarStateExt:
           # reads 50-127 kW while driving, and on a DC fast charge (route 00000464) it rose
           # 122 -> 135 kW while the pack actually took 115 -> 89 kW. It is what the pack will accept.
           charging.powerLimitKw = batt_data5["BattTrac2_Pw_ChrgInst"] / 1000.0
-          if self.CP.flags & FordFlags.HV_POWER_DATA:
-            # Real pack power (HV_Battery_Power_BP, + = discharge); report charging as positive.
-            charging.powerKw = max(0.0, -cp.vl["HV_Battery_Power_BP"]["BattTracPw_Actl_BP"])
+          if self.CP.flags & FordFlags.HV_CURRENT_DATA:
+            # Real pack power = pack voltage x pack current (HV_Battery_Current_BP, + = discharge); report
+            # charging as positive. Route 00000464: 83 -> 67 kW, while ChrgInst read 122 -> 135.
+            pack_a = cp.vl["HV_Battery_Current_BP"]["BattTracI_Actl_BP"]
+            pack_v = cp.vl["Battery_Traction_1_FD1"]["BattTrac_U_Actl"]
+            charging.powerKw = max(0.0, -pack_a * pack_v / 1000.0)
           else:
             # No verified pack-power signal on this platform: the limit is the best there is.
             charging.powerKw = charging.powerLimitKw

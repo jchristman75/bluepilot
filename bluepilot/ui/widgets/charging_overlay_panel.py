@@ -160,8 +160,8 @@ class ChargingOverlayPanel(Widget):
     rl.draw_text_ex(self._font_semi, status_text, rl.Vector2(rect.x + pad, rect.y + pad + 60), 32, 0, status_color)
 
     # kW leads, in the big font. Amps only earns a column on a car that actually reports pack
-    # current: on the Mach-E it is motor current, flat 0.0 A for a whole parked charge, so the
-    # tile was only ever a zero (see charge_session_history.amps_reported).
+    # current (Mach-E and F-150 Lightning: HV_Battery_Current_BP); where ampsActual is motor
+    # current it is a flat 0.0 A for a whole parked charge (see charge_session_history.amps_reported).
     readout_y = rect.y + pad + 130
     readout_h = READOUT_H
     # Max kW is what the pack will accept right now (powerLimitKw). Shown only when reported (the
