@@ -274,3 +274,24 @@ near-saturation windows; `fit.grab_windows` builds the near-saturation set).
 - **Covered earlier:** the authority ramp / engage counter was already tested in `fit_mode0.py`, also no
   benefit.
 - **Still open:** the general dynamic-R^2 gap (0.796) stays.
+
+### Code rescan with the hard-clamp emulator (2026-10-06)
+
+Run on 19 town routes with ceiling events (1b0-1b4, 451-457, 460-462, 465-469), with replay and with
+the clean emulator (`--ideal`), then regression-checked on the 32 held-out routes.
+
+- **Adopted: the anti-windup threshold now follows the ceiling.** `_WINDUP_AY` = 1.6 / 2.4 / 2.0 m/s^2
+  at 10 / 20 / 30 m/s (0.9 x the fit). The old flat 1.8 never engaged at 10-12 m/s, where the car
+  plateaus at 1.6-1.7.
+  - Clean emulator: curve-exit cut -9.5%, wide -2.4%, tracking -2.2%, path -0.4%, nothing worse.
+  - Replay: neutral.
+  - Held-out: neutral (all metrics within 0.2%, except clean-emulator exit cut +1.6% on a small base).
+  - A flat 1.6 or 1.5 gave a similar exit gain, but cost path error (+0.5 / +1.2%), because it
+    engaged early at speed.
+- **Rejected: a request cap at the ceiling.** It limited |kappa_cmd| * v^2 to 1.0 / 1.1 / 1.25 x the
+  fitted ceiling.
+  - The clean emulator favoured it (release drift -6..-11%).
+  - Replay disagreed (drift +2.7%), and the cap set off reactive stall pulses (0 -> 0.9-1.4 per hour)
+    and more panda blocks. A command held below the car at the ceiling makes the deviation clip bind,
+    and the stall detector reads that as a stall.
+- **Confirmed: anti-windup itself is worth keeping.** Turning it off was worse in both modes.
