@@ -76,6 +76,29 @@ def release_windows(r: Route):
   return out
 
 
+SAT_N = 1000  # 10 s
+
+
+def grab_windows(r: Route, ay_min=1.8):
+  """Near-saturation windows: hands-free 10 s stretches that run right up to the next grab (or the
+  end of the stretch), keeping only those whose measured lateral accel reaches ay_min. route_windows
+  drop the 2 s before every press, which is exactly where the PSCM ceiling and its hold show."""
+  ok = ((r.latActive > 0) & (r.lmcMode > 0) & (r.v > 5) & (r.pressed == 0) & (r.htPaused == 0) & (r.blip == 0)
+        & (r.since_last(r.pressed > 0) > 2.0))
+  ok &= ~np.r_[False, np.diff(r.t) > 0.03]
+  out = []
+  e = np.flatnonzero(np.diff(np.r_[0, ok.astype(int), 0]))
+  for a, b in zip(e[::2], e[1::2]):
+    for s in range(b - SAT_N, a - 1, -SAT_N // 2):
+      if s < a:
+        break
+      if np.abs(r.yaw[s:s + SAT_N] * r.v[s:s + SAT_N]).max() < ay_min:
+        continue
+      out.append(np.stack([r.lmcMode[s:s + SAT_N], -r.lmcPA[s:s + SAT_N], r.v[s:s + SAT_N], r.roll[s:s + SAT_N],
+                           r.ang[s:s + SAT_N], r.yaw[s:s + SAT_N]]))
+  return out
+
+
 def build_dataset(cache, kind='hands_free'):
   train, test = [], []
   for rid in route_ids(cache):
@@ -83,9 +106,9 @@ def build_dataset(cache, kind='hands_free'):
       r = Route(cache, rid)
     except FileNotFoundError:
       continue
-    w = route_windows(r) if kind == 'hands_free' else release_windows(r)
+    w = route_windows(r) if kind == 'hands_free' else release_windows(r) if kind == 'release' else grab_windows(r)
     (test if rid[:8] in TEST_ROUTES else train).extend(w)
-  sigs = SIGS if kind == 'hands_free' else SIGS + ('force', 'manual_turn')
+  sigs = SIGS + ('force', 'manual_turn') if kind == 'release' else SIGS
   as_arr = lambda w: {k: np.stack([x[i] for x in w], axis=1) for i, k in enumerate(sigs)}  # (T, N)
   return as_arr(train), as_arr(test)
 
@@ -117,13 +140,14 @@ STAGE_A = ([('ff_gain', i, 'log') for i in range(7)] + [('droop_ratio', i, 'lin'
             ('angle_offset_deg', None, 'lin'), ('bank_comp', None, 'lin'),
             ('small_gain', None, 'lin'), ('small_k0', None, 'log')])
 STAGE_SAT = [('sat_knee', None, 'lin'), ('sat_slope', None, 'lin')]
+STAGE_SAT_HARD = [('sat_lim', i, 'lin') for i in range(3)]
 STAGE_R = [('release_tau', None, 'log')]
 STAGE_B = [('veh_sr', None, 'log'), ('veh_cf', None, 'log'), ('veh_iz', None, 'log'),
            ('veh_yaw_tau', None, 'log'), ('veh_offset_deg', None, 'lin'), ('veh_roll', None, 'lin')]
 
 
 # physical bounds, applied after the transform, so the optimiser can't wander into an unstable model
-BOUNDS = {'release_tau': (0.02, 5.0), 'sat_knee': (1.0, 99.0), 'sat_slope': (0.05, 1.0), 'small_gain': (-0.5, 1.0), 'small_k0': (5e-5, 0.005), 'ff_gain': (0.3, 4.0), 'droop_ratio': (-0.3, 0.7), 'droop_tau': (0.05, 8.0), 'c1_slew': (0.02, 5.0),
+BOUNDS = {'sat_lim': (0.8, 99.0), 'release_tau': (0.02, 5.0), 'sat_knee': (1.0, 99.0), 'sat_slope': (0.05, 1.0), 'small_gain': (-0.5, 1.0), 'small_k0': (5e-5, 0.005), 'ff_gain': (0.3, 4.0), 'droop_ratio': (-0.3, 0.7), 'droop_tau': (0.05, 8.0), 'c1_slew': (0.02, 5.0),
           'servo_p_scale': (0.1, 3.0), 'servo_rate_scale': (0.05, 5.0),
           'angle_offset_deg': (-5, 5), 'bank_comp': (-40, 40), 'veh_sr': (8, 25), 'veh_cf': (4e4, 5e5), 'veh_iz': (1000, 10000), 'veh_yaw_tau': (0.002, 0.5), 'veh_offset_deg': (-5, 5),
           'veh_roll': (-60, 60)}

@@ -180,7 +180,12 @@ _STALL_RESPONDING_RATE = 0.002  # 1/m/s
 # clip binding there with the car short of the plan. 0.2 m/s margin keeps the clip engaged before
 # the panda starts checking.
 _DEVIATION_CLIP_MIN_SPEED = 9.8  # m/s
-_WINDUP_AY = 1.8               # m/s^2, measured lateral accel at which the car is at the ceiling
+# Measured lateral accel at which the car counts as at the ceiling: 0.9 x the emulator's hard-clamp fit
+# (1.78/2.66/2.20 m/s^2 at 10/20/30 m/s, 2026-10-06). A flat 1.8 never engaged at 10-12 m/s, where the
+# car plateaus at 1.6-1.7 (routes 465-467) and where the ceiling grabs happen. Harness, 19 town routes,
+# clean emulator: curve-exit cut -9.5%, wide -2.4%, tracking -2.2%, nothing worse; replay neutral.
+_WINDUP_AY_V = (10.0, 20.0, 30.0)  # m/s
+_WINDUP_AY = (1.6, 2.4, 2.0)       # m/s^2
 _WINDUP_PLAN_RATE = 0.002      # 1/m/s, plan curvature easing off at least this fast = unwinding
 _WINDUP_PLAN_TAU = 0.15        # s, smoothing for the plan-rate test
 # Post-release drift: the real-curve floor (|measured| > 2x tolerance) keeps curve entry from
@@ -751,7 +756,8 @@ class LateralAngleExt:
     _plan_easing = (self._windup_plan_slow - _plan_prev) / _STEER_DT * _turn < -_WINDUP_PLAN_RATE
     _hold = self.curvature_factor * current_curvature
     self.bp_windup_released = False
-    if (_plan_easing and v_ego ** 2 * abs(current_curvature) >= _WINDUP_AY
+    _windup_ay = float(interp(v_ego, _WINDUP_AY_V, _WINDUP_AY))
+    if (_plan_easing and v_ego ** 2 * abs(current_curvature) >= _windup_ay
         and wire_kappa * _turn > _hold * _turn):
       wire_kappa = _hold
       self._wire_slow = _hold

@@ -544,6 +544,20 @@ class TestAntiWindup(unittest.TestCase):
       self._update(plan, -0.0078)
     self.assertFalse(self.ext.bp_windup_released)
 
+  def test_low_speed_ceiling_engages(self):
+    # 10.5 m/s, car at 0.015 (1.65 m/s^2): below the old flat 1.8, above the scheduled ~1.64
+    v = 10.5
+    self.cs.out.vEgoRaw = self.cs.out.vEgo = v
+    self.V = v
+    for _ in range(60):
+      self._update(-0.020, -0.015)
+    plan = -0.020
+    for _ in range(4):
+      plan += 0.006 * 0.05
+      lat = self._update(plan, -0.015)
+    self.assertTrue(self.ext.bp_windup_released)
+    self.assertAlmostEqual(lat.path_angle, self.ext.curvature_factor * -0.015 * v, places=6)
+
   def test_curve_entry_is_untouched(self):
     for _ in range(20):
       self._update(0.0, 0.0)

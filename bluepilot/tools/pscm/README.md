@@ -248,3 +248,29 @@ Committed code vs working tree (lead-lag retune + small-curvature gain), per rou
 - **Emulator:** `release_tau` 5.0 -> 0.3 s (`fit_mode0.py`), and the mode bit is now delayed like C1.
   Hands-free validation is unchanged; release angle rms 1.93 -> 1.87 deg.
 - **`route.Route`** no longer shows a fake mode 2->0->2 at every 60 s segment boundary.
+
+## Firmware-structure tests (2026-10-06, `PSCM_Operations_Reference_for_Emulator.md`)
+
+The reference maps the ML3V-14D003 path controller: per-channel slew, gains `Kpsi(v)` etc., an authority
+ramp, a bounded integrator on measured angle, a hard speed-scheduled request clamp, and a
+counter-gated engage state machine, all on a 4 ms task. These were tested as emulator switches. Each was
+fitted on training routes only and scored on held-out routes (521 hands-free, 63 release, 135
+near-saturation windows; `fit.grab_windows` builds the near-saturation set).
+
+| variant | normal angle rms | saturation yaw rms | curve-exit angle rms | exit bias | release angle rms |
+|---|---|---|---|---|---|
+| committed (soft knee) | 0.597 | 0.395 | 1.24 | -0.56 | 1.87 |
+| **hard request clamp** (`sat_mode='hard'`) | **0.598** | **0.342** | **1.10** | **-0.18** | 1.87 |
+| droop driven by measured angle (`droop_source='angle'`) | 0.618 | 0.364 | 1.13 | -0.28 | 1.88 |
+| 5 ms substeps (`substeps=2`) | 0.612 | 0.381 | 1.19 | -0.45 | 1.97 |
+| plain refit (control) | 0.614 | 0.381 | 1.19 | -0.44 | 1.87 |
+
+- **Adopted: the hard clamp.** Fitted ceilings `sat_lim` 1.78 / 2.66 / 2.20 m/s^2 at 10 / 20 / 30 m/s.
+  The 20 m/s node is the least constrained. With it, two thirds of the model's "unwinds ahead of the car"
+  exit error goes away: the post-limit hold is mostly the request sitting above the clamp, a dead zone.
+- **Not adopted: the measured-angle droop.** It doesn't move the post-release yaw offset, so it doesn't
+  explain the post-manual-turn bias.
+- **Not adopted: the substeps.** No benefit.
+- **Covered earlier:** the authority ramp / engage counter was already tested in `fit_mode0.py`, also no
+  benefit.
+- **Still open:** the general dynamic-R^2 gap (0.796) stays.

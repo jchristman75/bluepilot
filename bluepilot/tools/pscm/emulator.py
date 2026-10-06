@@ -55,6 +55,16 @@ class PSCMParams:
   droop_tau: list = field(default_factory=lambda: [0.8] * 7)     # s
   sat_knee: float = 99.0           # m/s^2: delivered lateral accel where the PSCM's ceiling bends in (99 = off)
   sat_slope: float = 1.0           # delivered per requested lateral accel above the knee
+  # Structural options from the firmware map (PSCM_Operations_Reference_for_Emulator.md, 2026-10):
+  # sat_mode 'hard' = the request clamp of ML3V-14D003 0x001AF820 (speed-scheduled, saturation flag set
+  # while clamped) instead of the soft knee; droop_source 'angle' = the bounded feedback integrator
+  # driven by the module's own measured angle instead of the command; substeps = run the control law
+  # at the PSCM's 4-5 ms task rate instead of once per 10 ms sample. Defaults = the fitted model.
+  sat_mode: str = 'soft'
+  sat_lim_v: list = field(default_factory=lambda: [10., 20., 30.])  # m/s
+  sat_lim: list = field(default_factory=lambda: [99., 99., 99.])    # m/s^2 delivered-equivalent clamp (hard mode)
+  droop_source: str = 'ff'
+  substeps: int = 1
   small_gain: float = 0.0          # extra delivery for small commands: ff *= 1 + small_gain*exp(-|C1/v|/small_k0)
   small_k0: float = 0.0005         # 1/m, curvature scale of that small-command boost
   delay_s: float = 0.08            # wire -> PSCM internal target transport delay
@@ -139,9 +149,14 @@ class PSCMEmulator:
     unchanged, above it the delivered lateral accel grows at sat_slope. Fitted on the Mach-E, where
     the PSCM's LatCtlLim flag comes on as delivered accel passes ~2 m/s^2 (routes 1b0/1b1)."""
     p = self.p
+    x = np.abs(v * cmd_deg / self._nominal_deg_per_c1(v))  # steady lateral accel this target delivers
+    if p.sat_mode == 'hard':
+      lim = np.interp(v, p.sat_lim_v, p.sat_lim)
+      w = 0.05  # near-hard: keeps the fit differentiable
+      y = x - w * np.logaddexp(0.0, (x - lim) / w)
+      return cmd_deg * np.where(x > 1e-6, np.maximum(y, 0.0) / np.maximum(x, 1e-6), 1.0)
     if p.sat_knee >= 50:
       return cmd_deg
-    x = np.abs(v * cmd_deg / self._nominal_deg_per_c1(v))  # steady lateral accel this target delivers
     w = self._SAT_WIDTH
     y = x - (1 - p.sat_slope) * w * np.logaddexp(0.0, (x - p.sat_knee) / w)
     return cmd_deg * np.where(x > 1e-6, np.maximum(y, 0.0) / np.maximum(x, 1e-6), 1.0)
@@ -190,23 +205,35 @@ class PSCMEmulator:
     # feedforward (with the small-command boost) minus the leaky droop state
     boost = 1.0 + p.small_gain * np.exp(-np.abs(self.c1h) / (np.maximum(v, 1.0) * p.small_k0))
     ff = self._tab('ff_gain', v) * self._nominal_deg_per_c1(v) * self.c1h * boost
-    a_b = 1 - np.exp(-DT / np.maximum(self._tab('droop_tau', v), DT))
-    self.b = np.where(active, self.b + (self._tab('droop_ratio', v) * ff - self.b) * a_b, 0.0)
-    target = self._saturate(ff - self.b, v) + p.angle_offset_deg + p.bank_comp * roll + bias_deg
-
-    # angle servo (Lightning schedule shape, scaled)
-    kp = np.minimum(p.servo_p_scale * np.interp(v, _SERVO_V_BP, _SERVO_P), 0.9 / DT)
-    rmax = p.servo_rate_scale * np.interp(v, _SERVO_V_BP, _SERVO_RATE)
-    rate_req = np.clip(kp * (target - self.ang), -rmax, rmax)
-    # mode 0: the wheel relaxes toward the angle that holds the car straight (self-aligning)
-    free = p.veh_offset_deg + p.veh_roll * roll
-    rate_req = np.where(active, rate_req, (free - self.ang) / max(p.release_tau, DT))
-    self.ang = self.ang + rate_req * DT
     if driver_angle is not None:
       da = np.broadcast_to(np.asarray(driver_angle, float), (self.n,))
       forced = np.isfinite(da)
-      self.ang = np.where(forced, da, self.ang)
-      self.b = np.where(forced, self._tab('droop_ratio', v) * ff, self.b)
+    else:
+      da, forced = None, np.zeros(self.n, bool)
+    nsub = max(int(p.substeps), 1)
+    h = DT / nsub
+    a_b = 1 - np.exp(-h / np.maximum(self._tab('droop_tau', v), h))
+    kp = np.minimum(p.servo_p_scale * np.interp(v, _SERVO_V_BP, _SERVO_P), 0.9 / h)
+    rmax = p.servo_rate_scale * np.interp(v, _SERVO_V_BP, _SERVO_RATE)
+    free = p.veh_offset_deg + p.veh_roll * roll
+    for _ in range(nsub):
+      if p.droop_source == 'angle':
+        # feedback: driven by the module's own measured angle (command-driven part), so a wheel the
+        # driver holds loads it too
+        drive = self.ang - p.angle_offset_deg - p.bank_comp * roll
+      else:
+        drive = ff
+      self.b = np.where(active, self.b + (self._tab('droop_ratio', v) * drive - self.b) * a_b, 0.0)
+      target = self._saturate(ff - self.b, v) + p.angle_offset_deg + p.bank_comp * roll + bias_deg
+      # angle servo (Lightning schedule shape, scaled)
+      rate_req = np.clip(kp * (target - self.ang), -rmax, rmax)
+      # mode 0: the wheel relaxes toward the angle that holds the car straight (self-aligning)
+      rate_req = np.where(active, rate_req, (free - self.ang) / max(p.release_tau, h))
+      self.ang = self.ang + rate_req * h
+      if da is not None:
+        self.ang = np.where(forced, da, self.ang)
+        if p.droop_source != 'angle':
+          self.b = np.where(forced, self._tab('droop_ratio', v) * ff, self.b)
 
     ang_out = self.ang + ang_dist
     yaw = self.vehicle_step(ang_out, v, roll) + yaw_dist

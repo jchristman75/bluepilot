@@ -40,6 +40,19 @@
   ],
   "sat_knee": 1.8560603522419001,
   "sat_slope": 0.5593726395499083,
+  "sat_mode": "hard",
+  "sat_lim_v": [
+   10.0,
+   20.0,
+   30.0
+  ],
+  "sat_lim": [
+   1.7747183576449348,
+   2.6607472042724574,
+   2.199847650807743
+  ],
+  "droop_source": "ff",
+  "substeps": 1,
   "small_gain": 0.21030313443047693,
   "small_k0": 0.0012672758596885924,
   "delay_s": 0.06,
@@ -174,6 +187,7 @@
   "mode0_fit": {
    "episodes": 885,
    "best": 0.3
-  }
+  },
+  "sat_hard_2026_10_06": "hard speed-scheduled request clamp (firmware 0x001AF820) fitted on 638 near-saturation windows; held-out exit angle rms 1.24 -> 1.10 deg, sat yaw rms -13%"
  }
 }
