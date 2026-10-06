@@ -273,6 +273,9 @@ near-saturation windows; `fit.grab_windows` builds the near-saturation set).
 - **Not adopted: the substeps.** No benefit.
 - **Covered earlier:** the authority ramp / engage counter was already tested in `fit_mode0.py`, also no
   benefit.
+- **Not adopted: the section 7 output-stage slew on the target.** It fitted to ~60 deg/s (servo gain unchanged)
+  and matched the control on normal driving and saturation (it never binds hands-free), but release
+  angle rms went 1.87 -> 3.01 deg, because it slows the wheel's return to the command after a hand-off.
 - **Still open:** the general dynamic-R^2 gap (0.796) stays.
 
 ### Code rescan with the hard-clamp emulator (2026-10-06)
