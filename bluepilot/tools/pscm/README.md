@@ -298,3 +298,37 @@ the clean emulator (`--ideal`), then regression-checked on the 32 held-out route
     and more panda blocks. A command held below the car at the ceiling makes the deviation clip bind,
     and the stall detector reads that as a stall.
 - **Confirmed: anti-windup itself is worth keeping.** Turning it off was worse in both modes.
+
+## SC Model drives (2026-10-07, routes 46c-46f, code 12fba095)
+
+Four short town drives (21 min, 7.7 hands-free min above 8 m/s, nearly straight: |ay| p95 0.25),
+compared with the DSMV2 drives 440-46b on the same code family.
+
+- **The SC Model's plan is about twice as jittery.** Plan jitter (residual from a 0.5 s average, in
+  lateral-accel units) is 0.023-0.027 m/s^2 vs 0.008-0.017 for every DSMV2 route; plan jerk is 1.7-2x.
+  The wire (0.012-0.016) and the car (0.026-0.045) stay inside the DSMV2 range, so the lead-lag and
+  rate limits already absorb it. Weave, tracking error, lane-offset rms, plan->car lag (0.27-0.34 s)
+  and gain (~1.0) are all unchanged. lagd stays at 0.40 s. No model-specific retune needed.
+- **Grabs:** 28, all navigation turns except three. In those three the car tracked the plan until the
+  driver steered: a railroad crossing where the plan swung toward the hatched markings (46e t=283), a dark,
+  unmarked access road just before a turn (46d t=37), and a driver-chosen move off a painted median
+  (46f t=196). None involved the PSCM ceiling or the deviation clip.
+- **Emulator on these unseen drives:** angle rms 0.63 deg (DSMV2 46a/46b 0.56, 465-469 0.49).
+- **No low-speed data:** none of the 56 hands-free big-command turns below 10 m/s in the cache come
+  from these drives.
+
+### Frequency response, and why the emulator's "lag" at 1 Hz stays
+
+Cross-spectra of wire C1 -> steering angle on hands-free windows, using the plan as an instrument
+(SC drives and DSMV2 451-46b agree): at 0.6-1.6 Hz the measured angle shows gain 1.3-1.9 with 0-37 deg
+of lag; the emulator gives ~1.0 and 31-66 deg. Below 0.6 Hz they agree.
+
+- **Not adopted: a second-order (underdamped) angle servo.** The time-domain fit drove it to
+  over-damped (zeta 1.2, wn 4.8 rad/s), and held-out angle rms got worse (0.598 -> 0.613 deg), as did
+  release (1.87 -> 1.92) and near-saturation (0.87 -> 0.95).
+- **Why:** the emulator residual (measured - emulated angle, 0.5-2 Hz) correlates with the plan at
+  0 to +100 ms but leads the wire by ~200 ms. Angle mode sends only C1 (C0, C2, C3 are zero), so the
+  PSCM cannot respond before C1 does. The residual is road (crown, ruts, curve geometry) that the
+  camera sees at the same moment, not a faster PSCM path. The "bump" is that correlation, not the
+  servo. This also confirms why the harness replays logged disturbances: they are correlated with
+  the plan, which `--ideal` cannot reproduce.
