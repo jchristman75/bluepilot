@@ -174,7 +174,7 @@ def apply_patches(patches):
 
 
 def run_route(route_dir, ref=None, overrides=None, open_loop=False, bias=0.0, emu_params=None, ideal=False,
-              patches=None, bias_clear_on_mode0=False, pinion=False):
+              patches=None, bias_clear_on_mode0=False, pinion=False, no_safety=False):
   """Returns a dict of per-tick arrays (COLS) for one route."""
   install_ref(ref)
   apply_patches(patches)
@@ -345,7 +345,7 @@ def run_route(route_dir, ref=None, overrides=None, open_loop=False, bias=0.0, em
                                                            -lat.path_offset, -lat.path_angle, -lat.apply_curvature,
                                                            -lat.curvature_rate, counter)
           ok = safety.safety_tx_hook(libsafety_py.make_CANPacket(addr, bus % 4, dat))
-          if ok:
+          if ok or no_safety:  # no_safety: what a no-limits panda build would let through
             wire = (mode, -lat.path_angle)  # wire sign = carState sign
           blocked |= int(not ok)
         if frame % CarControllerParams.LKA_STEP == 0:
@@ -395,11 +395,13 @@ def main():
   ap.add_argument('--ideal', action='store_true', help='no replayed disturbances (clean emulated car)')
   ap.add_argument('--patch', action='append', default=[],
                   help="module constant override, e.g. lateral_angle_ext._LEADLAG_TAU_S='(0.5, 1.0)'")
+  ap.add_argument('--no-safety', action='store_true',
+                  help='frames ford.h would block still reach the PSCM (no-limits panda build); still counted as blocked')
   ap.add_argument('-j', type=int, default=30)
   a = ap.parse_args()
   os.makedirs(a.out, exist_ok=True)
   kw = dict(ref=a.ref, overrides=dict(s.split('=', 1) for s in a.set), open_loop=a.open_loop, bias=a.bias, ideal=a.ideal,
-            bias_clear_on_mode0=a.bias_clear_on_mode0, emu_params=a.emu, pinion=a.pinion,
+            bias_clear_on_mode0=a.bias_clear_on_mode0, emu_params=a.emu, pinion=a.pinion, no_safety=a.no_safety,
             patches={k: ast.literal_eval(v) for k, v in (p.split('=', 1) for p in a.patch)})
   with Pool(a.j, maxtasksperchild=1) as p:
     for path in p.imap_unordered(_job, [(r, a.out, kw) for r in a.routes]):

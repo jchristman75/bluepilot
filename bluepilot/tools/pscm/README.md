@@ -332,3 +332,34 @@ of lag; the emulator gives ~1.0 and 31-66 deg. Below 0.6 Hz they agree.
   camera sees at the same moment, not a faster PSCM path. The "bump" is that correlation, not the
   servo. This also confirms why the harness replays logged disturbances: they are correlated with
   the plan, which `--ideal` cannot reproduce.
+
+## Road test 470 / 471 (2026-10-08, SC Model, code 12fba095)
+
+74 min, 63 engaged. 73 grabs: 40 navigation turns; the other 33 sit almost entirely on curvy two-lane
+back roads driven at 30-38 mph through 15-25 mph advisory curves (op long off). Every sheet was checked
+against the front camera.
+
+- **PSCM ceiling (~15 grabs).** The plan asks 2.5-3.5 m/s^2; the car plateaus at 1.5-2.5 with
+  LatCtlLim set. These plateaus fit the hard clamp: refitting `sat_lim` with them (1.98/2.94/2.28) or on
+  a 5-node schedule made held-out saturation worse (0.87 -> 0.93 deg), so the emulator is unchanged.
+- **The car cuts the inside of curves, following the model.** Hands-free, the car sits 0.15-0.25 m inside
+  lane center at 0.8-2.5 m/s^2 on every route (both models), and the model's own planned path sits the
+  same distance inside at 1-2 s ahead -- it is the plan's intent, not tracking. The SC Model cuts left
+  curves (toward the center line) harder than right ones: 0.18-0.29 vs 0.09-0.15 m (DSMV2 symmetric,
+  ~0.2). At grabs it was 0.5-0.9 m, often with oncoming traffic (470 t=1716, 1741, 1967, 2038, 2096;
+  471 t=327, 743). The lane-centering trim (strength 0.25) barely moves it (1b0 with it off cuts the
+  same), and it gets only the deviation budget the plan leaves.
+- **Deviation clip on entries, exits and S-reversals.** The clip binds at 4-7% of curve time (highway
+  0-1%) and the car runs 0.3-0.6 s behind the plan there (471 t=751: wire +6e-3 vs plan +20e-3 through a
+  reversal). Harness on 9 curvy town routes with the clip removed (`--patch
+  lateral_angle_ext._DEVIATION_CLIP_MIN_SPEED=99 --no-safety`): during clip-bound stretches car-vs-plan
+  error is unchanged (the PSCM clamp binds at the same moments); whole route wide p95 -3.7% / -5.1%
+  (replay / clean), release drift -7.5% / -6.2%, but cut-in p95 +3.2% / +5.6%. Not worth it on its own.
+- **Driver, not control:** bridge with oncoming traffic, stop-and-go on a curve, small nudges, a hand
+  resisting the wheel at curve entry (the car's curvature backs off right at the torque onset: 470 t=1967,
+  2038; 471 t=743), a wheel jiggle while braking at 6 m/s that set off a 0.2 s hand-off pulse (470 t=1128).
+- **Releases** are clean except exits at the ceiling with the clip binding (settle 3-3.75 s: 470 t=2063,
+  471 t=328).
+
+`harness.py --no-safety`: frames ford.h would block still reach the emulated PSCM (a no-limits panda
+build); they are still counted in `blocked`.
