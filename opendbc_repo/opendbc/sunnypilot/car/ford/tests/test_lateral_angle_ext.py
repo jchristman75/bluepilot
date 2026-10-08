@@ -558,6 +558,34 @@ class TestAntiWindup(unittest.TestCase):
     self.assertTrue(self.ext.bp_windup_released)
     self.assertAlmostEqual(lat.path_angle, self.ext.curvature_factor * -0.015 * v, places=6)
 
+  def _low_speed_exit(self, mode):
+    # 00000470 t=2061 shape: 9.5 m/s (below the clip gate), car at the ceiling at 0.0287 (2.6 m/s^2),
+    # plan eased to 0.0245 -- more than the tolerance inside the car
+    from opendbc.sunnypilot.car.ford import lateral_angle_ext as lae
+    v = 9.5
+    self.cs.out.vEgoRaw = self.cs.out.vEgo = v
+    self.V = v
+    old, lae._LOW_SPEED_UNWIND = lae._LOW_SPEED_UNWIND, mode
+    try:
+      for _ in range(60):
+        self._update(-0.032, -0.0287)
+      for _ in range(10):
+        lat = self._update(-0.0245, -0.0287)
+    finally:
+      lae._LOW_SPEED_UNWIND = old
+    return lat.path_angle / v
+
+  def test_low_speed_exit_unwinds_at_the_ceiling(self):
+    wire = self._low_speed_exit(1)
+    self.assertTrue(self.ext.bp_unwind_clamped)
+    self.assertFalse(self.ext.bp_curvature_deviation_limited)  # nothing clipped below the gate
+    self.assertLessEqual(abs(wire), 0.0287 - self.ext.bp_curvature_error + 1e-6)
+
+  def test_low_speed_exit_without_the_unwind_holds_the_turn(self):
+    wire = self._low_speed_exit(0)
+    self.assertFalse(self.ext.bp_unwind_clamped)
+    self.assertGreater(abs(wire), 0.0287)
+
   def test_curve_entry_is_untouched(self):
     for _ in range(20):
       self._update(0.0, 0.0)

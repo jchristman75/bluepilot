@@ -363,3 +363,27 @@ against the front camera.
 
 `harness.py --no-safety`: frames ford.h would block still reach the emulated PSCM (a no-limits panda
 build); they are still counted in `blocked`.
+
+### Getting the most out of lateral at the ceiling (2026-10-08)
+
+- **What the ceiling is.** At the moment LatCtlLim comes on, the most speed-invariant quantity is the
+  PSCM's motor current (SteMdule_I_Est ~1.0, CV 0.10 across 6-35 m/s; delivered ay CV 0.15, wheel angle
+  0.39). Hands-free the current tops out at 1.0-1.5 (p99.9); with the driver steering it reaches 5-9.
+  So it is a torque-authority cap on lateral control, and it bites at lower ay at low speed (bigger wheel
+  angles cost more torque per m/s^2). Hands-free, LatCtlLim reaches "LimitReached" (2) more often than
+  "LimitClose" (1). Mode 1 and mode 2 hit the same ceiling (Lim-onset ay 1.76/1.77 at 8-13 m/s, current
+  p99.9 1.5 both); we already send extended mode, ramp Immediately, precision Precise; the stock IPMA's
+  Lane_Assist_Data1 carries nothing that would raise it (LkaDrvOvrrd 0). HandsOffCnfm_B_Rq has never
+  been set (untested). Stock-openpilot fleet data never asks above ~2.5 m/s^2, so it can't say whether
+  C2 has more authority.
+- **Adopted: the clip-bound unwind below the clip gate (`_LOW_SPEED_UNWIND = 1`).** Below 9.8 m/s there
+  is no deviation clip, so the unit-gain unwind never ran there: an exit at the ceiling waited for K x
+  plan to fall under the clamp (00000470 t=2061, 9.5 m/s: plan eased 32 -> 24.5e-3, wire held 36-39e-3,
+  car held 28.7e-3 for 0.7 s, until v crossed 9.8 and the wire fell to 26e-3 in one frame and the car
+  unwound 28 -> 18e-3 in 0.6 s). Now, with the car at the ceiling (_WINDUP_AY) and the plan more than the
+  tolerance inside the car, the same unwind runs against a virtual clip (measured -+ tolerance, kappa_cmd
+  and the ford.h shadow untouched). It only ever lowers the wire. ~10 events per town drive.
+  - 21 town routes: replay exit cut p95 -3.9%, tracking -1.1%, nothing worse; clean emulator neutral
+    (its 9-10 m/s clamp sits below the 2.6 m/s^2 the real car holds, so the case rarely arises there).
+  - Every-unwind variant (`= 2`): exit cut -4.6% but wide +1.0% in replay -> not used.
+  - 35 held-out routes: release drift p95 -5.2%, tracking -0.7%, nothing worse.

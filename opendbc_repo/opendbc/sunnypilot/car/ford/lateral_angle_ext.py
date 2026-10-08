@@ -180,6 +180,13 @@ _STALL_RESPONDING_RATE = 0.002  # 1/m/s
 # clip binding there with the car short of the plan. 0.2 m/s margin keeps the clip engaged before
 # the panda starts checking.
 _DEVIATION_CLIP_MIN_SPEED = 9.8  # m/s
+# Below that gate there is no clip, so the clip-bound unwind (see _shape_wire_kappa) never ran there and
+# a curve exit at the PSCM ceiling waited for K x plan to fall under the clamp: route 00000470 t=2061 at
+# 9.5 m/s, the plan eased 32 -> 24.5e-3 while the wire held 36-39e-3 and the car stayed at 28.7e-3 for
+# 0.7 s, until v crossed 9.8 and the wire dropped to 26e-3 in one frame. Below the gate the same unwind
+# now runs against a virtual clip (measured -+ tolerance, not applied to kappa_cmd or the shadow ford.h
+# checks): 0 = off, 1 = only with the car at the ceiling (_WINDUP_AY), 2 = every unwind.
+_LOW_SPEED_UNWIND = 1
 # Measured lateral accel at which the car counts as at the ceiling: 0.9 x the emulator's hard-clamp fit
 # (1.78/2.66/2.20 m/s^2 at 10/20/30 m/s, 2026-10-06). A flat 1.8 never engaged at 10-12 m/s, where the
 # car plateaus at 1.6-1.7 (routes 465-467) and where the ceiling grabs happen. Harness, 19 town routes,
@@ -412,7 +419,13 @@ class LateralAngleExt:
     # shadow curvature ford.h checks (kappa_cmd), which leads the car by the full tolerance every
     # frame. The lagged share restarts from here so leaving the clip is continuous.
     s = 1.0 if current_curvature >= 0.0 else -1.0
-    if (self.bp_curvature_deviation_limited and abs(current_curvature) > self.bp_curvature_error
+    _virtual_clip = (_LOW_SPEED_UNWIND > 0 and v_ego <= _DEVIATION_CLIP_MIN_SPEED
+                     and (kappa_pre_clip - current_curvature) * s < -self.bp_curvature_error
+                     and (_LOW_SPEED_UNWIND == 2
+                          or v_ego ** 2 * abs(current_curvature) >= float(interp(v_ego, _WINDUP_AY_V, _WINDUP_AY))))
+    if _virtual_clip:
+      kappa_cmd = current_curvature - s * self.bp_curvature_error
+    if ((self.bp_curvature_deviation_limited or _virtual_clip) and abs(current_curvature) > self.bp_curvature_error
         and (kappa_pre_clip - current_curvature) * s < 0.0):
       shaped = r * target + (1.0 - r) * min(self._wire_slow * s, target * s) * s
       if shaped * s > kappa_cmd * s:
