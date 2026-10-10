@@ -250,6 +250,15 @@ _BLIP_PLAN_STRAIGHT_AY = 0.3  # m/s^2
 # over every logged release above 22 m/s a pulse brought no tracking gain but more re-grabs within
 # 3 s (65-82% vs 47-57% without). An earned pulse just waits out its pending window.
 _BLIP_MAX_SPEED = 22.0  # m/s
+# The lane trim may not take curvature away from a turn. The model cuts curves on the inside by plan
+# (0.15-0.3 m, worse with SCM), so in a curve the trim pulls against the plan; openpilot judges the car
+# against the plan, and the shortfall reads as saturation. Route 0000047c (2026-10-10, strength 0.5): at
+# 43-47 mph the wire was 0.23-0.65x a 1.0-1.5 m/s^2 plan and "turn exceeds limit" fired on simple curves.
+# A trim that opposes the plan fades out between these plan lateral accels (none left at the second);
+# a trim that adds to the turn, and every trim on a straight, is untouched. Harness, saturation-like
+# events (plan > 1 m/s^2, car < plan/1.2 for 1 s): 47a-47e 19 -> 1 at strength 0.5 (9 -> 1 at 0.25, the
+# same as the trim off); highway routes 458/463/464 59 -> 6 with straight-road yaw unchanged.
+_TRIM_OPPOSE_AY = (0.5, 1.0)  # m/s^2
 # Lead-lag command shaping (see module docstring): the wire carries r*K*kappa immediately and the
 # remaining (1-r)*K*kappa through a first-order lag of tau. First fitted open-loop on routes
 # 41x-45x + 1a7-1af (r=0.70/tau=0.7 s to 56 mph, r=0.85/tau=1.0 s above 60 mph). Retuned 2026-09-28
@@ -299,6 +308,7 @@ class LateralAngleExt:
     # BluePilot: angle-mode lane centering trim (advanced lane positioning) -- see
     # lane_center_trim.py and the module docstring above.
     self.lane_center_trim = LaneCenterTrim()
+    self.lane_trim_applied = 0.0  # telemetry: trim actually added to kappa_cmd, after _TRIM_OPPOSE_AY
     self.enable_lane_positioning_ang = False
     self.custom_path_offset_ang = 0.0
     self.lane_centering_strength_ang = 0.25
@@ -716,6 +726,11 @@ class LateralAngleExt:
       kappa_cmd, self.model, v_ego, self.enable_lane_positioning_ang,
       self.custom_path_offset_ang, self.lane_centering_strength_ang,
       CC.latActive, self.lane_change)
+    _trim = kappa_cmd - _kappa_planner
+    if _trim * _kappa_planner < 0.0:
+      _trim *= float(interp(v_ego ** 2 * abs(_kappa_planner), _TRIM_OPPOSE_AY, [1.0, 0.0]))
+      kappa_cmd = _kappa_planner + _trim
+    self.lane_trim_applied = _trim
 
     # BluePilot: the planner has first claim on the deviation budget clipped below; the trim takes
     # what is left. Symmetric -- a one-sided form lets the trim subtract authority while the planner

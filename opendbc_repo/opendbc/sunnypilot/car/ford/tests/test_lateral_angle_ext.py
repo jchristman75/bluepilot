@@ -412,6 +412,37 @@ class TestLaneCenteringIntegration(unittest.TestCase):
     self._update(lat_active=False)
     self.assertEqual(self.ext.lane_center_trim.correction, 0.0)
 
+  def _trim_in_curve(self, plan, offset):
+    """Steady state in a constant curve with a constant lane offset request; returns the trim's own
+    correction (before the turn guard)."""
+    self.ext.enable_lane_positioning_ang = True
+    self.ext.custom_path_offset_ang = offset
+    self.ext.lane_centering_strength_ang = 1.0
+    # the model's predicted curvature agrees with the plan, so the predicted-curvature blend keeps it
+    self.ext.model.orientationRate = _OrientationRate([plan * self.V_EGO] * 33)
+    for _ in range(300):
+      self.ext.update_angle_strategy(_CC(), self.cs, _Actuators(curvature=plan), self.CP)
+    return self.ext.lane_center_trim.correction
+
+  def test_trim_cannot_take_from_a_turn(self):
+    # offset +5 m -> positive correction; a negative plan is a turn it would reduce
+    corr = self._trim_in_curve(-1.5 / self.V_EGO ** 2, 5.0)  # 1.5 m/s^2
+    self.assertGreater(corr, 0.0)
+    self.assertEqual(self.ext.lane_trim_applied, 0.0)
+
+  def test_trim_adding_to_a_turn_is_untouched(self):
+    corr = self._trim_in_curve(1.5 / self.V_EGO ** 2, 5.0)
+    self.assertGreater(corr, 0.0)
+    self.assertAlmostEqual(self.ext.lane_trim_applied, corr, places=12)
+
+  def test_opposing_trim_untouched_near_straight(self):
+    corr = self._trim_in_curve(-0.3 / self.V_EGO ** 2, 5.0)  # below _TRIM_OPPOSE_AY[0]
+    self.assertGreater(corr, 0.0)
+    self.assertAlmostEqual(self.ext.lane_trim_applied, corr, places=12)
+
+  def test_opposing_trim_fades_between_breakpoints(self):
+    corr = self._trim_in_curve(-0.75 / self.V_EGO ** 2, 5.0)  # halfway through _TRIM_OPPOSE_AY
+    self.assertAlmostEqual(self.ext.lane_trim_applied, 0.5 * corr, places=12)
 
 class TestLeadLagShaping(unittest.TestCase):
   """Lead-lag command shaping + clip-bound unwind clamp (lateral_angle_ext module docstring)."""
