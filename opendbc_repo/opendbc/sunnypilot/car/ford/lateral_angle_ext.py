@@ -193,6 +193,12 @@ _LOW_SPEED_UNWIND = 1
 # clean emulator: curve-exit cut -9.5%, wide -2.4%, tracking -2.2%, nothing worse; replay neutral.
 _WINDUP_AY_V = (10.0, 20.0, 30.0)  # m/s
 _WINDUP_AY = (1.6, 2.4, 2.0)       # m/s^2
+# The release holds the wire at the measured curvature (unit gain), not K x measured: at the ceiling
+# K x measured still asks above what the PSCM will deliver, so the car stayed turned while the plan
+# eased (route 00000480 t=485, a highway on-ramp exit: car 1-3e-3 above the plan for ~2 s with the
+# wire held at 1.2x the car). Same reasoning as the clip-bound unwind in _shape_wire_kappa. Harness,
+# 26 town routes: curve-exit cut_p95 -5.0% (replay) / -7.6% (clean); post-release drift p95 +1.8%
+# (replay) / -8.9% (clean); on the 480 exit car-minus-plan 1.75 -> 1.40e-3.
 _WINDUP_PLAN_RATE = 0.002      # 1/m/s, plan curvature easing off at least this fast = unwinding
 _WINDUP_PLAN_TAU = 0.15        # s, smoothing for the plan-rate test
 # Post-release drift: the real-curve floor (|measured| > 2x tolerance) keeps curve entry from
@@ -249,7 +255,11 @@ _BLIP_PLAN_STRAIGHT_AY = 0.3  # m/s^2
 # No hand-off pulse at highway speed. Its value is manual-turn exits, which don't happen there, and
 # over every logged release above 22 m/s a pulse brought no tracking gain but more re-grabs within
 # 3 s (65-82% vs 47-57% without). An earned pulse just waits out its pending window.
-_BLIP_MAX_SPEED = 22.0  # m/s
+# Lowered 22 -> 18 m/s: 18-22 m/s behaves the same way (3124 releases on 217 routes: re-grab within 3 s
+# 44% with a pulse vs 34% without, median drift 0.33 vs 0.24 m; 15-18 m/s neutral). Route 00000480
+# t=489: a 0.6 s correction on a highway on-ramp earned a pulse that fired at 18.6 m/s on the merge,
+# the wheel dropped 5 deg in mode 0 and the car wobbled for ~3 s.
+_BLIP_MAX_SPEED = 18.0  # m/s
 # The lane trim may not take curvature away from a turn. The model cuts curves on the inside by plan
 # (0.15-0.3 m, worse with SCM), so in a curve the trim pulls against the plan; openpilot judges the car
 # against the plan, and the shortfall reads as saturation. Route 0000047c (2026-10-10, strength 0.5): at
@@ -777,12 +787,13 @@ class LateralAngleExt:
     wire_kappa = self._shape_wire_kappa(wire_kappa, kappa_cmd, _kappa_cmd_pre_error_clip, current_curvature, v_ego)
 
     # Anti-windup at the PSCM ceiling (see _WINDUP_AY): the car is at the ceiling, the plan is
-    # unwinding, and we are asking for more than holds the car where it is -> drop the excess now.
+    # unwinding, and we are asking for more than the car is doing -> drop the excess now, down to the
+    # measured curvature itself (unit gain, see _WINDUP_PLAN_RATE).
     _plan_prev = self._windup_plan_slow if self._windup_plan_slow is not None else desired_curvature
     self._windup_plan_slow = _plan_prev + (_STEER_DT / (_STEER_DT + _WINDUP_PLAN_TAU)) * (desired_curvature - _plan_prev)
     _turn = 1.0 if current_curvature >= 0.0 else -1.0
     _plan_easing = (self._windup_plan_slow - _plan_prev) / _STEER_DT * _turn < -_WINDUP_PLAN_RATE
-    _hold = self.curvature_factor * current_curvature
+    _hold = current_curvature
     self.bp_windup_released = False
     _windup_ay = float(interp(v_ego, _WINDUP_AY_V, _WINDUP_AY))
     if (_plan_easing and v_ego ** 2 * abs(current_curvature) >= _windup_ay

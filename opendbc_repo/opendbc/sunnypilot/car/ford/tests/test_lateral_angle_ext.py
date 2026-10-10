@@ -562,7 +562,7 @@ class TestAntiWindup(unittest.TestCase):
       plan += 0.006 * 0.05  # plan easing off at 6e-3 1/m/s, still outside the car
       lat = self._update(plan, -0.0078)
     self.assertTrue(self.ext.bp_windup_released)
-    self.assertAlmostEqual(lat.path_angle, self.ext.curvature_factor * -0.0078 * self.V, places=6)
+    self.assertAlmostEqual(lat.path_angle, -0.0078 * self.V, places=6)  # unit gain
 
   def test_below_the_ceiling_is_untouched(self):
     v = 10.0  # same curvature at 10 m/s is 0.8 m/s^2 -- nowhere near the ceiling
@@ -587,7 +587,7 @@ class TestAntiWindup(unittest.TestCase):
       plan += 0.006 * 0.05
       lat = self._update(plan, -0.015)
     self.assertTrue(self.ext.bp_windup_released)
-    self.assertAlmostEqual(lat.path_angle, self.ext.curvature_factor * -0.015 * v, places=6)
+    self.assertAlmostEqual(lat.path_angle, -0.015 * v, places=6)  # unit gain
 
   def _low_speed_exit(self, mode):
     # 00000470 t=2061 shape: 9.5 m/s (below the clip gate), car at the ceiling at 0.0287 (2.6 m/s^2),
@@ -615,7 +615,8 @@ class TestAntiWindup(unittest.TestCase):
   def test_low_speed_exit_without_the_unwind_holds_the_turn(self):
     wire = self._low_speed_exit(0)
     self.assertFalse(self.ext.bp_unwind_clamped)
-    self.assertGreater(abs(wire), 0.0287)
+    # the anti-windup release alone holds the wire at the car (unit gain) -- never below it
+    self.assertGreaterEqual(abs(wire), 0.0287 - 1e-9)
 
   def test_curve_entry_is_untouched(self):
     for _ in range(20):
@@ -781,14 +782,19 @@ class TestHandoffBlipSpeedGates(TestHandoffBlipPlanGate):
     self._at_speed(lateral_angle_ext._BLIP_MAX_SPEED + 3.0)
     self.assertFalse(self._press_then_release(plan=0.0, meas=0.0))
 
+  def test_no_pulse_on_a_fast_merge(self):
+    # 00000480 t=489: 18.6 m/s, plan 0.28 m/s^2 -- passed every guard under the old 22 m/s gate
+    self._at_speed(18.6)
+    self.assertFalse(self._press_then_release(plan=0.0008, meas=0.0008))
+
   def test_curvature_straight_but_real_lateral_accel_waits(self):
-    self._at_speed(20.0)
-    plan = 0.0009  # under _BLIP_PLAN_STRAIGHT, but 0.36 m/s^2 at 20 m/s
+    self._at_speed(17.9)
+    plan = 0.00097  # under _BLIP_PLAN_STRAIGHT, but 0.31 m/s^2 at 17.9 m/s
     self.assertFalse(self._press_then_release(plan=plan, meas=plan))
 
   def test_straight_at_speed_still_fires(self):
-    self._at_speed(20.0)
-    self.assertTrue(self._press_then_release(plan=0.0004, meas=0.0))  # 0.16 m/s^2
+    self._at_speed(17.9)
+    self.assertTrue(self._press_then_release(plan=0.0004, meas=0.0))  # 0.13 m/s^2
 
 
 class TestReactiveStallRealCurveGate(unittest.TestCase):
