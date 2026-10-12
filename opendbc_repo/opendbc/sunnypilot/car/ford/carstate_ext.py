@@ -113,6 +113,10 @@ class CarStateExt:
     self.cruise_enabled_prev = False
     # Track if mainCruise was pressed recently (to handle delayed cruise enable)
     self.main_cruise_pressed_recently = False
+    # BluePilot: the PSCM's own limit flag (Lane_Assist_Data3_FD1 LatCtlLim_D_Stat: 0 not reached,
+    # 1 close, 2 reached, 3 with driver active), read by lateral_angle_ext's anti-windup. CAN FD only;
+    # always 0 elsewhere.
+    self.lat_ctl_lim_stat = 0
 
   def update(self, ret: structs.CarState, ret_sp: structs.CarStateSP, can_parsers: dict[StrEnum, CANParser]):
     """
@@ -128,6 +132,9 @@ class CarStateExt:
       can_parsers: Dictionary of CAN parsers by bus
     """
     cp = can_parsers[Bus.pt]
+
+    if self.CP.flags & FordFlags.CANFD:
+      self.lat_ctl_lim_stat = int(cp.vl["Lane_Assist_Data3_FD1"]["LatCtlLim_D_Stat"])
 
     button_events = []
     cruise_enabled = ret.cruiseState.enabled

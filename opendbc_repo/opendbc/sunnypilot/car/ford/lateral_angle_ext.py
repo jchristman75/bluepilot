@@ -201,6 +201,17 @@ _WINDUP_AY = (1.6, 2.4, 2.0)       # m/s^2
 # (replay) / -8.9% (clean); on the 480 exit car-minus-plan 1.75 -> 1.40e-3.
 _WINDUP_PLAN_RATE = 0.002      # 1/m/s, plan curvature easing off at least this fast = unwinding
 _WINDUP_PLAN_TAU = 0.15        # s, smoothing for the plan-rate test
+# The PSCM's own LatCtlLim_D_Stat (1 close / 2 reached) also counts as "at the ceiling". The fitted
+# _WINDUP_AY is a typical ceiling; on a given curve the car can top out below it. Route 0000048a t=769
+# and t=825 (right curves at 35-38 mph, plan 2.2 m/s^2): the car plateaued at 2.04-2.07 with LatCtlLim
+# set, under the 2.06/2.17 threshold, so the release never ran and the car out-turned the easing plan
+# by 2-3e-3 for ~1 s. Over routes 45x-48x, 77 of 166 hands-free exits with LatCtlLim set never reached
+# _WINDUP_AY (car median 1.66 m/s^2). The flag counts for _WINDUP_LIM_HOLD_S after it last showed, and
+# only above _WINDUP_LIM_MIN_AY: after a large command or a mode-0 pulse the PSCM can sit in LatCtlLim
+# while the car is nowhere near a real curve (see _BLIP_*), and releasing to measured there would hold
+# the car back.
+_WINDUP_LIM_HOLD_S = 0.5       # s
+_WINDUP_LIM_MIN_AY = 1.2       # m/s^2
 # Post-release drift: the real-curve floor (|measured| > 2x tolerance) keeps curve entry from
 # straight out of the detector, but entry has the car turning WITH the plan or not yet at all. A
 # car measurably curving AGAINST the plan is the deadlock instead: for ~5 s after the driver lets
@@ -269,6 +280,8 @@ _BLIP_MAX_SPEED = 18.0  # m/s
 # events (plan > 1 m/s^2, car < plan/1.2 for 1 s): 47a-47e 19 -> 1 at strength 0.5 (9 -> 1 at 0.25, the
 # same as the trim off); highway routes 458/463/464 59 -> 6 with straight-road yaw unchanged.
 _TRIM_OPPOSE_AY = (0.5, 1.0)  # m/s^2
+# EXPERIMENT: above the fade, an opposing trim may still take up to this share of the plan.
+_TRIM_OPPOSE_FRAC = 0.0
 # Lead-lag command shaping (see module docstring): the wire carries r*K*kappa immediately and the
 # remaining (1-r)*K*kappa through a first-order lag of tau. First fitted open-loop on routes
 # 41x-45x + 1a7-1af (r=0.70/tau=0.7 s to 56 mph, r=0.85/tau=1.0 s above 60 mph). Retuned 2026-09-28
@@ -332,6 +345,7 @@ class LateralAngleExt:
     self.bp_unwind_clamped = False  # clip-bound unwind clamp actually bit this frame
     self.bp_windup_released = False  # anti-windup cap at the PSCM ceiling bit this frame
     self._windup_plan_slow = None    # smoothed planner curvature for the unwinding test
+    self._windup_lim_age_s = 1e9     # s since the PSCM last reported LatCtlLim close/reached
     # Telemetry: variable curvature lookup time used this frame (s)
     self.bp_curvature_lookup_time = _VLT_T_EXTRA_MAX + 0.3725  # warm start at ~0.5s
     # BluePilot: error-clipped kappa path_angle was derived from -- carcontroller.py reads this as
@@ -498,6 +512,7 @@ class LateralAngleExt:
       self._stall_gap_mag_slow = -1.0
       self._stall_meas_slow = None
       self._windup_plan_slow = None
+      self._windup_lim_age_s = 1e9
       self.stall_blip_frames_left = 0
       self.stall_blip_cooldown_s = 0.0
       self.stall_blip_count = 0
@@ -549,6 +564,7 @@ class LateralAngleExt:
       self._stall_gap_mag_slow = -1.0
       self._stall_meas_slow = None
       self._windup_plan_slow = None
+      self._windup_lim_age_s = 1e9
       self.stall_blip_frames_left = 0
       self.stall_blip_cooldown_s = 0.0
       self.stall_blip_count = 0
@@ -682,9 +698,9 @@ class LateralAngleExt:
     # prediction that still sees the curve (→ seg-14 slow unwind) or that snaps when its
     # lookahead window crosses the curve exit (→ seg-17 snap + reverse PSCM hit).
     # Normal gentle curves are unaffected: no PSCM limit, no falling desired → full b=0.60.
-    # BluePilot: LatCtlLim_D_Stat is not wired into CarState (it does fire in angle mode, rarely, but
-    # blocking path_angle growth on it would hold the command in post-release stalls), so only the
-    # DBC-limit proximity below gates the saturation handling.
+    # BluePilot: LatCtlLim_D_Stat (CS.lat_ctl_lim_stat) only feeds the anti-windup release (see
+    # _WINDUP_LIM_HOLD_S), never this block: blocking path_angle growth on it would hold the command in
+    # post-release stalls, so only the DBC-limit proximity below gates the saturation handling.
     # Previously used angleState.saturated (CtrSat) as a proxy, but CtrSat fires whenever the car
     # lags the commanded path_angle by > 2.5° — which happens during any normal curve entry.
     # That caused a positive-feedback flat-line: under-steer → CtrSat → path_angle frozen → more under-steer.
@@ -738,7 +754,8 @@ class LateralAngleExt:
       CC.latActive, self.lane_change)
     _trim = kappa_cmd - _kappa_planner
     if _trim * _kappa_planner < 0.0:
-      _trim *= float(interp(v_ego ** 2 * abs(_kappa_planner), _TRIM_OPPOSE_AY, [1.0, 0.0]))
+      _faded = abs(_trim) * float(interp(v_ego ** 2 * abs(_kappa_planner), _TRIM_OPPOSE_AY, [1.0, 0.0]))
+      _trim = -float(np.sign(_kappa_planner)) * min(abs(_trim), max(_faded, _TRIM_OPPOSE_FRAC * abs(_kappa_planner)))
       kappa_cmd = _kappa_planner + _trim
     self.lane_trim_applied = _trim
 
@@ -796,7 +813,14 @@ class LateralAngleExt:
     _hold = current_curvature
     self.bp_windup_released = False
     _windup_ay = float(interp(v_ego, _WINDUP_AY_V, _WINDUP_AY))
-    if (_plan_easing and v_ego ** 2 * abs(current_curvature) >= _windup_ay
+    if getattr(CS, 'lat_ctl_lim_stat', 0) in (1, 2):
+      self._windup_lim_age_s = 0.0
+    else:
+      self._windup_lim_age_s += _STEER_DT
+    _car_ay = v_ego ** 2 * abs(current_curvature)
+    _at_ceiling = (_car_ay >= _windup_ay
+                   or (self._windup_lim_age_s <= _WINDUP_LIM_HOLD_S and _car_ay >= _WINDUP_LIM_MIN_AY))
+    if (_plan_easing and _at_ceiling
         and wire_kappa * _turn > _hold * _turn):
       wire_kappa = _hold
       self._wire_slow = _hold

@@ -618,6 +618,47 @@ class TestAntiWindup(unittest.TestCase):
     # the anti-windup release alone holds the wire at the car (unit gain) -- never below it
     self.assertGreaterEqual(abs(wire), 0.0287 - 1e-9)
 
+  def _below_threshold_exit(self, lim):
+    # 0000048a t=769 shape: 15.7 m/s, car at 0.0082 (2.02 m/s^2, under the ~2.06 threshold), plan easing
+    v = 15.7
+    self.cs.out.vEgoRaw = self.cs.out.vEgo = v
+    self.V = v
+    self.cs.lat_ctl_lim_stat = lim
+    for _ in range(60):
+      self._update(-0.0090, -0.0082)
+    plan = -0.0090
+    for _ in range(4):
+      plan += 0.006 * 0.05
+      lat = self._update(plan, -0.0082)
+    return lat
+
+  def test_pscm_limit_flag_releases_below_the_threshold(self):
+    lat = self._below_threshold_exit(2)
+    self.assertTrue(self.ext.bp_windup_released)
+    self.assertAlmostEqual(lat.path_angle, -0.0082 * self.V, places=6)
+
+  def test_below_the_threshold_without_the_flag_is_untouched(self):
+    self._below_threshold_exit(0)
+    self.assertFalse(self.ext.bp_windup_released)
+
+  def test_flag_with_driver_active_does_not_count(self):
+    self._below_threshold_exit(3)
+    self.assertFalse(self.ext.bp_windup_released)
+
+  def test_flag_ignored_far_from_a_real_curve(self):
+    # LatCtlLim after a mode-0 pulse on a gentle curve: 0.8 m/s^2 is under _WINDUP_LIM_MIN_AY
+    v = 15.7
+    self.cs.out.vEgoRaw = self.cs.out.vEgo = v
+    self.V = v
+    self.cs.lat_ctl_lim_stat = 2
+    for _ in range(60):
+      self._update(-0.0040, -0.0032)
+    plan = -0.0040
+    for _ in range(4):
+      plan += 0.006 * 0.05
+      self._update(plan, -0.0032)
+    self.assertFalse(self.ext.bp_windup_released)
+
   def test_curve_entry_is_untouched(self):
     for _ in range(20):
       self._update(0.0, 0.0)

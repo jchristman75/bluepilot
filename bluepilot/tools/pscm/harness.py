@@ -328,6 +328,8 @@ def run_route(route_dir, ref=None, overrides=None, open_loop=False, bias=0.0, em
         out.yawRate = yaw_e
         out.steeringAngleDeg = ang_e
         CS = _CS(out)
+        # the PSCM's LatCtlLim_D_Stat as the emulated car would report it (logged when the log drives)
+        CS.lat_ctl_lim_stat = int(bool(o['atLimit'][0])) if not forced else 0
         ctrl.model = model
 
         # 3. the real lateral dispatch (carcontroller.py, BP lateral enabled, angle mode)

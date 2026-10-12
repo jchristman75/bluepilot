@@ -133,6 +133,7 @@ class PSCMEmulator:
     self.c1h = c1.copy()
     ff = self._tab('ff_gain', v) * self._nominal_deg_per_c1(v) * c1
     self.b = self._tab('droop_ratio', v) * ff
+    self.at_limit = np.zeros(self.n, bool)
     self.ang = angle_deg
     # vehicle: lateral velocity and true yaw rate at their steady-state ratio, sensor at the measurement
     p = self.p
@@ -152,9 +153,13 @@ class PSCMEmulator:
     x = np.abs(v * cmd_deg / self._nominal_deg_per_c1(v))  # steady lateral accel this target delivers
     if p.sat_mode == 'hard':
       lim = np.interp(v, p.sat_lim_v, p.sat_lim)
+      # LatCtlLim_D_Stat stand-in: on the road it comes on as the wire asks ~1.07x this clamp (median
+      # of 249 onsets on routes 45x-48x), so the request passing the clamp sets it
+      self.at_limit = x > lim
       w = 0.05  # near-hard: keeps the fit differentiable
       y = x - w * np.logaddexp(0.0, (x - lim) / w)
       return cmd_deg * np.where(x > 1e-6, np.maximum(y, 0.0) / np.maximum(x, 1e-6), 1.0)
+    self.at_limit = x > p.sat_knee
     if p.sat_knee >= 50:
       return cmd_deg
     w = self._SAT_WIDTH
@@ -238,7 +243,7 @@ class PSCMEmulator:
     ang_out = self.ang + ang_dist
     yaw = self.vehicle_step(ang_out, v, roll) + yaw_dist
     return {'steeringAngleDeg': ang_out.copy(), 'yawRate': yaw.copy(), 'heldC1': self.c1h.copy(),
-            'target': target, 'droop': self.b.copy()}
+            'target': target, 'droop': self.b.copy(), 'atLimit': self.at_limit & active}
 
   def _axles(self):
     p = self.p
