@@ -54,6 +54,8 @@ resumed. Mode 0 is panda-clean by construction: every ford.h check has a legitim
 back in from zero through the soft ROC below (no jump seed) -- generous at human-turn speeds, and
 admitted by ford.h's path_angle ROC check (2% looser) without any bypass.
 """
+from collections import deque
+
 import numpy as np
 from numpy import clip, interp
 
@@ -263,6 +265,11 @@ _BLIP_PLAN_STRAIGHT = 0.001  # 1/m
 # t=3085 (34.5 m/s, plan 0.9 m/s^2 into an S-bend) passed the curvature test, the pulse freed the wheel,
 # the PSCM came back in LatCtlLim and the car overshot ~0.7 m toward the next lane.
 _BLIP_PLAN_STRAIGHT_AY = 0.3  # m/s^2
+# Both plan tests above use the largest |plan| over the last second, not the current frame. Route
+# 000004a1 t=337/343: after a hand-steered turn exit the plan swung +/-4e-3 every ~5.5 s on a straight
+# (model chasing a 0.5 s car lag); each pending pulse fired as the swinging plan crossed zero, freeing
+# the wheel for 300 ms right at a reversal (harness: tracking error -7%, first swing -14% without them).
+_BLIP_PLAN_WINDOW_S = 1.0
 # No hand-off pulse at highway speed. Its value is manual-turn exits, which don't happen there, and
 # over every logged release above 22 m/s a pulse brought no tracking gain but more re-grabs within
 # 3 s (65-82% vs 47-57% without). An earned pulse just waits out its pending window.
@@ -378,6 +385,7 @@ class LateralAngleExt:
     self.press_timer_s = 0.0          # pressed time in the current grab, for the hand-off blip
     self.release_timer_s = 0.0        # total !steeringPressed time in the grab (see _PRESS_RELEASE_S)
     self.press_blip_pending_s = 0.0   # earned hand-off pulse waiting for a clear frame to fire
+    self._blip_plan_hist = deque(maxlen=max(1, round(_BLIP_PLAN_WINDOW_S / _STEER_DT)))  # recent |plan|
 
   def update_angle_params(self, params):
     """Sets per-platform gain defaults and reads user angle-tuning params."""
@@ -521,6 +529,7 @@ class LateralAngleExt:
       self.press_timer_s = 0.0
       self.release_timer_s = 0.0
       self.press_blip_pending_s = 0.0
+      self._blip_plan_hist.clear()
       self.precision_type = 1
       return LateralResult(
         apply_curvature=0.0,
@@ -573,6 +582,7 @@ class LateralAngleExt:
       self.press_timer_s = 0.0
       self.release_timer_s = 0.0
       self.press_blip_pending_s = 0.0
+      self._blip_plan_hist.clear()
       self.precision_type = 1
       return LateralResult(
         apply_curvature=0.0,
@@ -605,9 +615,10 @@ class LateralAngleExt:
         self.press_timer_s = 0.0
 
     # An earned pulse waits for a frame where every guard is clear instead of being dropped.
+    self._blip_plan_hist.append(abs(actuators.curvature))
     if self.press_blip_pending_s > 0.0:
       self.press_blip_pending_s = max(0.0, self.press_blip_pending_s - _STEER_DT)
-      _plan = abs(actuators.curvature)
+      _plan = max(self._blip_plan_hist)  # see _BLIP_PLAN_WINDOW_S
       _plan_straight = _plan <= min(_BLIP_PLAN_STRAIGHT, _BLIP_PLAN_STRAIGHT_AY / max(v_ego, 1.0) ** 2)
       if (self.stall_blip_cooldown_s <= 0.0
           and self.stall_blip_frames_left <= 0

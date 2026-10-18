@@ -804,8 +804,22 @@ class TestHandoffBlipPlanGate(unittest.TestCase):
   def test_release_into_wanted_curve_waits_for_plan(self):
     self.assertFalse(self._press_then_release(plan=0.004, meas=0.004))
     self.assertGreater(self.ext.press_blip_pending_s, 0.0)  # still pending, not dropped
-    self._update(plan=0.0005, meas=0.003)
+    # the plan eases off: the pulse waits out the _BLIP_PLAN_WINDOW_S window, then fires
+    window = round(lateral_angle_ext._BLIP_PLAN_WINDOW_S / lateral_angle_ext._STEER_DT)
+    for i in range(window + 1):
+      self._update(plan=0.0005, meas=0.003)
+      if self.ext.angle_stall_blip_source == 1:
+        break
+    self.assertGreaterEqual(i, window - 1)
     self.assertEqual(self.ext.angle_stall_blip_source, 1)
+
+  def test_swinging_plan_zero_crossing_waits(self):
+    # route 000004a1 t=337: a plan swinging +/-4e-3 on a straight passes both instantaneous tests
+    # as it crosses zero -- the window keeps the pending pulse from firing mid-swing
+    self.assertFalse(self._press_then_release(plan=0.004, meas=-0.003))
+    for plan in (0.002, 0.0005, -0.0005, -0.002, -0.004):
+      self._update(plan=plan, meas=-0.003)
+      self.assertNotEqual(self.ext.angle_stall_blip_source, 1)
 
   def test_reversal_into_opposite_curve_waits(self):
     self.assertFalse(self._press_then_release(plan=-0.004, meas=0.003))
