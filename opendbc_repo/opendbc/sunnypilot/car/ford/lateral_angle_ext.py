@@ -92,6 +92,14 @@ _SMALL_CURV_GAIN_CANFD_SUV = 1.15
 # gain 1.08-1.14 vs 0.92-0.97, straight-road yaw weave +20% at 0.2-0.25 Hz, and the plan itself moving
 # 20-30% more -- the planner loop the harness can't see. Full gain to 22 m/s, none from 27 m/s.
 _SMALL_CURV_GAIN_FADE_V = (22.0, 27.0)  # m/s
+# The low/high curvature gain blend (curvature_factor) ramps over |kappa| 0.0007-0.001, i.e. 0.7-1.0 m/s^2
+# at 72 mph -- where most long highway curves sit. Evaluated on the instantaneous kappa, the wire's
+# incremental gain there is K + kappa*dK/dkappa = 1.4-1.8 (gain never above 1.19 on average), so plan
+# ripple inside such a curve is amplified: routes 000004b5/b7 (2026-10-24, 114 hands-free highway min),
+# car response to 0.07-1.5 Hz plan ripple 1.15-1.24 inside the ramp vs 1.03-1.10 on either side -- the
+# "wavering through long curves". The gain is looked up on |kappa| low-passed with this time constant
+# instead, so steady curves keep the same gain while ripple sees a fixed one. 0 = instantaneous (old).
+_GAIN_KAPPA_TAU_S = 2.0
 
 _CANFD_BOF_CARS = frozenset({
   CAR.FORD_F_150_MK14,
@@ -349,6 +357,7 @@ class LateralAngleExt:
     # update_angle_params.
     self.small_curv_gain = 1.0
     self._wire_slow = None
+    self._gain_kappa_slow = None  # low-passed |kappa_cmd| for the curvature_factor lookup (_GAIN_KAPPA_TAU_S)
     self.bp_unwind_clamped = False  # clip-bound unwind clamp actually bit this frame
     self.bp_windup_released = False  # anti-windup cap at the PSCM ceiling bit this frame
     self._windup_plan_slow = None    # smoothed planner curvature for the unwinding test
@@ -516,6 +525,7 @@ class LateralAngleExt:
       self.angle_human_turn_active = False
       self.lane_center_trim.reset()
       self._wire_slow = None
+      self._gain_kappa_slow = None
       self.stall_blip_hold_s = 0.0
       self._stall_gap_mag_slow = -1.0
       self._stall_meas_slow = None
@@ -566,6 +576,7 @@ class LateralAngleExt:
       self._desired_curvature_last = float(actuators.curvature)
       self.lane_center_trim.reset()
       self._wire_slow = None
+      self._gain_kappa_slow = None
       # A human turn ends any stall episode -- its own mode 0 does the PSCM reset job. That also
       # covers the press so far: only press time accumulated AFTER the latch releases should earn
       # a hand-off pulse.
@@ -652,6 +663,7 @@ class LateralAngleExt:
       self._desired_curvature_last = float(actuators.curvature)
       self.lane_center_trim.reset()
       self._wire_slow = None
+      self._gain_kappa_slow = None
       self.precision_type = 1
       if self.stall_blip_frames_left <= 0:
         self.stall_blip_cooldown_s = _STALL_COOLDOWN_S
@@ -807,7 +819,13 @@ class LateralAngleExt:
       self.low_gain_calc = min(self.low_gain_calc * _small_gain, max(self.high_gain_calc, self.low_gain_calc))
 
     # As the curve gets bigger, we will need a little boost to the signal to to not understeer
-    self.curvature_factor = interp(abs(kappa_cmd), [0.0007, 0.001], [self.low_gain_calc, self.high_gain_calc])
+    _k_abs = abs(kappa_cmd)
+    if _GAIN_KAPPA_TAU_S > 0.0:
+      if self._gain_kappa_slow is None:
+        self._gain_kappa_slow = _k_abs
+      self._gain_kappa_slow += (_STEER_DT / (_STEER_DT + _GAIN_KAPPA_TAU_S)) * (_k_abs - self._gain_kappa_slow)
+      _k_abs = self._gain_kappa_slow
+    self.curvature_factor = interp(_k_abs, [0.0007, 0.001], [self.low_gain_calc, self.high_gain_calc])
 
     # Steady-state wire command in curvature units (path_angle / v).
     wire_kappa = kappa_cmd * self.curvature_factor

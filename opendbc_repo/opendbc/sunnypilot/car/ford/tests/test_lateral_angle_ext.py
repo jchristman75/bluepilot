@@ -462,6 +462,7 @@ class TestLeadLagShaping(unittest.TestCase):
     self.ext.model.orientationRate = _OrientationRate([plan * v] * 33)
     return self.ext.update_angle_strategy(_CC(latActive=lat_active), self.cs, _Actuators(curvature=plan), self.CP)
 
+  @mock.patch.object(lateral_angle_ext, '_GAIN_KAPPA_TAU_S', 0.0)  # isolate the shaping from the gain lookup
   def test_step_is_immediate_share_then_settles_to_static_gain(self):
     for _ in range(5):
       self._update(0.0, 0.0)
@@ -474,6 +475,23 @@ class TestLeadLagShaping(unittest.TestCase):
     for _ in range(200):  # 10 s >> tau
       lat = self._update(k, k)
     self.assertAlmostEqual(lat.path_angle, K * k * 20.0, places=5)
+
+  def test_gain_lookup_ignores_ripple_inside_the_ramp(self):
+    # route 000004b5/b7: a highway curve inside the low/high gain ramp; the gain must not follow ripple
+    v, k = 30.0, 0.00085
+    self.ext.path_angle_gain_lowC_highV, self.ext.path_angle_gain_highC_highV = 1.0, 1.05
+    self.ext.user_dampening_factor, self.ext.high_speed_curv_factor = 1.0, 1.13
+    self.ext.small_curv_gain = 1.0
+    for _ in range(400):
+      self._update(k, k, v=v)
+    K_steady = self.ext.curvature_factor
+    self.assertAlmostEqual(K_steady, float(np.interp(k, [0.0007, 0.001], [self.ext.low_gain_calc, self.ext.high_gain_calc])), places=4)
+    Ks = []
+    for i in range(40):  # 2 s of +/-1.5e-4 ripple at 0.5 Hz
+      self._update(k + 1.5e-4 * math.sin(2 * math.pi * 0.5 * i * 0.05), k, v=v)
+      Ks.append(self.ext.curvature_factor)
+    self.assertGreater(self.ext.high_gain_calc - self.ext.low_gain_calc, 0.1)
+    self.assertLess(max(Ks) - min(Ks), 0.2 * (self.ext.high_gain_calc - self.ext.low_gain_calc))
 
   def test_reengage_is_seeded_like_the_static_gain(self):
     k = 0.001
