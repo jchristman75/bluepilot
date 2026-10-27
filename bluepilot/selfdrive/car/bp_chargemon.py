@@ -26,7 +26,7 @@ import time
 from types import SimpleNamespace
 
 import openpilot.cereal.messaging as messaging
-from openpilot.cereal import car
+from opendbc.car.structs import car
 from opendbc.can.parser import CANParser
 from opendbc.car import Bus
 from opendbc.car.ford.fordcan import CanBus

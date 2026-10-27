@@ -25,7 +25,6 @@ from multiprocessing import Pool
 import numpy as np
 
 from opendbc.can.dbc import DBC
-from opendbc.can.parser import get_raw_value
 from openpilot.tools.lib.logreader import LogReader
 
 DEFAULT_CACHE = os.path.expanduser('~/.cache/bp_pscm_v2')  # v2: COLS gained the fields after desireLeft
@@ -59,7 +58,7 @@ _EPAS = _sigs(130, ['SteMdule_I_Est', 'DrvSte_Tq_Actl', 'DrvSteActv_B_Stat', 'St
 def _decode(dat, sigs):
   out = []
   for s in sigs:
-    r = get_raw_value(dat, s)
+    r = s.get_raw_value(dat)
     if s.is_signed:
       r -= ((r >> (s.size - 1)) & 1) * (1 << s.size)
     out.append(r * s.factor + s.offset)
