@@ -146,7 +146,7 @@ class CarState(CarStateBase, MadsCarState, CarStateExt):
     ret.seatbeltUnlatched = cp.vl["RCMStatusMessage2_FD1"]["FirstRowBuckleDriver"] == 2
 
     # blindspot sensors
-    if self.CP.enableBsm:
+    if self.CP.flags & FordFlags.HAS_BSM:
       cp_bsm = cp_cam if self.CP.flags & FordFlags.CANFD else cp
       ret.leftBlindspot = cp_bsm.vl["Side_Detect_L_Stat"]["SodDetctLeft_D_Stat"] != 0
       ret.rightBlindspot = cp_bsm.vl["Side_Detect_R_Stat"]["SodDetctRight_D_Stat"] != 0
@@ -245,7 +245,7 @@ class CarState(CarStateBase, MadsCarState, CarStateExt):
         ("Engine_Clutch_Data", 33),
       ]
 
-    if CP.enableBsm and not (CP.flags & FordFlags.CANFD):
+    if CP.flags & FordFlags.HAS_BSM and not (CP.flags & FordFlags.CANFD):
       pt_messages += [
         ("Side_Detect_L_Stat", 5),
         ("Side_Detect_R_Stat", 5),
@@ -273,7 +273,7 @@ class CarState(CarStateBase, MadsCarState, CarStateExt):
         ("Traffic_RecognitnData", float('nan')),
       ]
 
-    if CP.enableBsm and CP.flags & FordFlags.CANFD:
+    if CP.flags & FordFlags.HAS_BSM and CP.flags & FordFlags.CANFD:
       cam_messages += [
         ("Side_Detect_L_Stat", 5),
         ("Side_Detect_R_Stat", 5),

@@ -59,6 +59,10 @@ class FordSafetyFlags(IntFlag):
 
 
 class FordFlags(IntFlag):
+  # Detected flags
+  # BluePilot: upstream uses 2, which collides with ALT_STEER_ANGLE below
+  HAS_BSM = 64  # blind spot monitoring
+
   # Static flags
   CANFD = 1
   ALT_STEER_ANGLE = 2
@@ -166,12 +170,12 @@ MACH_E_VDS_CODES = {'K1R', 'K1S', 'K2S', 'K3R', 'K3S', 'K4S'}
 class CAR(Platforms):
   FORD_BRONCO_SPORT_MK1 = FordPlatformConfig(
     [FordCarDocs("Ford Bronco Sport 2021-24")],
-    CarSpecs(mass=1625, wheelbase=2.67, steerRatio=17.7),
+    CarSpecs(wheelbase=2.67, steerRatio=17.7),
     wmis={'3FM'}, vds_codes={'CR9'}, years={MY_2021, MY_2022, MY_2023, MY_2024},
   )
   FORD_EDGE_MK2 = FordPlatformConfig(
     [FordCarDocs("Ford Edge 2022")],
-    CarSpecs(mass=1933, steerRatio=15.3, wheelbase=2.824),
+    CarSpecs(steerRatio=15.3, wheelbase=2.824),
     flags=FordFlags.ALT_STEER_ANGLE,
     wmis={'2FM'}, vds_codes={'PK4'}, years={MY_2022},
   )
@@ -180,7 +184,7 @@ class CAR(Platforms):
       FordCarDocs("Ford Escape 2020-22", hybrid=True, plug_in_hybrid=True),
       FordCarDocs("Ford Kuga 2020-23", "Adaptive Cruise Control with Lane Centering", hybrid=True, plug_in_hybrid=True),
     ],
-    CarSpecs(mass=1750, wheelbase=2.71, steerRatio=16.7),
+    CarSpecs(wheelbase=2.71, steerRatio=16.7),
     wmis={'1FM'}, vds_codes={'CU0', 'CU9'}, years={MY_2020, MY_2021, MY_2022},  # CU0 = 4x2, CU9 = 4WD
   )
   FORD_ESCAPE_MK4_5 = FordCANFDPlatformConfig(
@@ -189,7 +193,7 @@ class CAR(Platforms):
       FordCarDocs("Ford Kuga Hybrid 2024", "All"),
       FordCarDocs("Ford Kuga Plug-in Hybrid 2024", "All"),
     ],
-    CarSpecs(mass=1750, wheelbase=2.71, steerRatio=16.7),
+    CarSpecs(wheelbase=2.71, steerRatio=16.7),
     # same body codes as the MK4; the model year letter separates them
     wmis={'1FM'}, vds_codes={'CU0', 'CU9'}, years={MY_2023, MY_2024},
   )
@@ -198,51 +202,51 @@ class CAR(Platforms):
       FordCarDocs("Ford Explorer 2020-24", hybrid=True),  # Hybrid: Limited and Platinum only
       FordCarDocs("Lincoln Aviator 2020-24", "Co-Pilot360 Plus", plug_in_hybrid=True),  # Hybrid: Grand Touring only
     ],
-    CarSpecs(mass=2050, wheelbase=3.025, steerRatio=16.8),
+    CarSpecs(wheelbase=3.025, steerRatio=16.8),
     # SK7/SK8 (Explorer) and YJ8/YJ9/5J9 (Aviator) are the post-2021 descriptor blocks
     wmis={'1FM', '5LM'}, vds_codes={'5K7', '5K8', '5J7', 'SK7', 'SK8', 'YJ8', 'YJ9', '5J9'},
     years={MY_2020, MY_2021, MY_2022, MY_2023, MY_2024},
   )
   FORD_EXPEDITION_MK4 = FordCANFDPlatformConfig(
     [FordCarDocs("Ford Expedition 2022-24", "Co-Pilot360 Assist 2.0", hybrid=False)],
-    CarSpecs(mass=2000, wheelbase=3.69, steerRatio=17.0),
+    CarSpecs(wheelbase=3.69, steerRatio=17.0),
     # JK1 is the MAX; same platform here
     wmis={'1FM'}, vds_codes={'JU1', 'JU2', 'JK1'}, years={MY_2022, MY_2023, MY_2024},
   )
   FORD_F_150_MK14 = FordCANFDPlatformConfig(
     [FordCarDocs("Ford F-150 2021-23", "Co-Pilot360 Assist 2.0", hybrid=True)],
-    CarSpecs(mass=3334, wheelbase=3.99, steerRatio=17.0),
+    CarSpecs(wheelbase=3.99, steerRatio=17.0),
     wmis={'1FT'}, vds_codes=F150_VDS_CODES, years={MY_2021, MY_2022, MY_2023},
   )
   FORD_F_150_LIGHTNING_MK1 = FordF150LightningPlatform(
     [FordCarDocs("Ford F-150 Lightning 2022-25", "Co-Pilot360 Assist 2.0")],
-    CarSpecs(mass=2948, wheelbase=3.70, steerRatio=16.9),
+    CarSpecs(wheelbase=3.70, steerRatio=16.9),
     wmis={'1FT'}, vds_codes=F150_VDS_CODES, years={MY_2022, MY_2023, MY_2024, MY_2025},
   )
   FORD_FOCUS_MK4 = FordPlatformConfig(
     [FordCarDocs("Ford Focus 2018-22", "Adaptive Cruise Control with Lane Centering", footnotes=[Footnote.FOCUS], hybrid=True)],  # mHEV only
-    CarSpecs(mass=1350, wheelbase=2.7, steerRatio=15.0),
+    CarSpecs(wheelbase=2.7, steerRatio=15.0),
   )
   FORD_MONDEO_MK5 = FordCANFDPlatformConfig(
     [FordCarDocs("Ford Mondeo 2014-2022", "Adaptive Cruise Control with Lane Centering")],
-    CarSpecs(mass=1550, wheelbase=2.85, steerRatio=14.8),
+    CarSpecs(wheelbase=2.85, steerRatio=14.8),
   )
   FORD_MAVERICK_MK1 = FordPlatformConfig(
     [
       FordCarDocs("Ford Maverick 2022", "LARIAT Luxury", hybrid=True),
       FordCarDocs("Ford Maverick 2023-24", "Co-Pilot360 Assist", hybrid=True),
     ],
-    CarSpecs(mass=1650, wheelbase=3.076, steerRatio=17.0),
+    CarSpecs(wheelbase=3.076, steerRatio=17.0),
     wmis={'3FT'}, vds_codes={'TW8'}, years={MY_2022, MY_2023, MY_2024},
   )
   FORD_MUSTANG_MACH_E_MK1 = FordCANFDPlatformConfig(
     [FordCarDocs("Ford Mustang Mach-E 2021-24", "All", setup_video="https://www.youtube.com/watch?v=AR4_eTF3b_A")],
-    CarSpecs(mass=2200, wheelbase=2.984, steerRatio=17.0),  # TODO: check steer ratio
+    CarSpecs(wheelbase=2.984, steerRatio=17.0),  # TODO: check steer ratio
     wmis={'3FM'}, vds_codes=MACH_E_VDS_CODES, years={MY_2021, MY_2022, MY_2023, MY_2024},
   )
   FORD_RANGER_MK2 = FordCANFDPlatformConfig(
     [FordCarDocs("Ford Ranger 2024", "Adaptive Cruise Control with Lane Centering", setup_video="https://www.youtube.com/watch?v=2oJlXCKYOy0")],
-    CarSpecs(mass=2000, wheelbase=3.27, steerRatio=17.0),
+    CarSpecs(wheelbase=3.27, steerRatio=17.0),
     # the year set excludes the unsupported 2019-23 Ranger, which shares this code
     wmis={'1FT'}, vds_codes={'ER4'}, years={MY_2024},
   )

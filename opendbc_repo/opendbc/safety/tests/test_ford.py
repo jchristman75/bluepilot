@@ -4,6 +4,7 @@ import random
 import unittest
 
 import opendbc.safety.tests.common as common
+from opendbc.safety.tests.libsafety import libsafety_py
 # BluePilot: MAX_LATERAL_ACCEL here is the CAN FD limit from the carcontroller (~2.4 m/s^2,
 # ISO minus the roll term), which is what ford.h's limit_lateral_acceleration path enforces.
 # Upstream's lateral.MAX_LATERAL_ACCEL is a different value (~3.6, ISO plus roll) and applies
@@ -11,12 +12,10 @@ import opendbc.safety.tests.common as common
 from opendbc.car.ford.carcontroller import MAX_LATERAL_ACCEL
 from opendbc.car.lateral import MAX_LATERAL_ACCEL as ISO_MAX_LATERAL_ACCEL, MAX_LATERAL_JERK
 from opendbc.car.ford.values import CAR, FordFlags, FordSafetyFlags
-from opendbc.car.interfaces import scale_tire_stiffness
+from opendbc.car import scale_tire_stiffness_per_mass
 from opendbc.car.vehicle_model import VehicleModel, calc_slip_factor
 from opendbc.sunnypilot.car.ford.values_ext import FORD_PINION_GEOMETRY_INDEX, FORD_PINION_GEOMETRY_SHIFT, FordSafetyFlagsSP
 from opendbc.car.structs import CarParams
-from opendbc.safety.tests.libsafety import libsafety_py
-from opendbc.safety.tests.common import CANPackerSafety
 
 MSG_BrakeSysFeatures = 0x415       # RX from ABS, for vehicle speed
 MSG_EngVehicleSpThrottle2 = 0x202  # RX from PCM, for second vehicle speed
@@ -28,54 +27,26 @@ MSG_Lane_Assist_Data1 = 0x3CA      # TX by OP, Lane Keep Assist
 MSG_LateralMotionControl = 0x3D3   # TX by OP, Lateral Control message
 MSG_LateralMotionControl2 = 0x3D6  # TX by OP, alternate Lateral Control message
 MSG_IPMA_Data = 0x3D8              # TX by OP, IPMA and LKAS user interface
-
-
-def checksum(msg):
-  addr, dat, bus = msg
-  ret = bytearray(dat)
-
-  if addr == MSG_Yaw_Data_FD1:
-    chksum = dat[0] + dat[1]  # VehRol_W_Actl
-    chksum += dat[2] + dat[3]  # VehYaw_W_Actl
-    chksum += dat[5]  # VehRollYaw_No_Cnt
-    chksum += dat[6] >> 6  # VehRolWActl_D_Qf
-    chksum += (dat[6] >> 4) & 0x3  # VehYawWActl_D_Qf
-    chksum = 0xff - (chksum & 0xff)
-    ret[4] = chksum
-
-  elif addr == MSG_BrakeSysFeatures:
-    chksum = dat[0] + dat[1]  # Veh_V_ActlBrk
-    chksum += (dat[2] >> 2) & 0xf  # VehVActlBrk_No_Cnt
-    chksum += dat[2] >> 6  # VehVActlBrk_D_Qf
-    chksum = 0xff - (chksum & 0xff)
-    ret[3] = chksum
-
-  elif addr == MSG_EngVehicleSpThrottle2:
-    chksum = (dat[2] >> 3) & 0xf  # VehVActlEng_No_Cnt
-    chksum += (dat[4] >> 5) & 0x3  # VehVActlEng_D_Qf
-    chksum += dat[6] + dat[7]  # Veh_V_ActlEng
-    chksum = 0xff - (chksum & 0xff)
-    ret[1] = chksum
-
-  return addr, ret, bus
-
-
 class Buttons:
   CANCEL = 0
   RESUME = 1
   TJA_TOGGLE = 2
-
-
 # Ford safety has four different configurations tested here:
 #  * CAN with openpilot longitudinal
 #  * CAN FD with stock longitudinal
 #  * CAN FD with openpilot longitudinal
 
 class TestFordSafetyBase(common.CarSafetyTest):
-  # BluePilot: sunnypilot SP safety param (current_safety_param_sp), set before
-  # set_safety_hooks in every concrete setUp -- ford_init reads it. 0 = stock behavior;
+  DBC = "ford_lincoln_base_pt"
+  SAFETY_MODEL = CarParams.SafetyModel.ford
+  # BluePilot: sunnypilot SP safety param (current_safety_param_sp). 0 = stock behavior;
   # the pinion-curvature classes below override it (Toyota SAFETY_PARAM_SP convention).
   SAFETY_PARAM_SP: int = 0
+
+  def setUp(self):
+    # BluePilot: ford_init reads the SP param during set_safety_hooks, so it must be set first
+    libsafety_py.libsafety.set_current_safety_param_sp(self.SAFETY_PARAM_SP)
+    super().setUp()
 
   STANDSTILL_THRESHOLD = 1
   RELAY_MALFUNCTION_ADDRS = {0: (MSG_ACCDATA_3, MSG_Lane_Assist_Data1, MSG_LateralMotionControl,
@@ -93,13 +64,7 @@ class TestFordSafetyBase(common.CarSafetyTest):
   CURVATURE_ERROR_MIN_SPEED = 10.0    # m/s
   LATERAL_FREQUENCY = 20              # Hz, for per-frame jerk limit
 
-  cnt_speed = 0
-  cnt_speed_2 = 0
-  cnt_yaw_rate = 0
-  cnt_lat_ctl = 0
-
-  packer: CANPackerSafety
-  safety: libsafety_py.LibSafety
+  lat_ctl_frame = 0
 
   # BluePilot: retained from pre-sync. ford.h applies the lateral-accel cap only where
   # limit_lateral_acceleration is set (CAN FD / Q4), not on CAN / Q3 as upstream's ISO-only
@@ -153,16 +118,14 @@ class TestFordSafetyBase(common.CarSafetyTest):
 
   # ABS vehicle speed
   def _speed_msg(self, speed: float, quality_flag=True):
-    values = {"Veh_V_ActlBrk": speed * 3.6, "VehVActlBrk_D_Qf": 3 if quality_flag else 0, "VehVActlBrk_No_Cnt": self.cnt_speed % 16}
-    self.__class__.cnt_speed += 1
-    return self.packer.make_can_msg_safety("BrakeSysFeatures", 0, values, fix_checksum=checksum)
+    values = {"Veh_V_ActlBrk": speed * 3.6, "VehVActlBrk_D_Qf": 3 if quality_flag else 0}
+    return self.packer.make_can_msg_safety("BrakeSysFeatures", 0, values)
 
   # PCM vehicle speed
   def _speed_msg_2(self, speed: float, quality_flag=True):
     # Ford relies on speed for driver curvature limiting, so it checks two sources
-    values = {"Veh_V_ActlEng": speed * 3.6, "VehVActlEng_D_Qf": 3 if quality_flag else 0, "VehVActlEng_No_Cnt": self.cnt_speed_2 % 16}
-    self.__class__.cnt_speed_2 += 1
-    return self.packer.make_can_msg_safety("EngVehicleSpThrottle2", 0, values, fix_checksum=checksum)
+    values = {"Veh_V_ActlEng": speed * 3.6, "VehVActlEng_D_Qf": 3 if quality_flag else 0}
+    return self.packer.make_can_msg_safety("EngVehicleSpThrottle2", 0, values)
 
   # Standstill state
   def _vehicle_moving_msg(self, speed: float):
@@ -171,10 +134,8 @@ class TestFordSafetyBase(common.CarSafetyTest):
 
   # Current curvature
   def _yaw_rate_msg(self, curvature: float, speed: float, quality_flag=True):
-    values = {"VehYaw_W_Actl": curvature * speed, "VehYawWActl_D_Qf": 3 if quality_flag else 0,
-              "VehRollYaw_No_Cnt": self.cnt_yaw_rate % 256}
-    self.__class__.cnt_yaw_rate += 1
-    return self.packer.make_can_msg_safety("Yaw_Data_FD1", 0, values, fix_checksum=checksum)
+    values = {"VehYaw_W_Actl": curvature * speed, "VehYawWActl_D_Qf": 3 if quality_flag else 0}
+    return self.packer.make_can_msg_safety("Yaw_Data_FD1", 0, values)
 
   # Drive throttle input
   def _user_gas_msg(self, gas: float):
@@ -191,6 +152,11 @@ class TestFordSafetyBase(common.CarSafetyTest):
       "CcStat_D_Actl": 5 if enable else 0,
     }
     return self.packer.make_can_msg_safety("EngBrakeData", 0, values)
+
+  def test_enable_control_allowed_from_queue_assist(self):
+    msg = self.packer.make_can_msg_safety("EngBrakeData", 0, {"BpedDrvAppl_D_Actl": 1, "CcStat_D_Actl": 4})
+    self.assertTrue(self._rx(msg))
+    self.assertTrue(self.safety.get_controls_allowed())
 
   # LKAS command
   def _lkas_command_msg(self, action: int):
@@ -217,8 +183,8 @@ class TestFordSafetyBase(common.CarSafetyTest):
   def _lat_ctl_msg(self, enabled: bool, path_offset: float, path_angle: float, curvature: float, curvature_rate: float,
                    increment_timer: bool = True):
     if increment_timer:
-      self.safety.set_timer(self.cnt_lat_ctl * int(1e6 / self.LATERAL_FREQUENCY))
-      self.__class__.cnt_lat_ctl += 1
+      self.safety.set_timer(self.lat_ctl_frame * int(1e6 / self.LATERAL_FREQUENCY))
+      self.__class__.lat_ctl_frame += 1
     if self.STEER_MESSAGE == MSG_LateralMotionControl:
       values = {
         "LatCtl_D_Rq": 1 if enabled else 0,
@@ -572,9 +538,9 @@ class TestFordSafetyBase(common.CarSafetyTest):
             self.safety.set_mads_params(enable_mads, False, False)
             self._rx(self._pcm_status_msg(main_button_msg_valid))
             self.assertEqual(enable_mads and main_button_msg_valid, self.safety.get_controls_allowed_lateral())
-
-
 class TestFordCANFDStockSafety(TestFordSafetyBase):
+  SAFETY_PARAM = FordSafetyFlags.CANFD
+
   STEER_MESSAGE = MSG_LateralMotionControl2
 
   TX_MSGS = [
@@ -586,15 +552,6 @@ class TestFordCANFDStockSafety(TestFordSafetyBase):
 
   FWD_BLACKLISTED_ADDRS = {2: [MSG_ACCDATA_3, MSG_Lane_Assist_Data1, MSG_LateralMotionControl2,
                                MSG_IPMA_Data]}
-
-  def setUp(self):
-    self.packer = CANPackerSafety("ford_lincoln_base_pt")
-    self.safety = libsafety_py.libsafety
-    self.safety.set_current_safety_param_sp(self.SAFETY_PARAM_SP)
-    self.safety.set_safety_hooks(CarParams.SafetyModel.ford, FordSafetyFlags.CANFD)
-    self.safety.init_tests()
-
-
 class TestFordLongitudinalSafetyBase(TestFordSafetyBase):
   MAX_ACCEL = 2.0  # accel is used for brakes, but openpilot can set positive values
   MIN_ACCEL = -3.5
@@ -644,9 +601,9 @@ class TestFordLongitudinalSafetyBase(TestFordSafetyBase):
           should_tx = (controls_allowed and self.MIN_ACCEL <= brake <= self.MAX_ACCEL) or brake == self.INACTIVE_ACCEL
           should_tx = should_tx and (controls_allowed or not brake_actuation)
           self.assertEqual(should_tx, self._tx(self._acc_command_msg(self.INACTIVE_GAS, brake, brake_actuation)))
-
-
 class TestFordLongitudinalSafety(TestFordLongitudinalSafetyBase):
+  # Make sure we enforce long safety even without long flag for CAN
+  SAFETY_PARAM = 0
   STEER_MESSAGE = MSG_LateralMotionControl
 
   TX_MSGS = [
@@ -658,17 +615,9 @@ class TestFordLongitudinalSafety(TestFordLongitudinalSafetyBase):
 
   FWD_BLACKLISTED_ADDRS = {2: [MSG_ACCDATA, MSG_ACCDATA_3, MSG_Lane_Assist_Data1, MSG_LateralMotionControl,
                                MSG_IPMA_Data]}
-
-  def setUp(self):
-    self.packer = CANPackerSafety("ford_lincoln_base_pt")
-    self.safety = libsafety_py.libsafety
-    self.safety.set_current_safety_param_sp(self.SAFETY_PARAM_SP)
-    # Make sure we enforce long safety even without long flag for CAN
-    self.safety.set_safety_hooks(CarParams.SafetyModel.ford, 0)
-    self.safety.init_tests()
-
-
 class TestFordCANFDLongitudinalSafety(TestFordLongitudinalSafetyBase):
+  SAFETY_PARAM = FordSafetyFlags.LONG_CONTROL | FordSafetyFlags.CANFD
+
   STEER_MESSAGE = MSG_LateralMotionControl2
 
   TX_MSGS = [
@@ -680,13 +629,6 @@ class TestFordCANFDLongitudinalSafety(TestFordLongitudinalSafetyBase):
 
   FWD_BLACKLISTED_ADDRS = {2: [MSG_ACCDATA, MSG_ACCDATA_3, MSG_Lane_Assist_Data1, MSG_LateralMotionControl2,
                                MSG_IPMA_Data]}
-
-  def setUp(self):
-    self.packer = CANPackerSafety("ford_lincoln_base_pt")
-    self.safety = libsafety_py.libsafety
-    self.safety.set_current_safety_param_sp(self.SAFETY_PARAM_SP)
-    self.safety.set_safety_hooks(CarParams.SafetyModel.ford, FordSafetyFlags.LONG_CONTROL | FordSafetyFlags.CANFD)
-    self.safety.init_tests()
 
 
 # =============================================================================
@@ -923,13 +865,13 @@ class TestFordPinionGeometryTable(unittest.TestCase):
 
       specs = car.config.specs
       CP = CarParams()
-      CP.mass = specs.mass
       CP.wheelbase = specs.wheelbase
       CP.steerRatio = specs.steerRatio
       CP.centerToFront = specs.wheelbase * specs.centerToFrontRatio
       CP.tireStiffnessFactor = specs.tireStiffnessFactor
-      CP.tireStiffnessFront, CP.tireStiffnessRear = scale_tire_stiffness(
-        CP.mass, CP.wheelbase, CP.centerToFront, CP.tireStiffnessFactor)
+      # mass cancels out of the slip factor; upstream's mass-normalized stiffness gives the same value
+      CP.tireStiffnessFrontPerMass, CP.tireStiffnessRearPerMass = scale_tire_stiffness_per_mass(
+        CP.wheelbase, CP.centerToFront, CP.tireStiffnessFactor)
       slip_factor = calc_slip_factor(VehicleModel(CP))
 
       self.assertAlmostEqual(safety.get_ford_pinion_geometry_steer_ratio(idx), specs.steerRatio, places=3, msg=str(car))

@@ -24,7 +24,7 @@ from unittest import mock
 
 from opendbc.car import structs
 from opendbc.car.ford.values import CAR, CarControllerParams
-from opendbc.car.interfaces import scale_tire_stiffness
+from opendbc.car import scale_tire_stiffness_per_mass
 from opendbc.sunnypilot.car.ford import lateral_angle_ext, lateral_curv_ext
 from opendbc.sunnypilot.car.ford.values_ext import FordSafetyFlagsSP
 from opendbc.sunnypilot.car.ford.lateral_curv_ext import LateralCurvExt
@@ -33,13 +33,12 @@ from opendbc.sunnypilot.car.ford.lateral_angle_ext import LateralAngleExt
 
 def _explorer_cp():
   CP = structs.CarParams()
-  CP.mass = 2050.
   CP.wheelbase = 3.025
   CP.steerRatio = 16.8
   CP.centerToFront = CP.wheelbase * 0.44
   CP.tireStiffnessFactor = 0.82
-  CP.tireStiffnessFront, CP.tireStiffnessRear = scale_tire_stiffness(
-    CP.mass, CP.wheelbase, CP.centerToFront, CP.tireStiffnessFactor)
+  CP.tireStiffnessFrontPerMass, CP.tireStiffnessRearPerMass = scale_tire_stiffness_per_mass(
+    CP.wheelbase, CP.centerToFront, CP.tireStiffnessFactor)
   return CP
 
 
