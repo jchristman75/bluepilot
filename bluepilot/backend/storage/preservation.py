@@ -22,9 +22,9 @@ except ImportError:
 
 # Import xattr for preserve marker support
 try:
+    from openpilot.system.loggerd import xattr_cache
     from openpilot.system.loggerd.xattr_cache import getxattr, setxattr
     from openpilot.system.loggerd.deleter import PRESERVE_ATTR_NAME, PRESERVE_ATTR_VALUE, PRESERVE_COUNT, DELETE_LAST
-    import xattr as xattr_module
     XATTR_AVAILABLE = True
 except ImportError:
     XATTR_AVAILABLE = False
@@ -409,12 +409,15 @@ def set_route_preserve(route_base, preserve=True):
                     affected_segments += 1
                 else:
                     # Remove xattr
+                    # stdlib, not the xattr package: AGNOS 19+ no longer ships it
                     try:
-                        xattr_module.removexattr(seg['path'], PRESERVE_ATTR_NAME)
+                        os.removexattr(seg['path'], PRESERVE_ATTR_NAME)
                         affected_segments += 1
                     except OSError:
                         # Attribute doesn't exist - that's fine
                         pass
+                    # getxattr caches per path; drop the stale "preserved" entry
+                    xattr_cache._cached_attributes.pop((seg['path'], PRESERVE_ATTR_NAME), None)
             except Exception as e:
                 logger.warning(f"Error setting preserve on {seg['name']}: {e}")
 
