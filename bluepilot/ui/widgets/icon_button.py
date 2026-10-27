@@ -3,6 +3,8 @@ BluePilot Icon Button Widget
 Reusable button component with icon and optional label
 """
 
+import math
+import time
 import pyray as rl
 from collections.abc import Callable
 from openpilot.system.ui.lib.application import gui_app, FontWeight, MousePos
@@ -10,6 +12,19 @@ from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.widgets import Widget
 from bluepilot.ui.lib.colors import BPColors
 from bluepilot.ui.lib.constants import BPConstants
+
+GLOW_PULSE_PERIOD_S = 2.0
+
+
+def breathing_alpha(min_alpha: float = 0.35, max_alpha: float = 0.85) -> float:
+  """Sine-wave alpha in [min_alpha, max_alpha] that breathes over GLOW_PULSE_PERIOD_S seconds."""
+  phase = (time.monotonic() % GLOW_PULSE_PERIOD_S) / GLOW_PULSE_PERIOD_S
+  return min_alpha + (max_alpha - min_alpha) * (0.5 + 0.5 * math.sin(phase * 2 * math.pi))
+
+
+def draw_breathing_fill(rect: rl.Rectangle, color: rl.Color, roundness: float = 0.2, segments: int = 10) -> None:
+  """Fill rect with color at a breathing alpha, e.g. to mark an actively-charging button."""
+  rl.draw_rectangle_rounded(rect, roundness, segments, BPColors.with_alpha(color, int(255 * breathing_alpha())))
 
 
 class IconButton(Widget):
@@ -24,6 +39,7 @@ class IconButton(Widget):
     self._size = size if size else BPConstants.BUTTON_SIZE
     self._on_click: Callable | None = None
     self._scale = 0.55  # Icon scale factor
+    self._glow = False
 
     if icon_path:
       self._load_icon()
@@ -49,6 +65,10 @@ class IconButton(Widget):
     """Set icon scale factor"""
     self._scale = scale
 
+  def set_glow(self, glow: bool):
+    """Enable/disable the breathing green glow (e.g. while charging is active)"""
+    self._glow = glow
+
   def _handle_mouse_release(self, mouse_pos: MousePos) -> bool:
     if self._on_click and self.enabled:
       self._on_click()
@@ -61,7 +81,10 @@ class IconButton(Widget):
     border_color = BPColors.with_alpha(BPColors.WHITE, 80)
 
     # Draw button background
-    rl.draw_rectangle_rounded(rect, 0.2, 10, bg_color)
+    if self._glow:
+      draw_breathing_fill(rect, BPColors.GOOD)
+    else:
+      rl.draw_rectangle_rounded(rect, 0.2, 10, bg_color)
 
     # Draw border
     rl.draw_rectangle_rounded_lines_ex(rect, 0.2, 10, 2, border_color)

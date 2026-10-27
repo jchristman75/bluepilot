@@ -110,3 +110,25 @@ class TestComboButtonEvents(unittest.TestCase):
 
 if __name__ == "__main__":
   unittest.main()
+
+
+class TestLatCtlLimStat(unittest.TestCase):
+  """LatCtlLim_D_Stat is read on CAN FD cars only (lateral_angle_ext's anti-windup)."""
+
+  def _parsers(self, lim):
+    p = _parsers(dec_press=0)
+    p[Bus.pt].vl["Lane_Assist_Data3_FD1"] = {"LatCtlLim_D_Stat": lim}
+    return p
+
+  def test_canfd_reads_the_flag(self):
+    from opendbc.car.ford.values import FordFlags
+    CP = structs.CarParams()
+    CP.flags = int(FordFlags.CANFD)
+    ext = CarStateExt(CP, structs.CarParamsSP())
+    ext.update(_cs(False), structs.CarStateSP(), self._parsers(2))
+    self.assertEqual(ext.lat_ctl_lim_stat, 2)
+
+  def test_can_stays_zero(self):
+    ext = CarStateExt(structs.CarParams(), structs.CarParamsSP())
+    ext.update(_cs(False), structs.CarStateSP(), self._parsers(2))
+    self.assertEqual(ext.lat_ctl_lim_stat, 0)

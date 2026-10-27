@@ -189,6 +189,9 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
         self.curvatureDeviationLimited = getattr(self, 'bp_curvature_deviation_limited', False)
         self.humanTurnLateralPaused = self.angle_human_turn_active if _angle_mode else False
         self.stallBlipActive = self.angle_stall_blip_active if _angle_mode else False
+        # BluePilot: which blip path armed the pulse + episode progress (0-3; 3 = gave up).
+        self.stallBlipSource = self.angle_stall_blip_source if _angle_mode else 0
+        self.stallBlipEpisodeCount = self.stall_blip_count if _angle_mode else 0
 
         # BluePilot: angle-mode human-turn override -- send lateral inactive (mode 0) while the
         # driver manually turns, so the PSCM releases cleanly instead of stalling 2-3 s on
@@ -200,7 +203,10 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
         # resets the PSCM's post-override attenuation when the deviation clip deadlocks hands-free.
         lat_active = CC.latActive and not (_angle_mode and (self.angle_human_turn_active or self.angle_stall_blip_active))
         if self.CP.flags & FordFlags.CANFD:
-          mode = 1 if lat_active else 0
+          # BluePilot: angle mode requests PathFollowingExtendedMode (2), the setting the PSCM
+          # Walkthrough's LMC2 path controller runs; curvature mode keeps PathFollowingLimitedMode (1).
+          # ford.h only checks mode != 0.
+          mode = (2 if _angle_mode else 1) if lat_active else 0
           counter = (self.frame // CarControllerParams.STEER_STEP) % 0x10
           can_sends.append(fordcan_ext.create_lat_ctl2_msg(
             self.packer, self.CAN, mode, lat.ramp_type, lat.precision_type,

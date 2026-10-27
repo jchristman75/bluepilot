@@ -19,6 +19,8 @@ if is_bluepilot():
   from bluepilot.ui.layouts.home_bp import HomeLayoutBP as HomeLayout
   from openpilot.selfdrive.ui.bp.onroad.augmented_road_view_bp import AugmentedRoadViewBP as AugmentedRoadView
   from bluepilot.ui.widgets.debug import ControlsDebugPanel
+  from bluepilot.ui.widgets.charging_overlay_panel import ChargingOverlayPanel
+  from openpilot.selfdrive.ui.bp.charging.auto_open import charging_auto_open
 
 if gui_app.sunnypilot_ui():
   from openpilot.selfdrive.ui.sunnypilot.layouts.settings.settings import SettingsLayoutSP as SettingsLayout
@@ -57,6 +59,10 @@ class MainLayout(Widget):
     if is_bluepilot():
       self._debug_panel = ControlsDebugPanel()
       self._debug_toggled_this_frame = False
+      self._charging_panel = ChargingOverlayPanel()
+      self._charging_toggled_this_frame = False
+      # BluePilot: a charge session starting (or the UI coming up mid-charge) opens the panel
+      charging_auto_open.set_opener(self._charging_panel.show_panel)
 
     # Set callbacks
     self._setup_callbacks()
@@ -71,14 +77,16 @@ class MainLayout(Widget):
   def _render(self, _):
     if is_bluepilot():
       self._debug_toggled_this_frame = False
+      self._charging_toggled_this_frame = False
     self._handle_onroad_transition()
     self._render_main_content()
 
   def _setup_callbacks(self):
     self._sidebar.set_callbacks(on_settings=self._on_settings_clicked,
                                 on_flag=self._on_bookmark_clicked,
-                                # BluePilot: sidebar debug and network buttons
+                                # BluePilot: sidebar debug, charging, and network buttons
                                 **({"on_debug": self._on_debug_clicked,
+                                    "on_charging": self._on_charging_clicked,
                                     "on_network": lambda: self.open_settings(PanelType.NETWORK)} if is_bluepilot() else {}),
                                 open_settings=lambda: self.open_settings(PanelType.TOGGLES))
     self._layouts[MainState.HOME]._setup_widget.set_open_settings_callback(lambda: self.open_settings(PanelType.FIREHOSE))
@@ -132,8 +140,9 @@ class MainLayout(Widget):
       self._pm.send(service, msg)
 
   def _on_onroad_clicked(self):
-    # BluePilot: suppress onroad clicks when debug panel is visible
-    if is_bluepilot() and (self._debug_toggled_this_frame or self._debug_panel.is_panel_visible):
+    # BluePilot: suppress onroad clicks when debug or charging panel is visible
+    if is_bluepilot() and (self._debug_toggled_this_frame or self._debug_panel.is_panel_visible or
+                            self._charging_toggled_this_frame or self._charging_panel.is_panel_visible):
       return
     self._sidebar.set_visible(not self._sidebar.is_visible)
 
@@ -141,6 +150,11 @@ class MainLayout(Widget):
   def _on_debug_clicked(self):
     self._debug_panel.toggle_visibility()
     self._debug_toggled_this_frame = True
+
+  # BluePilot: toggle charging panel from sidebar button
+  def _on_charging_clicked(self):
+    self._charging_panel.toggle_visibility()
+    self._charging_toggled_this_frame = True
 
   def _render_main_content(self):
     # Render sidebar
@@ -153,3 +167,10 @@ class MainLayout(Widget):
     # BluePilot: render debug panel overlay on top of onroad view
     if is_bluepilot() and self._current_mode == MainState.ONROAD and self._debug_panel.is_panel_visible:
       self._debug_panel.render(content_rect)
+
+    # BluePilot: render charging panel overlay. Deliberately NOT restricted to
+    # MainState.ONROAD - charging is typically detected while parked (car "on" but
+    # not driving), which can leave _current_mode at HOME/SETTINGS. The overlay
+    # renders on top of whatever content is currently showing.
+    if is_bluepilot() and self._charging_panel.is_panel_visible:
+      self._charging_panel.render(content_rect)

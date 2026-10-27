@@ -371,6 +371,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"BpShowLateralControl", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"BPDisableLaneLineStatusColor", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"BPUIDebugLog", {PERSISTENT, BOOL, "0"}},
+    {"BPChargeCanAwake", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION, BOOL}},  // bp_chargemon -> pandad: keep CAN on offroad
     {"Blindspot", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"BlinkerPauseLaneChange", {PERSISTENT | BACKUP, BOOL, "0"}},
 

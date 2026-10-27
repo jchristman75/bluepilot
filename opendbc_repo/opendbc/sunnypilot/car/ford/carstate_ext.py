@@ -68,6 +68,25 @@ def get_hev_engine_on_reason_text(reason_value):
   return engine_on_reasons.get(int(reason_value), "Unknown")
 
 
+# BluePilot: charge status text lookup
+def get_charge_status_text(status_value):
+  """Convert ChrgStat_D_ActlMntr value to human-readable text.
+
+  These values come from the MtrTrac_Data2_FD1 CAN message (ChrgStat_D_ActlMntr signal).
+  """
+  charge_statuses = {
+    0: "",
+    1: "Charging (Parked)",
+    2: "Charging (Driving)",
+    3: "Not Charging",
+    4: "Charge Complete",
+    5: "Not Used",
+    6: "No Data",
+    7: "Faulty",
+  }
+  return charge_statuses.get(int(status_value), "Unknown")
+
+
 class CarStateExt:
   """
   Extension class for Ford CarState to parse cruise control buttons.
@@ -94,6 +113,10 @@ class CarStateExt:
     self.cruise_enabled_prev = False
     # Track if mainCruise was pressed recently (to handle delayed cruise enable)
     self.main_cruise_pressed_recently = False
+    # BluePilot: the PSCM's own limit flag (Lane_Assist_Data3_FD1 LatCtlLim_D_Stat: 0 not reached,
+    # 1 close, 2 reached, 3 with driver active), read by lateral_angle_ext's anti-windup. CAN FD only;
+    # always 0 elsewhere.
+    self.lat_ctl_lim_stat = 0
 
   def update(self, ret: structs.CarState, ret_sp: structs.CarStateSP, can_parsers: dict[StrEnum, CANParser]):
     """
@@ -109,6 +132,9 @@ class CarStateExt:
       can_parsers: Dictionary of CAN parsers by bus
     """
     cp = can_parsers[Bus.pt]
+
+    if self.CP.flags & FordFlags.CANFD:
+      self.lat_ctl_lim_stat = int(cp.vl["Lane_Assist_Data3_FD1"]["LatCtlLim_D_Stat"])
 
     button_events = []
     cruise_enabled = ret.cruiseState.enabled
@@ -320,6 +346,7 @@ class CarStateExt:
     hybrid_drive = dat.carStateBP.hybridDrive
     hybrid_battery = dat.carStateBP.hybridBattery
     brake_light_status = dat.carStateBP.brakeLightStatus
+    charging = dat.carStateBP.charging
 
     # Initialize with defaults
     hybrid_drive.dataAvailable = False
@@ -341,6 +368,13 @@ class CarStateExt:
 
     brake_light_status.dataAvailable = False
     brake_light_status.brakeLightsOn = False
+
+    charging.dataAvailable = False
+    charging.chargingActive = False
+    charging.statusText = ""
+    charging.statusValue = 0
+    charging.powerKw = 0.0
+    charging.powerLimitKw = 0.0
 
     # Brake light status — try BCM message first, then fallback to BrakeSysFeatures_2
     brake_lights_detected = False
@@ -410,8 +444,16 @@ class CarStateExt:
           hybrid_battery.voltHighLimit = batt_data1["BattTrac_U_LimHi"]
           hybrid_battery.voltLowLimit = batt_data1["BattTrac_U_LimLo"]
           hybrid_battery.voltActual = batt_data1["BattTrac_U_Actl"]
-          # BattTrac_I_Actl reads a constant -750 A on the Mach-E (bytes 0-1 of 0x07A are always 0)
-          if self.CP.carFingerprint == CAR.FORD_MUSTANG_MACH_E_MK1:
+          # BattTrac_I_Actl reads a constant -750 A on the Mach-E (bytes 0-1 of 0x07A are always 0).
+          # Verified driving AND charging: in route 0000041c (DC fast charge, 32.5 -> 50.6% SOC)
+          # 0x07A arrives at 100 Hz on bus 0 the whole time and BattTrac_U_Actl in the same frame
+          # tracks 361.5 -> 369.0 V, while the 15-bit current field is raw 0 in every frame. No
+          # other HV current signal in the DBC is live either, so there is no pack current to be
+          # had on this platform from the DBC. The real pack current is HV_Battery_Current_BP (0x7B).
+          if self.CP.flags & FordFlags.HV_CURRENT_DATA:
+            # pack current is + when discharging; UI wants positive = charging, so negate
+            hybrid_battery.ampsActual = -cp.vl["HV_Battery_Current_BP"]["BattTracI_Actl_BP"]
+          elif self.CP.carFingerprint == CAR.FORD_MUSTANG_MACH_E_MK1:
             # motor current is positive when motoring; UI wants positive = charging, so negate
             hybrid_battery.ampsActual = -cp.vl["MtrTracData_1_FD1"]["MtrTrac2_I_Actl"]
           else:
@@ -419,6 +461,34 @@ class CarStateExt:
           hybrid_battery.socMinPerc = batt_data3["BattTracSoc_Pc_MnPrtct"]
           hybrid_battery.socMaxPerc = batt_data3["BattTracSoc_Pc_MxPrtct"]
           hybrid_battery.socActual = batt_data4["BattTracSoc2_Pc_Actl"]
+    except (KeyError, AttributeError):
+      pass
+
+    # Charging telemetry (Battery_Traction_5_FD1, MtrTrac_Data2_FD1)
+    try:
+      if self.CP.flags & FordFlags.CHARGING_DATA:
+        batt_data5 = cp.vl["Battery_Traction_5_FD1"]
+        mtr_trac_data2 = cp.vl["MtrTrac_Data2_FD1"]
+
+        if all(x is not None for x in [batt_data5, mtr_trac_data2]):
+          charging.dataAvailable = True
+          status_value = int(mtr_trac_data2["ChrgStat_D_ActlMntr"])
+          charging.statusValue = status_value
+          charging.statusText = get_charge_status_text(status_value)
+          charging.chargingActive = status_value in (1, 2)  # ChargingInParkingState, ChargingInDrivingState
+          # Battery_Traction_5's four signals are charge/discharge power LIMITS, not flow: ChrgInst
+          # reads 50-127 kW while driving, and on a DC fast charge (route 00000464) it rose
+          # 122 -> 135 kW while the pack actually took 115 -> 89 kW. It is what the pack will accept.
+          charging.powerLimitKw = batt_data5["BattTrac2_Pw_ChrgInst"] / 1000.0
+          if self.CP.flags & FordFlags.HV_CURRENT_DATA:
+            # Real pack power = pack voltage x pack current (HV_Battery_Current_BP, + = discharge); report
+            # charging as positive. Route 00000464: 83 -> 67 kW, while ChrgInst read 122 -> 135.
+            pack_a = cp.vl["HV_Battery_Current_BP"]["BattTracI_Actl_BP"]
+            pack_v = cp.vl["Battery_Traction_1_FD1"]["BattTrac_U_Actl"]
+            charging.powerKw = max(0.0, -pack_a * pack_v / 1000.0)
+          else:
+            # No verified pack-power signal on this platform: the limit is the best there is.
+            charging.powerKw = charging.powerLimitKw
     except (KeyError, AttributeError):
       pass
 

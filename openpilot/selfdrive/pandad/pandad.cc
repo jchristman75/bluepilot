@@ -175,7 +175,7 @@ void fill_panda_can_state(cereal::PandaState::PandaCanState::Builder &cs, const 
   cs.setCanCoreResetCnt(can_health.can_core_reset_cnt);
 }
 
-std::optional<bool> send_panda_states(PubMaster *pm, Panda *panda, bool is_onroad, bool spoofing_started, bool always_offroad) {
+std::optional<bool> send_panda_states(PubMaster *pm, Panda *panda, bool is_onroad, bool spoofing_started, bool always_offroad, bool charge_can_awake) {
   // build msg
   MessageBuilder msg;
   auto evt = msg.initEvent();
@@ -208,7 +208,9 @@ std::optional<bool> send_panda_states(PubMaster *pm, Panda *panda, bool is_onroa
     panda->set_safety_model(cereal::CarParams::SafetyModel::NO_OUTPUT);
   }
 
-  bool power_save_desired = !ignition_local;
+  // BluePilot: keep the CAN transceivers on while offroad when bp_chargemon asks (car off, charging)
+  bool power_save_desired = !ignition_local && !charge_can_awake;
+  // End BluePilot
   if (((health.flags_pkt & HEALTH_FLAG_POWER_SAVE_ENABLED) != 0U) != power_save_desired) {
     panda->set_power_saving(power_save_desired);
   }
@@ -272,8 +274,8 @@ void send_peripheral_state(Panda *panda, PubMaster *pm) {
   pm->send("peripheralState", msg);
 }
 
-void process_panda_state(Panda *panda, PubMaster *pm, bool engaged, bool engaged_mads, bool is_onroad, bool spoofing_started, bool always_offroad) {
-  auto ignition_opt = send_panda_states(pm, panda, is_onroad, spoofing_started, always_offroad);
+void process_panda_state(Panda *panda, PubMaster *pm, bool engaged, bool engaged_mads, bool is_onroad, bool spoofing_started, bool always_offroad, bool charge_can_awake) {
+  auto ignition_opt = send_panda_states(pm, panda, is_onroad, spoofing_started, always_offroad, charge_can_awake);
   if (!ignition_opt) {
     LOGE("Failed to get ignition_opt");
     return;
@@ -387,6 +389,10 @@ void pandad_run(Panda *panda) {
   bool engaged_mads = false;
   bool is_onroad = false;
   bool always_offroad = false;
+  // BluePilot: offroad charge monitor CAN wake request
+  Params bp_params;
+  bool charge_can_awake = false;
+  // End BluePilot
 
   // Main loop: receive CAN first, then process lower priority panda and peripheral state.
   while (!do_exit && check_connected(panda)) {
@@ -406,7 +412,10 @@ void pandad_run(Panda *panda) {
       }
       engaged_mads = process_mads_heartbeat(&sm);
       always_offroad = panda_safety.getOffroadMode();
-      process_panda_state(panda, &pm, engaged, engaged_mads, is_onroad, spoofing_started, always_offroad);
+      // BluePilot: offroad charge monitor CAN wake request
+      charge_can_awake = !is_onroad && bp_params.getBool("BPChargeCanAwake");
+      // End BluePilot
+      process_panda_state(panda, &pm, engaged, engaged_mads, is_onroad, spoofing_started, always_offroad, charge_can_awake);
       panda_safety.configureSafetyMode(is_onroad);
     }
 

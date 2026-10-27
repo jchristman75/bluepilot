@@ -491,6 +491,11 @@ struct ControllerStateBP @0xcd96dafb67a082d0 {
   curvatureDeviationLimited @3 :Bool;
   humanTurnLateralPaused @4 :Bool;  # angle mode: lateral forced inactive (mode 0) during a manual turn
   stallBlipActive @5 :Bool;  # angle mode: brief mode-0 pulse resetting PSCM authority after a post-override stall
+  # BluePilot: which path armed the mode-0 pulse (0 = none, 1 = hand-off after a sustained
+  # press/release, 2 = reactive stall detector) -- distinguishes the two blip paths in rlogs.
+  stallBlipSource @55 :UInt8;
+  # BluePilot: pulses fired in the current stall episode (0-3); 3 = the detector gave up.
+  stallBlipEpisodeCount @56 :UInt8;
 
   # BluePilot: full BluePilot-menu settings snapshot, for PlotJuggler/route analysis without
   # reading logs. "bms" = BluePilot Menu Setting. One field per on-device menu item (TICI + MICI
@@ -578,6 +583,7 @@ struct CarStateBP @0xb057204d7deadf3f {
   hybridDrive @0 :HybridDrive;
   hybridBattery @1 :HybridBattery;
   brakeLightStatus @2 :BrakeLightStatus;
+  charging @3 :Charging;
 
   struct HybridDrive {
     dataAvailable @0 :Bool;
@@ -603,6 +609,15 @@ struct CarStateBP @0xb057204d7deadf3f {
   struct BrakeLightStatus {
     dataAvailable @0 :Bool;
     brakeLightsOn @1 :Bool;
+  }
+
+  struct Charging {
+    dataAvailable @0 :Bool;
+    chargingActive @1 :Bool;  # true when ChrgStat_D_ActlMntr indicates an active charge (parked or driving)
+    statusText @2 :Text;
+    statusValue @3 :UInt8;  # Raw numeric value for PlotJuggler compatibility
+    powerKw @4 :Float32;  # power into the HV pack while charging (Mach-E, F-150 Lightning: pack V x HV_Battery_Current_BP; else = powerLimitKw)
+    powerLimitKw @5 :Float32;  # what the pack will accept right now (BattTrac2_Pw_ChrgInst)
   }
 }
 

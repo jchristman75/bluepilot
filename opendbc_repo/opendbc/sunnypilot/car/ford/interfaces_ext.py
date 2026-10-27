@@ -13,7 +13,11 @@ Includes:
 """
 
 from opendbc.car import Bus, structs
-from opendbc.car.ford.values import DBC, FordFlags, RADAR, FordSafetyFlags
+from opendbc.car.ford.values import CAR, DBC, FordFlags, RADAR, FordSafetyFlags
+
+
+# BluePilot: platforms whose 0x7B pack-current signal has been checked against real data (see below).
+HV_CURRENT_VERIFIED_CARS = frozenset({CAR.FORD_MUSTANG_MACH_E_MK1, CAR.FORD_F_150_LIGHTNING_MK1})
 
 
 def apply_ford_ext_params(ret: structs.CarParams, CP, car_fw, fingerprint, alpha_long: bool) -> None:
@@ -63,6 +67,21 @@ def apply_ford_ext_params(ret: structs.CarParams, CP, car_fw, fingerprint, alpha
   # All three must be present for full HEV battery telemetry
   if 0x07A in fingerprint[CAN.main] and 0x24B in fingerprint[CAN.main] and 0x24C in fingerprint[CAN.main]:
     ret.flags |= int(FordFlags.HEV_BATTERY_DATA)
+
+  # BluePilot: real HV pack current (HV_Battery_Current_BP, 0x7B, 0.05 A/bit). Reverse-engineered on a
+  # Mach-E SR: it matches Ford's own BattTrac_I_EstVsc (0x185) at r=0.9997 while driving, and integrates to
+  # a constant 195-198 Ah per 100% SOC over drives and DC charges (96s3p pack). On the commaCarSegments
+  # fleet it gives the two pack sizes cleanly on every car -- Mach-E ~195 / ~260 Ah, F-150 Lightning ~325 /
+  # ~405 Ah -- so it is the same signal on both. No ICE/hybrid Ford in the fleet sends 0x7B. Platforms not
+  # verified keep reporting the charge-power limit (see carstate_ext).
+  if candidate in HV_CURRENT_VERIFIED_CARS and 0x7B in fingerprint[CAN.main]:
+    ret.flags |= int(FordFlags.HV_CURRENT_DATA)
+
+  # BluePilot: BEV/PHEV charging telemetry. MtrTrac_Data2 (0x442) has charge status; the power comes from
+  # Battery_Traction_5 (0x24D, the pack's charge power limits) or from 0x7B above. The F-150 Lightning
+  # sends 0x442 and 0x7B but no 0x24D.
+  if 0x442 in fingerprint[CAN.main] and (0x24D in fingerprint[CAN.main] or ret.flags & FordFlags.HV_CURRENT_DATA):
+    ret.flags |= int(FordFlags.CHARGING_DATA)
 
 
 def apply_ford_ext_params_sp(ret: structs.CarParamsSP) -> None:

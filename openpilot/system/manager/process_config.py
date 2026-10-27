@@ -194,6 +194,8 @@ if is_bluepilot():
   procs += [
     PythonProcess("bp_portal", "bluepilot.backend.bp_portal", _bp_portal_enabled),
     PythonProcess("bp_route_preprocessor", "bluepilot.backend.routes.preprocessor", _bp_route_preprocessor_enabled),
+    # Offroad charge monitor: keeps charge telemetry flowing after the car is turned off mid-charge
+    PythonProcess("bp_chargemon", "bluepilot.selfdrive.car.bp_chargemon", always_run),
   ]
 
 if os.path.exists("../../sunnypilot/sunnylink/uploader.py"):
