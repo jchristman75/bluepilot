@@ -2144,16 +2144,19 @@ class WebRoutesHandler(BaseHTTPRequestHandler):
                         try:
                             from opendbc.car.structs import car
                             car_params_bytes = params.get("CarParams")
-                            car_params = car.CarParams.from_bytes(car_params_bytes)
+                            from openpilot.cereal.messaging import log_from_bytes
+                            car_params = log_from_bytes(car_params_bytes, car.CarParams)
 
                             # Add vehicle-specific state
                             state['hasLongitudinalControl'] = car_params.openpilotLongitudinalControl
-                            state['hasBlindSpotMonitoring'] = len(car_params.enableBsm) > 0
+                            # upstream replaced enableBsm with per-brand flags; Ford's is FordFlags.HAS_BSM
+                            from opendbc.car.ford.values import FordFlags
+                            state['hasBlindSpotMonitoring'] = car_params.brand == 'ford' and bool(car_params.flags & FordFlags.HAS_BSM)
                             state['isAngleSteering'] = car_params.steerControlType == car.CarParams.SteerControlType.angle
                             state['isPcmCruise'] = car_params.pcmCruise
 
                             # Brand detection
-                            car_name = car_params.carName.lower() if car_params.carName else ''
+                            car_name = car_params.brand.lower() if car_params.brand else ''
                             car_fingerprint = car_params.carFingerprint.lower() if car_params.carFingerprint else ''
 
                             state['brandEquals'] = {}

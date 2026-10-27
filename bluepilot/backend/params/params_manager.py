@@ -625,7 +625,7 @@ def decode_bytes_param(key: str, raw_bytes: bytes) -> Optional[Dict[str, Any]]:
             with car.CarParams.from_bytes(raw_bytes) as car_params:
                 cp_dict = car_params.to_dict()
                 summary = {
-                    "carName": car_params.carName or "",
+                    "carName": car_params.brand or "",  # carName was renamed to brand upstream
                     "carFingerprint": car_params.carFingerprint or "",
                     "carVin": car_params.carVin or "",
                     "openpilotLongitudinalControl": bool(car_params.openpilotLongitudinalControl),
