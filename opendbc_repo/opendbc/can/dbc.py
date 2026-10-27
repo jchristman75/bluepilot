@@ -203,8 +203,12 @@ def tesla_setup_signal(sig: Signal, dbc_name: str, line_num: int) -> None:
 
 
 def ford_setup_signal(sig: Signal, dbc_name: str, line_num: int) -> None:
-  if sig.name in ("VehVActlBrk_No_Cnt", "VehVActlEng_No_Cnt", "VehRollYaw_No_Cnt"):
+  # BluePilot: VehVActlEng_No_Cnt (0x202) is not a +1 counter on every PCM -- the Mach-E HEV PCM
+  # steps it by 2 (5, 7, 9, ...), which fails the parser's counter check on every frame and drops
+  # canValid. Panda safety never checked it either; its checksum is still verified.
+  if sig.name in ("VehVActlBrk_No_Cnt", "VehRollYaw_No_Cnt"):
     sig.type = SignalType.COUNTER
+  # End BluePilot
 
 
 @dataclass
