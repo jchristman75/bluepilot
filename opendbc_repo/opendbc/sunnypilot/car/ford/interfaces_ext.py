@@ -38,7 +38,6 @@ def apply_ford_ext_params(ret: structs.CarParams, CP, car_fw, fingerprint, alpha
 
   # BluePilot: tuning overrides
   ret.steerActuatorDelay = 0.22  # upstream: 0.2
-  ret.longitudinalTuning.kpV = [0.]
 
   # BluePilot: DELPHI_MRR_64 radar support
   candidate = ret.carFingerprint
