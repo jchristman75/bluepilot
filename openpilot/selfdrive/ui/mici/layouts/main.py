@@ -85,14 +85,19 @@ class MiciMainLayout(Scroller):
       alert_count_callback=self._alerts_layout.active_alerts,
       alert_icon_callback=self._alerts_layout.highest_severity_icon,
     )
-    for layout in (self._car_onroad_layout, self._body_onroad_layout):
-      layout.set_click_callback(lambda: self._scroll_to(self._home_layout))
+    # BluePilot: single onroad layout (no comma body split)
+    self._onroad_layout.set_click_callback(lambda: self._scroll_to(self._home_layout))
 
     device.add_interactive_timeout_callback(self._on_interactive_timeout)
 
   def _scroll_to(self, layout: Widget):
     layout_x = int(layout.rect.x)
     self._scroller.scroll_to(layout_x, smooth=True)
+
+  def _update_state(self):
+    super()._update_state()
+    # TODO: Hack to run alert updates while not in view. Add a nav stack tick?
+    self._alerts_layout._update_state()
 
   def _render(self, _):
     if not self._setup:
