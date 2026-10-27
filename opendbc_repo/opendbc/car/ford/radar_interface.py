@@ -197,7 +197,6 @@ class RadarInterface(RadarInterfaceBase):
 
       yRel = msg['CmbbObjDistLat_L_Actl']
       vRel = msg['CmbbObjRelLong_V_Actl']
-      yvRel = msg['CmbbObjRelLat_V_Actl']
       if not new_track:
         # if this is a newly created track - we don't have historical data so skip it
         # if we are on the same track
@@ -222,9 +221,6 @@ class RadarInterface(RadarInterfaceBase):
       self.pts[0].dRel = dRel  # from front of car
       self.pts[0].yRel = yRel  # in car frame's y axis, left is positive
       self.pts[0].vRel = vRel
-      self.pts[0].aRel = float('nan')
-      self.pts[0].yvRel = yvRel
-      self.pts[0].measured = True
     else:
       if 0 in self.pts:
         del self.pts[0]
