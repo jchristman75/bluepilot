@@ -111,8 +111,8 @@ def extract_segment(args):
       elif w == 'vehicleParameters':
         p = m.vehicleParameters
         lp = [p.roll, p.angleOffsetDeg, p.steerRatio]
-      elif w == 'livePose':
-        pose = [m.livePose.angularVelocityDevice.z, m.livePose.accelerationDevice.y]
+      elif w == 'deviceMotion':
+        pose = [m.deviceMotion.angularVelocityDevice.z, m.deviceMotion.accelerationDevice.y]
       elif w == 'modelV2':
         mv = m.modelV2
         if len(mv.laneLines) == 4 and len(mv.laneLines[1].y):

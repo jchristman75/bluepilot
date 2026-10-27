@@ -83,11 +83,20 @@ def steady_state(d):
   return float(c[0]), float(c[1]), float(c[2] / c[1])
 
 
+# Curb mass by platform: upstream dropped CarSpecs.mass ("Remove car mass", #3858). Values are
+# the CarSpecs masses from before that change.
+PLATFORM_MASS = {
+  'FORD_BRONCO_SPORT_MK1': 1625, 'FORD_EDGE_MK2': 1933, 'FORD_ESCAPE_MK4': 1750, 'FORD_ESCAPE_MK4_5': 1750,
+  'FORD_EXPLORER_MK6': 2050, 'FORD_EXPEDITION_MK4': 2000, 'FORD_F_150_MK14': 3334, 'FORD_F_150_LIGHTNING_MK1': 2948, 'FORD_FOCUS_MK4': 1350,
+  'FORD_MONDEO_MK5': 1550, 'FORD_MAVERICK_MK1': 1650, 'FORD_MUSTANG_MACH_E_MK1': 2200, 'FORD_RANGER_MK2': 2000,
+}
+
+
 def fit_platform(platform, d, workers):
   spec = CAR[platform].config.specs
   a0, ck, kus = steady_state(d)
   wb = spec.wheelbase
-  p = PSCMParams(pscm_ck=ck, pscm_kus=kus, veh_mass=spec.mass, veh_wheelbase=wb, veh_cg_front=0.44,
+  p = PSCMParams(pscm_ck=ck, pscm_kus=kus, veh_mass=PLATFORM_MASS[str(platform)], veh_wheelbase=wb, veh_cg_front=0.44,
                  veh_sr=float(np.clip(ck * np.pi / 180 / wb, 8, 25)), veh_us=kus * wb, veh_offset_deg=a0,
                  angle_offset_deg=a0, veh_roll=0.0, bank_comp=0.0, c1_slew=1.0)
   stage_b = [s for s in fit.STAGE_B if s[0] != 'veh_roll']
