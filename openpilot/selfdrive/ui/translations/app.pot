@@ -459,7 +459,7 @@ msgid "Welcome to bluepilot"
 msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/onboarding.py
-msgid "You must accept the Terms of Service to use sunnypilot. Read the latest terms at https://sunnypilot.ai/terms before continuing."
+msgid "You must accept the Terms of Service to use bluepilot. Read the latest terms at https://sunnypilot.ai/terms before continuing."
 
 msgid "Welcome to openpilot"
 msgstr ""
