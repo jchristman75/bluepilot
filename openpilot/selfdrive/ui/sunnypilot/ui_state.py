@@ -15,6 +15,7 @@ from openpilot.sunnypilot.models.helpers import ACTIVE_BUNDLE_KEYS, get_active_s
 from openpilot.sunnypilot.sunnylink.sunnylink_state import SunnylinkState
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.sunnypilot.widgets.screen_saver import ScreenSaverSP
+from openpilot.common.bluepilot import is_bluepilot  # BluePilot: screensaver swap
 
 OpenpilotState = log.SelfdriveState.OpenpilotState
 MADSState = custom.ModularAssistiveDrivingSystem.ModularAssistiveDrivingSystemState
@@ -42,7 +43,13 @@ class UIStateSP:
 
     self.sunnylink_state = SunnylinkState()
 
-    self.screensaver = ScreenSaverSP(params=self.params)
+    # BluePilot: bouncing BluePilot logo instead of the sunnypilot text
+    if is_bluepilot():
+      from openpilot.bluepilot.ui.widgets.screen_saver_bp import ScreenSaverBP
+      self.screensaver = ScreenSaverBP(params=self.params)
+    else:
+      self.screensaver = ScreenSaverSP(params=self.params)
+    # End BluePilot
     self.screensaver_enabled: bool = False
 
     self.active_bundle = None
