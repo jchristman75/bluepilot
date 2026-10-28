@@ -39,7 +39,10 @@ from openpilot.selfdrive.pandad import can_capnp_to_list
 
 PUBLISH_HZ = 10
 ONROAD_CHARGING_WINDOW_S = 10.0  # charging this recently when ignition dropped -> keep monitoring
-PROBE_INTERVAL_S = 300.0         # offroad and idle: wake CAN this often to look for a charge
+# Offroad and idle: wake CAN this often to look for a charge (0 = never). Off: waking CAN every 5 min on a
+# parked, locked car is the suspected cause of the Mach-E alarm going off (2026-10-28). The ignition-drop
+# path (car turned off mid-charge) still monitors.
+PROBE_INTERVAL_S = 0.0
 PROBE_WINDOW_S = 15.0            # how long a probe listens before giving up
 STATUS_STALE_S = 2.0             # MtrTrac_Data2_FD1 (charge status) older than this = no data
 INACTIVE_RELEASE_S = 60.0        # charging inactive this long -> release CAN (UI grace is 15 s)
@@ -151,7 +154,7 @@ class ChargeMonitor:
         self.last_probe_t = now
 
     if self.mode == "idle":
-      if now - self.last_probe_t >= PROBE_INTERVAL_S:
+      if PROBE_INTERVAL_S > 0.0 and now - self.last_probe_t >= PROBE_INTERVAL_S:
         self._wake("probe", now)
       return
 

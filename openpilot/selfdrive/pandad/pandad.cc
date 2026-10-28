@@ -205,8 +205,14 @@ std::optional<bool> send_panda_states(PubMaster *pm, Panda *panda, bool is_onroa
 
   bool ignition_local = ((health.flags_pkt & (HEALTH_FLAG_IGNITION_LINE | HEALTH_FLAG_IGNITION_CAN)) != 0U) && !always_offroad;
 
+  // BluePilot: while bp_chargemon holds CAN awake with the car off, keep the panda listen-only (SILENT: no
+  // ACKs, no error frames). NO_OUTPUT leaves the CAN controllers active, so the comma acted as a live node
+  // on a sleeping/locked car's network -- suspected of setting off the Mach-E alarm.
+  bool charge_listen_only = !ignition_local && charge_can_awake;
+  // End BluePilot
+
   // Make sure CAN buses are live: safety_setter_thread does not work if Panda CAN are silent and there is only one other CAN node
-  if (health.safety_mode_pkt == (uint8_t)(cereal::CarParams::SafetyModel::SILENT)) {
+  if (health.safety_mode_pkt == (uint8_t)(cereal::CarParams::SafetyModel::SILENT) && !charge_listen_only) {  // BluePilot: && !charge_listen_only
     panda->set_safety_model(cereal::CarParams::SafetyModel::NO_OUTPUT);
   }
 
@@ -219,9 +225,12 @@ std::optional<bool> send_panda_states(PubMaster *pm, Panda *panda, bool is_onroa
 
   // set safety mode to NO_OUTPUT when car is off or we're not onroad. ELM327 is an alternative if we want to leverage athenad/connect
   bool should_close_relay = !ignition_local || !is_onroad;
-  if (should_close_relay && (health.safety_mode_pkt != (uint8_t)(cereal::CarParams::SafetyModel::NO_OUTPUT))) {
-    panda->set_safety_model(cereal::CarParams::SafetyModel::NO_OUTPUT);
+  // BluePilot: listen-only instead of NO_OUTPUT while the charge monitor holds CAN awake (see above)
+  const auto offroad_safety = charge_listen_only ? cereal::CarParams::SafetyModel::SILENT : cereal::CarParams::SafetyModel::NO_OUTPUT;
+  if (should_close_relay && (health.safety_mode_pkt != (uint8_t)(offroad_safety))) {
+    panda->set_safety_model(offroad_safety);
   }
+  // End BluePilot
 
   if (!panda->comms_healthy()) {
     evt.setValid(false);
