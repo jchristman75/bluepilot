@@ -484,7 +484,9 @@ class TestLeadLagShaping(unittest.TestCase):
     for _ in range(400):
       self._update(k, k, v=v)
     K_steady = self.ext.curvature_factor
-    self.assertAlmostEqual(K_steady, float(np.interp(k, [0.0007, 0.001], [self.ext.low_gain_calc, self.ext.high_gain_calc])), places=4)
+    lo, hi = lateral_angle_ext._GAIN_RAMP_KAPPA
+    expected = float(np.interp(np.log(k), np.log([lo, hi]), [self.ext.low_gain_calc, self.ext.high_gain_calc]))
+    self.assertAlmostEqual(K_steady, expected, places=4)
     Ks = []
     for i in range(40):  # 2 s of +/-1.5e-4 ripple at 0.5 Hz
       self._update(k + 1.5e-4 * math.sin(2 * math.pi * 0.5 * i * 0.05), k, v=v)

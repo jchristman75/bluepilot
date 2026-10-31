@@ -92,14 +92,19 @@ _SMALL_CURV_GAIN_CANFD_SUV = 1.15
 # gain 1.08-1.14 vs 0.92-0.97, straight-road yaw weave +20% at 0.2-0.25 Hz, and the plan itself moving
 # 20-30% more -- the planner loop the harness can't see. Full gain to 22 m/s, none from 27 m/s.
 _SMALL_CURV_GAIN_FADE_V = (22.0, 27.0)  # m/s
-# The low/high curvature gain blend (curvature_factor) ramps over |kappa| 0.0007-0.001, i.e. 0.7-1.0 m/s^2
-# at 72 mph -- where most long highway curves sit. Evaluated on the instantaneous kappa, the wire's
-# incremental gain there is K + kappa*dK/dkappa = 1.4-1.8 (gain never above 1.19 on average), so plan
-# ripple inside such a curve is amplified: routes 000004b5/b7 (2026-10-24, 114 hands-free highway min),
-# car response to 0.07-1.5 Hz plan ripple 1.15-1.24 inside the ramp vs 1.03-1.10 on either side -- the
-# "wavering through long curves". The gain is looked up on |kappa| low-passed with this time constant
-# instead, so steady curves keep the same gain while ripple sees a fixed one. 0 = instantaneous (old).
-_GAIN_KAPPA_TAU_S = 2.0
+# The low/high curvature gain blend (curvature_factor). On the old narrow linear ramp (|kappa| 0.0007-0.001,
+# i.e. 0.7-1.0 m/s^2 at 72 mph, where most long highway curves sit) the wire's incremental gain was
+# K + kappa*dK/dkappa = 1.4-1.8, so plan ripple inside such a curve was amplified: routes 000004b5/b7
+# (2026-10-24), car response to 0.07-1.5 Hz plan ripple 1.15-1.24 inside the ramp vs 1.03-1.10 either side --
+# the "wavering through long curves". A 2 s low-pass on the lookup fixed the ripple but delayed the gain on
+# every curve entry (+0.14 s plan->wire on route 000004e6) and ran wider on the highway.
+# Now: blend linear in log(|kappa|) over a wider span (kappa*dK/dkappa = (H - L) / ln(k2 / k1), bounded) plus
+# a short low-pass. Harness, 8 routes / 191 min vs the 2 s low-pass: ripple gain in the old ramp 1.15 vs 1.10
+# (narrow ramp, no low-pass: 1.28), highway weave 0.404 vs 0.396, highway wide p95 2.00 vs 2.15, path rms
+# 0.176 vs 0.185 m, highway curve delivery 0.972 vs 0.962, plan->wire 0.23 vs 0.24 s.
+_GAIN_RAMP_KAPPA = (0.0004, 0.0015)  # |kappa| where the blend leaves low_gain_calc and reaches high_gain_calc
+_GAIN_RAMP_LOG = True                # blend linear in log(|kappa|) (False: linear in |kappa|)
+_GAIN_KAPPA_TAU_S = 0.5              # low-pass on the |kappa| used for the lookup; 0 = instantaneous
 
 _CANFD_BOF_CARS = frozenset({
   CAR.FORD_F_150_MK14,
@@ -825,7 +830,10 @@ class LateralAngleExt:
         self._gain_kappa_slow = _k_abs
       self._gain_kappa_slow += (_STEER_DT / (_STEER_DT + _GAIN_KAPPA_TAU_S)) * (_k_abs - self._gain_kappa_slow)
       _k_abs = self._gain_kappa_slow
-    self.curvature_factor = interp(_k_abs, [0.0007, 0.001], [self.low_gain_calc, self.high_gain_calc])
+    if _GAIN_RAMP_LOG:
+      self.curvature_factor = interp(np.log(max(_k_abs, 1e-9)), np.log(_GAIN_RAMP_KAPPA), [self.low_gain_calc, self.high_gain_calc])
+    else:
+      self.curvature_factor = interp(_k_abs, _GAIN_RAMP_KAPPA, [self.low_gain_calc, self.high_gain_calc])
 
     # Steady-state wire command in curvature units (path_angle / v).
     wire_kappa = kappa_cmd * self.curvature_factor
