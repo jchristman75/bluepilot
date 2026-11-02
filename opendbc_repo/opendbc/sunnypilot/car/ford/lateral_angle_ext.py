@@ -123,8 +123,15 @@ FORD_DBC_PATH_ANGLE_MIN = -0.5
 FORD_DBC_PATH_ANGLE_MAX = 0.5235
 
 
-# Default blend ratio validated on F-150 fleet data (0.5s lookup time).
-_FORD_PATH_ANGLE_BLEND_RATIO_DEFAULT = 0.50
+# Share of the model's predicted curvature (orientationRate at the lookup time) in the command; the rest is
+# the planner's desiredCurvature. Was 0.50 (validated on F-150 fleet data, 0.5 s lookup). With the bp-gpu
+# modeld (upstream lat_action_t / action_t input) orientationRate at the lookup lags desiredCurvature by
+# 0.22-0.24 s (0.02 s on bp-pscm-study), so half the command arrived late: plan->wire 0.39-0.57 s vs 0.12-0.18,
+# plan->car ~0.5 s, and lagd learned the lag. Harness b = 0.5 / 0.25 / 0, bp-gpu highway (4e6, 4f8, 4f9):
+# plan->car 0.48-0.62 / 0.40-0.43 / 0.32-0.35 s, path rms 0.202 / 0.174 / 0.152 m, highway weave
+# 0.61 / 0.51 / 0.46; 8 mixed routes on both branches: path rms 0.168 / 0.161 / 0.155 m, weave
+# 1.28 / 1.27 / 1.31, steady curve delivery -1-2%.
+_FORD_PATH_ANGLE_BLEND_RATIO_DEFAULT = 0.0
 
 # Variable lookup time (VLT): curvature_lookup_time adapts to speed and curvature magnitude.
 # t_lookup = t_base + t_extra_max × speed_factor(v) × kappa_factor(|κ|)
