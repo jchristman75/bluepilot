@@ -31,6 +31,7 @@ MAX_FONT_SIZE = 40
 COMPLICATION_W = 80
 RIGHT_MARGIN = 5
 TOP_MARGIN = 14
+TEXT_CLEARANCE = 10  # gap kept between alert text and the badge
 
 TEXT_COLOR = rl.Color(12, 20, 16, 235)
 # Partly see-through so the road shows behind it; the text keeps a little more weight than the logo.
@@ -61,6 +62,12 @@ class EgpuWattsIcon(Widget):
       self._watts = sm["chestnutState"].powerDrawW
     elif not sm.alive["chestnutState"]:
       self._watts = None
+
+  def reserved_right(self) -> float:
+    """Width from the content rect's right edge that other top-of-screen text should avoid while the badge shows."""
+    if self._alpha_filter.x < 1e-2:
+      return 0.0
+    return RIGHT_MARGIN + COMPLICATION_W / 2 + ICON_W / 2 + TEXT_CLEARANCE
 
   def watts_text(self) -> str:
     return f"{round(self._watts)}W" if self._watts is not None else "--W"

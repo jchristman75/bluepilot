@@ -14,6 +14,7 @@ from openpilot.selfdrive.ui.bp.onroad.driver_state_bp import DriverStateRenderer
 from openpilot.selfdrive.ui.bp.lib.dm_icon_style import DMIconStyle
 from openpilot.selfdrive.ui.bp.mici.onroad.complication import MiciComplication
 from openpilot.selfdrive.ui.bp.mici.onroad.egpu_watts_icon import EgpuWattsIcon
+from openpilot.selfdrive.ui.bp.mici.onroad.alert_renderer_bp import MiciAlertRendererBP
 from openpilot.selfdrive.ui.bp.mici.onroad.confidence_ball_bp import ConfidenceBallMiciBP
 from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
 from openpilot.selfdrive.ui.bp.lib.ui_debug_logger import bp_ui_log
@@ -90,6 +91,8 @@ class MiciAugmentedRoadViewBP(MiciCameraViewBP, AugmentedRoadView, BlindspotRend
     self._complication = MiciComplication()
     # BluePilot: eGPU badge with live wattage, upper right above the complication
     self._egpu_icon = EgpuWattsIcon()
+    # BluePilot: alert text steps around the eGPU badge
+    self._alert_renderer = MiciAlertRendererBP()
 
     self._model_renderer = ModelRendererBP()
     self._lat_debug: LateralDebugMici | None = None
@@ -192,6 +195,7 @@ class MiciAugmentedRoadViewBP(MiciCameraViewBP, AugmentedRoadView, BlindspotRend
       _scene.hero_y_scale = 0.90
       _scene.draw_foreground(self._content_rect, getattr(self, "_bp_hide_camera_view", False))
     if ui_state.started:
+      self._alert_renderer.set_reserved_right(self._egpu_icon.reserved_right())
       self._alert_renderer.render(self._content_rect)
     self._hud_renderer.render(self._content_rect)
 
