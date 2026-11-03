@@ -13,6 +13,7 @@ from openpilot.selfdrive.ui.bp.mici.onroad.hud_renderer_bp import MiciHudRendere
 from openpilot.selfdrive.ui.bp.onroad.driver_state_bp import DriverStateRendererBP
 from openpilot.selfdrive.ui.bp.lib.dm_icon_style import DMIconStyle
 from openpilot.selfdrive.ui.bp.mici.onroad.complication import MiciComplication
+from openpilot.selfdrive.ui.bp.mici.onroad.egpu_watts_icon import EgpuWattsIcon
 from openpilot.selfdrive.ui.bp.mici.onroad.confidence_ball_bp import ConfidenceBallMiciBP
 from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
 from openpilot.selfdrive.ui.bp.lib.ui_debug_logger import bp_ui_log
@@ -87,6 +88,8 @@ class MiciAugmentedRoadViewBP(MiciCameraViewBP, AugmentedRoadView, BlindspotRend
 
     # BluePilot: Add lead car complication widget
     self._complication = MiciComplication()
+    # BluePilot: eGPU badge with live wattage, upper right above the complication
+    self._egpu_icon = EgpuWattsIcon()
 
     self._model_renderer = ModelRendererBP()
     self._lat_debug: LateralDebugMici | None = None
@@ -204,6 +207,7 @@ class MiciAugmentedRoadViewBP(MiciCameraViewBP, AugmentedRoadView, BlindspotRend
 
     # BluePilot: Lead car complication widget
     self._complication.render(self._content_rect)
+    self._egpu_icon.render(self._content_rect)
 
     ball_rect = rl.Rectangle(
       self._rect.x + self._rect.width - SIDE_PANEL_WIDTH,

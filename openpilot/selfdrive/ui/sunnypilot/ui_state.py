@@ -39,6 +39,7 @@ class UIStateSP:
       "modelManagerSP", "selfdriveStateSP", "longitudinalPlanSP", "backupManagerSP",
       "lateralTorqueParameters", "carStateSP", "liveMapDataSP", "carParamsSP", "lateralDelay",
       "controllerStateBP",  # BluePilot: lateral uncertainty for torque bar
+      "chestnutState",  # BluePilot: eGPU power draw for the MICI eGPU badge
     ]
 
     self.sunnylink_state = SunnylinkState()

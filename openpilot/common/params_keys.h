@@ -368,6 +368,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"BPThemePack", {PERSISTENT | BACKUP, STRING, ""}},
     {"BPThemeAutoSeasonal", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"BPRainbowLines", {PERSISTENT | BACKUP, BOOL, "0"}},
+    {"BPShowEgpuWatts", {PERSISTENT | BACKUP, BOOL, "1"}},  // BluePilot: MICI eGPU wattage badge
     {"BPShowConfidenceBall", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"BPAnimateSteeringWheel", {PERSISTENT | BACKUP, BOOL, "1"}},
     // BluePilot: No static defaults; the first active UI persists its matching device styles (C4=0, C3X=1).

@@ -25,6 +25,7 @@ bluepilot/**/*.ttf -filter -diff -merge
 bluepilot/**/*.otf -filter -diff -merge
 bluepilot/**/*.wav -filter -diff -merge
 bluepilot/**/*.onnx -filter -diff -merge
+openpilot/selfdrive/assets/icons_mici/bp_egpu_blank.png -filter -diff -merge
 openpilot/selfdrive/assets/icons_mici/onroad/bookmark_fill.png -filter -diff -merge
 openpilot/selfdrive/assets/icons_mici/onroad/driver_monitoring/dm_center.png -filter -diff -merge
 openpilot/selfdrive/assets/icons_mici/settings/car_icon.png -filter -diff -merge

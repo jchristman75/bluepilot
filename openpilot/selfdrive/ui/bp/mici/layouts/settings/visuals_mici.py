@@ -53,6 +53,7 @@ class VisualsLayoutMici(NavScroller):
     self.rainbow_lane_lines = BigParamControlBP("Rainbow Lane Lines", "BPRainbowLines")
     self.show_blindspot_ui = BigParamControlBP("Show Blindspot Overlay", "ShowBlindspotOverlay")
     self.show_brake_status = BigParamControlBP("Show Brake Status", "ShowBrakeStatus")
+    self.show_egpu_watts = BigParamControlBP("Show eGPU Wattage", "BPShowEgpuWatts")
     self.animate_steering_wheel = BigParamControlBP("Animate Steering Wheel", "BPAnimateSteeringWheel")
     ensure_steering_wheel_icon_style_initialized(Params(), SteeringWheelIconStyle.COMMA_4)
     self.wheel_icon_style = BigMultiParamToggleBP(
@@ -78,6 +79,7 @@ class VisualsLayoutMici(NavScroller):
       self.rainbow_lane_lines,
       self.show_blindspot_ui,
       self.show_brake_status,
+      self.show_egpu_watts,
       self.animate_steering_wheel,
       self.wheel_icon_style,
       self.dm_icon_style,
@@ -94,6 +96,7 @@ class VisualsLayoutMici(NavScroller):
       ("BPRainbowLines", self.rainbow_lane_lines),
       ("ShowBlindspotOverlay", self.show_blindspot_ui),
       ("ShowBrakeStatus", self.show_brake_status),
+      ("BPShowEgpuWatts", self.show_egpu_watts),
       ("BPAnimateSteeringWheel", self.animate_steering_wheel),
       ("FordPrefHybridPowerFlow", self.show_hybrid_power_flow),
     )
