@@ -1,12 +1,16 @@
 """BluePilot: eGPU (Chestnut) badge for the MICI onroad view, upper right above the complication.
 
 The eGPU logo with the GPU's current power draw printed where the "GPU" lettering normally is.
-Shown only while the big model is running on the eGPU (ChestnutState.ACTIVE), behind BPShowEgpuWatts.
+Shown while the big model is running on the eGPU (ChestnutState.ACTIVE), behind BPShowEgpuWatts.
+While it loads (ChestnutState.LOADING) the plain white GPU logo pulses instead, the same way the
+home screen's GPU icon does.
 
 Power comes from chestnutState.powerDrawW (hardwared, 10 Hz), which carries the SMU's
 AverageSocketPower that modeld samples. modeld only re-reads the SMU every 100 sends (~10 s),
 so the number steps rather than tracks.
 """
+import math
+
 import pyray as rl
 
 from openpilot.common.filter_simple import FirstOrderFilter
@@ -39,6 +43,10 @@ ICON_OPACITY = 0.6
 TEXT_OPACITY = 0.85
 PARAM_REFRESH_FRAMES = 60
 
+# Loading pulse, same as the home screen (mici/layouts/home.py): 0.35..1.0 at 6 rad/s.
+PULSE_MIN = 0.35
+PULSE_RATE = 6.0
+
 
 class EgpuWattsIcon(Widget):
   def __init__(self):
@@ -47,6 +55,7 @@ class EgpuWattsIcon(Widget):
     self._enabled = self._params.get_bool(PARAM)
     self._param_counter = 0
     self._texture: rl.Texture = gui_app.texture("icons_mici/bp_egpu_blank.png", ICON_W, ICON_H)
+    self._loading_texture: rl.Texture = gui_app.texture("icons_mici/chestnut.png", ICON_W, ICON_H)
     self._font: rl.Font = gui_app.font(FontWeight.BOLD)
     self._alpha_filter = FirstOrderFilter(0.0, 0.15, 1 / gui_app.target_fps)
     self._watts: float | None = None
@@ -73,7 +82,8 @@ class EgpuWattsIcon(Widget):
     return f"{round(self._watts)}W" if self._watts is not None else "--W"
 
   def _render(self, rect: rl.Rectangle) -> None:
-    visible = self._enabled and ui_state.chestnut_state == ChestnutState.ACTIVE
+    loading = ui_state.chestnut_state == ChestnutState.LOADING
+    visible = self._enabled and (loading or ui_state.chestnut_state == ChestnutState.ACTIVE)
     alpha = self._alpha_filter.update(1.0 if visible else 0.0)
     if alpha < 1e-2:
       return
@@ -81,6 +91,13 @@ class EgpuWattsIcon(Widget):
     column_center_x = rect.x + rect.width - RIGHT_MARGIN - COMPLICATION_W / 2
     x = column_center_x - ICON_W / 2
     y = rect.y + TOP_MARGIN
+
+    if loading:
+      pulse = PULSE_MIN + (1.0 - PULSE_MIN) * (0.5 - 0.5 * math.cos(rl.get_time() * PULSE_RATE))
+      rl.draw_texture_ex(self._loading_texture, rl.Vector2(x, y), 0.0, 1.0,
+                         rl.Color(255, 255, 255, int(255 * ICON_OPACITY * pulse * alpha)))
+      return
+
     rl.draw_texture_ex(self._texture, rl.Vector2(x, y), 0.0, 1.0, rl.Color(255, 255, 255, int(255 * ICON_OPACITY * alpha)))
 
     text = self.watts_text()
