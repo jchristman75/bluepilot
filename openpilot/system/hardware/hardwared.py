@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import faulthandler  # BluePilot: hardwared stall watchdog
 import fcntl
 import os
 import queue
@@ -253,7 +254,24 @@ def hardware_thread(end_event, hw_queue) -> None:
   chestnut_status = ChestnutStatus()
   branch = get_short_branch()
 
+  # BluePilot: stall watchdog. The main loop has frozen for 3-8 s mid-drive (routes 000004e9 t=347,
+  # 00000501 t=118: deviceState stopped while hardwared's chestnut thread kept publishing -> selfdrived
+  # "Communication Issue Between Processes"). If one pass takes longer than _STALL_DUMP_S, faulthandler
+  # (C-level watchdog thread, works while this thread is blocked in a syscall) appends every thread's stack
+  # to _STALL_LOG so the blocking call can be identified. Re-armed every pass; costs nothing otherwise.
+  _STALL_DUMP_S = 3.0
+  _STALL_LOG = "/data/community/crashes/hardwared_stall.log"
+  try:
+    stall_log = open(_STALL_LOG, "a") if os.path.isdir(os.path.dirname(_STALL_LOG)) else None
+  except OSError:
+    stall_log = None
+  # End BluePilot
+
   while not end_event.is_set():
+    # BluePilot: re-arm the stall watchdog (see above)
+    if stall_log is not None:
+      faulthandler.dump_traceback_later(_STALL_DUMP_S, repeat=False, file=stall_log, exit=False)
+    # End BluePilot
     sm.update(PANDA_STATES_TIMEOUT)
 
     pandaStates = sm['pandaStates']

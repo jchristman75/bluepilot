@@ -67,6 +67,11 @@ class WifiFavoriteManager:
       try:
         if Params is None:
           continue
+
+        # No scanning while driving: auto-joining the favorite only matters when parked, and the 30 s
+        # scans preceded both mid-drive hardwared stalls (routes 000004e9, 00000501)
+        if Params().get_bool("IsOnroad"):
+          continue
         
         # Check if DBus is available
         if self._wifi_manager._router_main is None:
