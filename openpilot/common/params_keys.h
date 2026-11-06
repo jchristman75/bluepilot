@@ -388,6 +388,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // BluePilot: Portal (Web Routes Server)
     {"EnableWebRoutesServer", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"BPPortalPort", {PERSISTENT | BACKUP, INT, "8088"}},
+    {"CopypartyPassword", {PERSISTENT, STRING}},  // BluePilot: portal-set copyparty password; no BACKUP, it is a secret
 
     // BluePilot: connect backend — 0=Comma Connect, 1=Konik Stable, 2=Offline Mode.
     // Per-backend dongle ID caches let comma <-> Konik switch without losing either identity;

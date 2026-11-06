@@ -216,6 +216,11 @@ if os.path.exists("../../third_party/copyparty/copyparty-sfx.py"):
   copyparty_args += ["-p8080"]
   copyparty_args += ["-z"]
   copyparty_args += ["-q"]
+  # BluePilot: when the portal has set CopypartyPassword, restrict every volume to that account
+  if is_bluepilot():
+    from bluepilot.system.copyparty_auth import apply_password
+    copyparty_args = apply_password(copyparty_args, Params())
+  # End BluePilot
   procs += [NativeProcess("copyparty-sfx", "openpilot/third_party/copyparty", ["./copyparty-sfx.py", *copyparty_args], and_(only_offroad, use_copyparty))]
 
 managed_processes = {p.name: p for p in procs}
