@@ -70,7 +70,8 @@ class WifiFavoriteManager:
 
         # No scanning while driving: auto-joining the favorite only matters when parked, and the 30 s
         # scans preceded both mid-drive hardwared stalls (routes 000004e9, 00000501)
-        if Params().get_bool("IsOnroad"):
+        # IsOnroad no longer exists (upstream #38205 kept only IsOffroad); unset at boot reads as onroad
+        if not Params().get_bool("IsOffroad"):
           continue
         
         # Check if DBus is available

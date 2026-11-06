@@ -85,7 +85,8 @@ def is_device_idle():
     """Check if device is idle (screen off + not driving)"""
     try:
         # Check if onroad (driving)
-        onroad = params.get_bool("IsOnroad")
+        # IsOnroad no longer exists (upstream #38205); unset IsOffroad at boot reads as onroad
+        onroad = not params.get_bool("IsOffroad")
         if onroad:
             return False
 
