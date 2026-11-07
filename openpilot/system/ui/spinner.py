@@ -35,7 +35,9 @@ def clamp(value, min_value, max_value):
 class Spinner(Widget):
   def __init__(self):
     super().__init__()
-    self._comma_texture = gui_app.texture("../../sunnypilot/selfdrive/assets/images/spinner_sunnypilot.png", TEXTURE_SIZE, TEXTURE_SIZE)
+    # BluePilot: BluePilot spinner logo (was copied over spinner_sunnypilot.png by boot_logo.sh)
+    self._comma_texture = gui_app.texture("images/spinner_bluepilot.png", TEXTURE_SIZE, TEXTURE_SIZE)
+    # End BluePilot
     self._spinner_texture = gui_app.texture("images/spinner_track.png", TEXTURE_SIZE, TEXTURE_SIZE, alpha_premultiply=True)
     self._rotation = 0.0
     self._progress: int | None = None
