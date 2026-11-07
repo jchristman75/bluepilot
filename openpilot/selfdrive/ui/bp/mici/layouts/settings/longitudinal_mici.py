@@ -1,4 +1,4 @@
-"""BluePilot MICI: Longitudinal tuning panel — BP long bypass, downhill comp, Ford radar."""
+"""BluePilot MICI: Longitudinal tuning panel — BP long bypass, regen coasting, downhill comp, Ford radar."""
 
 from collections.abc import Callable
 
@@ -14,17 +14,20 @@ class LongitudinalLayoutMici(NavScroller):
       self.set_back_callback(back_callback)
 
     self.disable_BP_long = BigParamControlBP("Bypass BP Longitudinal Control", "disable_BP_long_UI")
+    self.regen_blend = BigParamControlBP("Regen Coasting (Stock-Like Decel)", "BPLongRegenBlend")
     self.disable_downhill_comp = BigParamControlBP("Disable Downhill Compensation", "disable_downhill_comp_UI")
     self.disable_ford_radar = BigParamControlBP("Disable Ford Radar (Vision-Only Leads)", "disable_ford_radar_UI")
 
     self._scroller.add_widgets([
       self.disable_BP_long,
+      self.regen_blend,
       self.disable_downhill_comp,
       self.disable_ford_radar,
     ])
 
     self._refresh_toggles = (
       ("disable_BP_long_UI", self.disable_BP_long),
+      ("BPLongRegenBlend", self.regen_blend),
       ("disable_downhill_comp_UI", self.disable_downhill_comp),
       ("disable_ford_radar_UI", self.disable_ford_radar),
     )

@@ -100,6 +100,7 @@ class BluePilotLayout(Widget):
       ("disable_BP_lat_UI", self._disable_BP_lat),
       ("disable_BP_long_UI", self._disable_BP_long),
       ("disable_downhill_comp_UI", self._disable_dowhill_comp),
+      ("BPLongRegenBlend", self._regen_blend),
       ("disable_ford_radar_UI", self._disable_ford_radar),
       ("BpShowLateralControl", self._show_lateral_control),
       ("BPUIDebugLog", self._ui_debug_log),
@@ -607,6 +608,15 @@ class BluePilotLayout(Widget):
       icon="chffr_wheel.png"
     )
 
+    # Regen coasting: gentle decel via regen (stock-like), brake flag only for real braking
+    self._regen_blend = toggle_item(
+      lambda: tr("Regen Coasting (Stock-Like Decel)"),
+      lambda: tr("Slow gently with regen like stock Ford ACC and use the brakes only for real braking."),
+      initial_state=self._safe_get_bool(self._params, "BPLongRegenBlend"),
+      callback=lambda state: self._toggle_callback(state, "BPLongRegenBlend"),
+      icon="chffr_wheel.png"
+    )
+
     # Disable downhill compensation toggle
     self._disable_dowhill_comp = toggle_item(
       lambda: tr("Disable Downhill Compensation"),
@@ -753,6 +763,7 @@ class BluePilotLayout(Widget):
       ]) +
       _section(tr("Longitudinal Tuning"), [
         self._disable_BP_long,
+        self._regen_blend,
         self._disable_dowhill_comp,
         self._disable_ford_radar,
       ]) +

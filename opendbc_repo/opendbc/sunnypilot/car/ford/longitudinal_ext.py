@@ -12,6 +12,10 @@ Key features:
   - Rate-limited accel changes to avoid stomping the brakes
   - TTC-based emergency bypass for imminent collision scenarios
   - Mutual exclusion: brake_actuate forces gas to INACTIVE_GAS
+  - Regen blend (BPLongRegenBlend): gentle decel goes through a negative
+    propulsion request (regen) like stock Ford ACC, with the brake flag kept for
+    real braking. On the Mach-E the brake flag alone produces ~-1 m/s^2 for any
+    request, which turned every small ease-off into a brake hit (logs 4d5/50a).
 """
 
 from collections import namedtuple
@@ -65,6 +69,15 @@ class LongitudinalExt:
     self.precharge_actuate_release = -0.06
     self.op_brake_actuate_last = False
 
+    # Regen blend (BPLongRegenBlend). Stock Ford ACC (Mach-E, routes 4e6/4f8)
+    # sends AccPrpl_A_Rq ~= AccBrkTot_A_Rq down to ~-0.9 with the brake flag off,
+    # and mirrors the gas value into AccPrpl_A_Pred. Panda limits gas to -0.5.
+    self.regen_blend_UI = False
+    self.REGEN_BRAKE_ON = -0.55     # brake flag on below this (pitch-compensated accel)
+    self.REGEN_BRAKE_OFF = -0.40    # brake flag off above this
+    self.REGEN_MIN_SPEED = 3.0      # m/s; below this (and when stopping) use the stock brake logic
+    self.regen_brake_actuate_last = False
+
     # Toggles (updated from Params each frame)
     self.disable_BP_long_UI = False
     self.disable_downhill_comp_UI = True
@@ -73,6 +86,7 @@ class LongitudinalExt:
     """Read longitudinal-related Params from the UI. Called each frame."""
     self.disable_BP_long_UI = params.get_bool("disable_BP_long_UI")
     self.disable_downhill_comp_UI = params.get_bool("disable_downhill_comp_UI")
+    self.regen_blend_UI = params.get_bool("BPLongRegenBlend")
 
   def update(self, CC, CS, op_accel, op_gas, accel_due_to_pitch, v_ego_mph, stopping, target_speed):
     """
@@ -125,7 +139,9 @@ class LongitudinalExt:
       if self.sm.valid.get('radarState', False):
         rs = self.sm['radarState']
         lead = getattr(rs, 'leadOne', None)
-        if lead is not None and getattr(lead, 'status', 0) != 1:
+        # LeadData.status was renamed to present upstream (#38339); reading
+        # 'status' returned the default and dropped every lead.
+        if lead is not None and not getattr(lead, 'present', False):
           lead = None
         if lead:
           d_rel = float(getattr(lead, 'dRel', 0))
@@ -244,6 +260,29 @@ class LongitudinalExt:
       precharge_actuate = op_brake_actuate
       bp_long_used = False
 
+    # Regen blend: decel through negative propulsion (regen), brake flag only for real braking.
+    # Any negative request counts as braking: gas is never positive while decelerating.
+    regen_active = (self.regen_blend_UI and CC.longActive and not stopping and
+                    CS.out.vEgo > self.REGEN_MIN_SPEED)
+    if regen_active:
+      accel_pitch = accel + accel_due_to_pitch
+      regen_brake = self.regen_brake_actuate_last
+      if accel_pitch < self.REGEN_BRAKE_ON:
+        regen_brake = True
+      elif accel_pitch > self.REGEN_BRAKE_OFF:
+        regen_brake = False
+      brake_actuate = regen_brake
+      precharge_actuate = regen_brake
+
+      # INACTIVE gas from upstream means op_gas < MIN_GAS: treat as max regen
+      gas_want = CarControllerParams.MIN_GAS if gas == CarControllerParams.INACTIVE_GAS else gas
+      decel_req = min(accel, gas_want)
+      if not brake_actuate and decel_req < 0.0:
+        gas = max(decel_req, CarControllerParams.MIN_GAS)
+      self.regen_brake_actuate_last = regen_brake
+    else:
+      self.regen_brake_actuate_last = brake_actuate
+
     # Mutual exclusion: no brake and gas at the same time
     if brake_actuate:
       gas = CarControllerParams.INACTIVE_GAS
@@ -252,7 +291,8 @@ class LongitudinalExt:
     accel = float(clip(accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
     if gas != CarControllerParams.INACTIVE_GAS:
       gas = float(clip(gas, CarControllerParams.MIN_GAS, CarControllerParams.ACCEL_MAX))
-    accel_pred_send = CarControllerParams.INACTIVE_GAS
+    # Stock Ford mirrors the propulsion request into AccPrpl_A_Pred (op sends INACTIVE)
+    accel_pred_send = gas if regen_active else CarControllerParams.INACTIVE_GAS
 
     self._bp_long_active_last = bp_long_used
     self.op_brake_actuate_last = op_brake_actuate
