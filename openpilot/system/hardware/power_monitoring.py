@@ -118,8 +118,15 @@ class PowerMonitoring:
 
     now = time.monotonic()
     should_shutdown = False
+    # BluePilot: user-set 12V cutoff (vbatt_pause_charging, BluePilot settings); stock 11.8 V otherwise
+    try:
+      param = self.params.get("vbatt_pause_charging")
+      vbatt_cutoff = float(param) if param is not None and float(param) > 0 else VBATT_PAUSE_CHARGING
+    except Exception:
+      vbatt_cutoff = VBATT_PAUSE_CHARGING
+    # End BluePilot
     offroad_time = (now - offroad_timestamp)
-    low_voltage_shutdown = (self.car_voltage_mV < (VBATT_PAUSE_CHARGING * 1e3) and
+    low_voltage_shutdown = (self.car_voltage_mV < (vbatt_cutoff * 1e3) and
                             offroad_time > VOLTAGE_SHUTDOWN_MIN_OFFROAD_TIME_S)
     should_shutdown |= self.max_time_offroad_exceeded(offroad_time)
     should_shutdown |= low_voltage_shutdown

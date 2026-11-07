@@ -134,13 +134,17 @@ CRITICAL_PARAMS = {
 
 # Cache for BluePilot panel params (loaded from JSON files)
 _BLUEPILOT_PARAMS_CACHE: Optional[set] = None
+# Repo root (bluepilot/backend/params/ -> repo); openpilot sources live under <repo>/openpilot/
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _load_bluepilot_params() -> set:
-    """Load all param names from BluePilot panel JSON files.
+    """Load the BluePilot param names from the Sunnylink settings schema.
 
-    Params defined in panel JSONs are considered 'BluePilot' params.
-    All other params are considered 'System' params.
+    The Ford/BluePilot settings live under vehicle_settings.ford in
+    openpilot/sunnypilot/sunnylink/settings_ui.json (the old Qt panel JSONs under
+    selfdrive/ui/bluepilot/menus no longer exist). Those keys are 'BluePilot'
+    params; all others are 'System' params.
     """
     global _BLUEPILOT_PARAMS_CACHE
     if _BLUEPILOT_PARAMS_CACHE is not None:
@@ -148,53 +152,26 @@ def _load_bluepilot_params() -> set:
 
     bp_params: set = set()
 
-    # Find panel JSON files
-    repo_root = Path(__file__).resolve().parents[3]  # Go up to openpilot root
-    panel_dirs = [
-        repo_root / "selfdrive" / "ui" / "bluepilot" / "menus",
-    ]
+    def _collect_keys(node):
+        if isinstance(node, dict):
+            key = node.get("key")
+            if isinstance(key, str):
+                bp_params.add(key)
+            for value in node.values():
+                _collect_keys(value)
+        elif isinstance(node, list):
+            for value in node:
+                _collect_keys(value)
 
-    for panel_dir in panel_dirs:
-        if not panel_dir.exists():
-            continue
+    settings_path = _REPO_ROOT / "openpilot" / "sunnypilot" / "sunnylink" / "settings_ui.json"
+    try:
+        with open(settings_path, 'r') as f:
+            settings = json.load(f)
+        _collect_keys(settings.get("vehicle_settings", {}).get("ford", {}))
+    except (json.JSONDecodeError, IOError) as e:
+        logger.warning(f"Error reading {settings_path}: {e}")
 
-        for json_file in panel_dir.glob("*.json"):
-            try:
-                with open(json_file, 'r') as f:
-                    panel_data = json.load(f)
-
-                # Extract params from all controls in all groups
-                groups = panel_data.get("groups", [])
-                for group in groups:
-                    controls = group.get("controls", [])
-                    for control in controls:
-                        # Get param from control
-                        param = control.get("param")
-                        if param:
-                            bp_params.add(param)
-
-                        # Also check params array (some controls have multiple params)
-                        params_list = control.get("params", [])
-                        bp_params.update(params_list)
-
-                        # Check options for selection controls
-                        options = control.get("options", [])
-                        for opt in options:
-                            if isinstance(opt, dict):
-                                opt_param = opt.get("param")
-                                if opt_param:
-                                    bp_params.add(opt_param)
-
-                # Also include persistent params and other param arrays
-                for key in ["persistentParams", "clearOnManagerStartParams",
-                           "clearOnOnroadTransitionParams", "clearOnOffroadTransitionParams"]:
-                    bp_params.update(panel_data.get(key, []))
-
-            except (json.JSONDecodeError, IOError) as e:
-                logger.debug(f"Error reading panel file {json_file}: {e}")
-                continue
-
-    logger.info(f"Loaded {len(bp_params)} BluePilot params from panel JSON files")
+    logger.info(f"Loaded {len(bp_params)} BluePilot params from {settings_path.name}")
     _BLUEPILOT_PARAMS_CACHE = bp_params
     return bp_params
 
@@ -209,8 +186,7 @@ def _load_param_type_cache() -> Dict[str, str]:
 
     # First, load from common/params_keys.h (openpilot core params)
     try:
-        repo_root = Path(__file__).resolve().parents[3]  # Go up to openpilot root
-        header_path = repo_root / "common" / "params_keys.h"
+        header_path = _REPO_ROOT / "openpilot" / "common" / "params_keys.h"
         if header_path.exists():
             contents = header_path.read_text()
             pattern = re.compile(r'\{"([^"]+)",\s*\{[^,]+,\s*(STRING|BOOL|INT|FLOAT|TIME|JSON|BYTES)')
@@ -222,8 +198,7 @@ def _load_param_type_cache() -> Dict[str, str]:
 
     # Second, load from bluepilot/params/params.json (BluePilot-specific params)
     try:
-        repo_root = Path(__file__).resolve().parents[3]  # Go up to openpilot root
-        params_json_path = repo_root / "bluepilot" / "params" / "params.json"
+        params_json_path = _REPO_ROOT / "bluepilot" / "params" / "params.json"
         if params_json_path.exists():
             with open(params_json_path, 'r') as f:
                 bp_params_data = json.load(f)
@@ -252,8 +227,7 @@ def _load_param_attributes_cache() -> Dict[str, List[str]]:
 
     cache: Dict[str, List[str]] = {}
     try:
-        repo_root = Path(__file__).resolve().parents[3]  # Go up to openpilot root
-        header_path = repo_root / "common" / "params_keys.h"
+        header_path = _REPO_ROOT / "openpilot" / "common" / "params_keys.h"
         if header_path.exists():
             contents = header_path.read_text()
             # Match pattern: {"ParamName", {FLAGS, TYPE, ...}}

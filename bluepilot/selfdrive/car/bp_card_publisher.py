@@ -158,7 +158,8 @@ def publish_controller_state_bp(CI, pm):
     # needed, so no caching required (fingerprint never changes after startup).
     CP = getattr(CI, "CP", None)
     if CP is not None:
-      cs_bp.bmsFingerprintForced = bool(getattr(CP, "fingerprintSource", None) == "fixed")
+      # fingerprintSource is an int enum on the Python CarParams, not the string "fixed"
+      cs_bp.bmsFingerprintForced = getattr(CP, "fingerprintSource", None) == structs.CarParams.FingerprintSource.fixed
       cs_bp.bmsFingerprint = str(getattr(CP, "carFingerprint", "") or "")
 
     cs_bp_capnp = convert_to_capnp(cs_bp)

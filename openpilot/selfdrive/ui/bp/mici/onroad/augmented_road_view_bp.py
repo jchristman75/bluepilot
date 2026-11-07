@@ -170,9 +170,9 @@ class MiciAugmentedRoadViewBP(MiciCameraViewBP, AugmentedRoadView, BlindspotRend
         self._content_rect, self._model_renderer,
         self._content_rect.y + self._content_rect.height - 4)
 
-    # Fade out bottom overlay (only when engaged)
+    # Fade out bottom overlay (only when engaged; mici_hide_onroad_fade turns it off)
     fade_alpha = self._fade_alpha_filter.update(ui_state.status != UIStatus.DISENGAGED)
-    if fade_alpha > 1e-2:
+    if fade_alpha > 1e-2 and not self._bp_params.get_bool("mici_hide_onroad_fade"):
       rl.draw_texture_ex(self._fade_texture, rl.Vector2(self._content_rect.x, self._content_rect.y), 0.0, 1.0,
                          rl.Color(255, 255, 255, int(255 * fade_alpha)))
 

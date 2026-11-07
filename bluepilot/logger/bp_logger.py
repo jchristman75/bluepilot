@@ -276,7 +276,7 @@ def log(level: LogLevel, message: str, *args, console_output: bool = False) -> N
     try:
       params = Params()
       try:
-        debug_enabled = params.check_key("FordPrefEnableDebugLogs") and params.get_bool("FordPrefEnableDebugLogs", default=False)
+        debug_enabled = params.check_key("FordPrefEnableDebugLogs") and params.get_bool("FordPrefEnableDebugLogs")
       except (KeyError, ValueError, TypeError):
         debug_enabled = False
     except (KeyError, ValueError, TypeError):

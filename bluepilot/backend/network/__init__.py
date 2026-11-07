@@ -9,6 +9,7 @@ from .utils import (
     get_wifi_ip,
     get_all_wifi_ips,
     get_connection_type,
+    is_tethering_active,
 )
 
 __all__ = [
@@ -17,4 +18,5 @@ __all__ = [
     'get_wifi_ip',
     'get_all_wifi_ips',
     'get_connection_type',
+    'is_tethering_active',
 ]

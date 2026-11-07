@@ -472,7 +472,7 @@ def extract_fingerprint_from_segment(segment_path):
 
         # Check if this is the current route by checking Params
         params = Params()
-        current_route = params.get("CurrentRoute", encoding='utf-8')
+        current_route = params.get("CurrentRoute")
 
         # If this segment is part of the current route, we can use cached CarParams
         if current_route and current_route in segment_path:
@@ -750,6 +750,9 @@ def extract_drive_stats_from_segments(segments):
     control_lag_sum = 0.0
     control_lag_count = 0
     control_lag_max = 0.0
+    mads_active = False  # MADS lateral-only engagement lives in selfdriveStateSP, not selfdriveState
+    prev_event_names = set()  # onroadEvents is republished while an event stays active: count rising edges
+    prev_controls_time = None
 
     prev_time = None
     prev_speed = None
@@ -828,6 +831,9 @@ def extract_drive_stats_from_segments(segments):
                 continue
 
             logger.debug(f"Processing drive stats from {os.path.basename(segment_path)}")
+            # qlogs decimate controlsState, so loop timing can only be measured from rlogs
+            full_rate_log = os.path.basename(log_path).startswith('rlog')
+            prev_controls_time = None
 
             try:
                 # Choose appropriate message reader
@@ -853,7 +859,7 @@ def extract_drive_stats_from_segments(segments):
                             # Track state time
                             if prev_state is not None:
                                 op_state_times[prev_state] = op_state_times.get(prev_state, 0.0) + dt
-                                if prev_state in ['enabled', 'overriding']:
+                                if prev_state in ['enabled', 'overriding'] or mads_active:
                                     op_engaged_time += dt
 
                     # Process carState messages for speed and distance
@@ -891,70 +897,91 @@ def extract_drive_stats_from_segments(segments):
                             state_str = str(sds.state)
                             prev_state = state_str
 
+                    # MADS: steering can be engaged while selfdriveState stays 'disabled'
+                    elif msg_type == 'selfdriveStateSP':
+                        try:
+                            mads_active = bool(msg.selfdriveStateSP.mads.active)
+                        except Exception:
+                            mads_active = False
+
                     # Process controlsState for control metrics
                     elif msg_type == 'controlsState':
                         ctrl = msg.controlsState
 
-                        # Track steering saturation
-                        if hasattr(ctrl, 'lateralControlState'):
+                        # Track steering saturation. lateralControlState is a union
+                        # (angleState/pidState/torqueState/...): read the active member.
+                        try:
                             lat_state = ctrl.lateralControlState
-                            if hasattr(lat_state, 'saturated') and lat_state.saturated:
+                            if getattr(lat_state, lat_state.which()).saturated:
                                 steering_saturated_count += 1
+                        except Exception:
+                            pass
 
-                        # Track control lag
-                        if hasattr(ctrl, 'cumLagMs'):
-                            lag_ms = float(ctrl.cumLagMs)
-                            control_lag_sum += lag_ms
-                            control_lag_count += 1
-                            if lag_ms > control_lag_max:
-                                control_lag_max = lag_ms
+                        # Track control lag. cumLagMs was removed upstream, so measure how late
+                        # each 100 Hz controlsState arrives past its 10 ms period.
+                        if full_rate_log and prev_controls_time is not None:
+                            gap_s = current_time - prev_controls_time
+                            if 0 < gap_s < 1.0:
+                                lag_ms = max(0.0, (gap_s - 0.01) * 1000.0)
+                                control_lag_sum += lag_ms
+                                control_lag_count += 1
+                                if lag_ms > control_lag_max:
+                                    control_lag_max = lag_ms
+                        prev_controls_time = current_time
 
-                    # Process onroadEvents for disengagements, alerts, and safety events
-                    elif msg_type == 'onroadEvent':
-                        event = msg.onroadEvent
-                        event_name = str(event.name) if hasattr(event, 'name') else 'unknown'
+                    # Process onroadEvents for disengagements, alerts, and safety events.
+                    # The service is onroadEvents (a list), republished while events stay active.
+                    elif msg_type == 'onroadEvents':
+                        names_now = set()
+                        for event in msg.onroadEvents:
+                            event_name = str(event.name)
+                            names_now.add(event_name)
+                            if event_name in prev_event_names:
+                                continue
 
-                        # Disengagement events
-                        if hasattr(event, 'userDisable') and event.userDisable:
-                            disengagements.append({
-                                'time': current_time,
-                                'type': event_name,
-                                'reason': 'userDisable'
-                            })
-                        elif hasattr(event, 'immediateDisable') and event.immediateDisable:
-                            disengagements.append({
-                                'time': current_time,
-                                'type': event_name,
-                                'reason': 'immediateDisable'
-                            })
-                        elif hasattr(event, 'softDisable') and event.softDisable:
-                            disengagements.append({
-                                'time': current_time,
-                                'type': event_name,
-                                'reason': 'softDisable'
-                            })
+                            # Disengagement events
+                            if hasattr(event, 'userDisable') and event.userDisable:
+                                disengagements.append({
+                                    'time': current_time,
+                                    'type': event_name,
+                                    'reason': 'userDisable'
+                                })
+                            elif hasattr(event, 'immediateDisable') and event.immediateDisable:
+                                disengagements.append({
+                                    'time': current_time,
+                                    'type': event_name,
+                                    'reason': 'immediateDisable'
+                                })
+                            elif hasattr(event, 'softDisable') and event.softDisable:
+                                disengagements.append({
+                                    'time': current_time,
+                                    'type': event_name,
+                                    'reason': 'softDisable'
+                                })
 
-                        # Alert events (warnings and critical)
-                        if hasattr(event, 'warning') and event.warning:
-                            alerts.append({
-                                'time': current_time,
-                                'type': event_name,
-                                'level': 'warning'
-                            })
+                            # Alert events (warnings and critical)
+                            if hasattr(event, 'warning') and event.warning:
+                                alerts.append({
+                                    'time': current_time,
+                                    'type': event_name,
+                                    'level': 'warning'
+                                })
 
-                        # Safety events
-                        if event_name == 'fcw':
-                            safety_events['fcw'] += 1
-                        elif event_name == 'aeb':
-                            safety_events['aeb'] += 1
-                        elif event_name == 'stockFcw':
-                            safety_events['stockFcw'] += 1
-                        elif event_name == 'stockAeb':
-                            safety_events['stockAeb'] += 1
+                            # Safety events
+                            if event_name == 'fcw':
+                                safety_events['fcw'] += 1
+                            elif event_name == 'aeb':
+                                safety_events['aeb'] += 1
+                            elif event_name == 'stockFcw':
+                                safety_events['stockFcw'] += 1
+                            elif event_name == 'stockAeb':
+                                safety_events['stockAeb'] += 1
 
-                        # Lane changes
-                        if event_name in ['preLaneChangeLeft', 'preLaneChangeRight', 'laneChange']:
-                            lane_changes += 1
+                            # Lane changes
+                            if event_name == 'laneChange':  # each lane change also raises preLaneChange*
+                                lane_changes += 1
+
+                        prev_event_names = names_now
 
                     prev_time = current_time
 

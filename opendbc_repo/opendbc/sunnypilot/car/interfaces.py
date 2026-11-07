@@ -197,6 +197,12 @@ def _initialize_ford(CP: structs.CarParams, CP_SP: structs.CarParamsSP, params_d
       if geometry_index is not None:
         CP_SP.safetyParam |= FordSafetyFlagsSP.STEER_ANGLE_CURVATURE | (geometry_index << FORD_PINION_GEOMETRY_SHIFT)
 
+    # BluePilot: "Disable Ford Radar (Vision-Only Leads)". Marking the radar unavailable makes the
+    # Ford RadarInterface skip its parser and radard take leads from the driving model only.
+    # Read at car init, so it takes effect after an onroad cycle / reboot.
+    if int(params_dict.get("disable_ford_radar_UI", 0) or 0) == 1:
+      CP.radarUnavailable = True
+
 
 def _initialize_toyota(CP: structs.CarParams, CP_SP: structs.CarParamsSP, params_dict: dict[str, str]) -> None:
   if CP.brand == 'toyota':

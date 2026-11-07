@@ -117,11 +117,15 @@ class ParamsWatcher:
             if key.endswith("Enabled") or key.endswith("Toggle") or key in ["IsOnRoad", "IsOffroad", "Passive"]:
                 return self.params.get_bool(key)
 
-            # Try getting as string
-            value = self.params.get(key, encoding='utf-8')
+            # Params.get returns the declared type (bool/int/float/str/dict/bytes);
+            # it no longer takes encoding= (that raised TypeError on every read)
+            value = self.params.get(key)
 
-            if value is None or value == b'':
+            if value is None or value == b'' or value == '':
                 return None
+
+            if isinstance(value, (bool, int, float, dict, list)):
+                return value
 
             if isinstance(value, bytes):
                 value = value.decode('utf-8', errors='replace')

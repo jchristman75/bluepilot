@@ -101,7 +101,7 @@ from bluepilot.backend.core import process_manager, lifecycle
 # Network utilities
 from bluepilot.backend.network import (
     is_onroad, should_server_run,
-    get_wifi_ip, get_all_wifi_ips, get_connection_type,
+    get_wifi_ip, get_all_wifi_ips, get_connection_type, is_tethering_active,
 )
 
 # Route utilities
@@ -1146,10 +1146,7 @@ class WebRoutesHandler(BaseHTTPRequestHandler):
                     connection_type = get_connection_type()
                     wifi_ip = get_wifi_ip()
                     all_wifi_ips = get_all_wifi_ips()
-                    try:
-                        tethering_enabled = params.get_bool("EnableTethering")
-                    except Exception:
-                        tethering_enabled = False
+                    tethering_enabled = is_tethering_active(all_wifi_ips)
 
                     # Server uptime
                     try:
@@ -2032,82 +2029,27 @@ class WebRoutesHandler(BaseHTTPRequestHandler):
                 self.send_json_response(result)
 
             elif path == '/api/panels':
-                # List all available panel configurations
+                # List the settings panels (built from the Sunnylink settings schema)
                 try:
-                    panel_dir = Path(__file__).parent.parent.parent / 'selfdrive' / 'ui' / 'bluepilot' / 'menus'
-                    panel_files = sorted(panel_dir.glob('bp_*_panel.json'))
-
-                    # Exclude network panel as requested
-                    exclude_panels = ['bp_network_panel.json']
-
-                    # Define Qt settings order (matching selfdrive/ui/bluepilot/qt/offroad/settings.cc)
-                    panel_order = [
-                        'bp_device_panel',
-                        'bp_toggles_panel',
-                        'bp_steering_panel',
-                        'bp_cruise_panel',
-                        'bp_visuals_panel',
-                        'bp_display_panel',
-                        'bp_vehicle_panel',
-                        'bp_developer_panel',
-                    ]
-
-                    # Load panel data
-                    panel_data_map = {}
-                    for panel_file in panel_files:
-                        if panel_file.name in exclude_panels:
-                            continue
-
-                        try:
-                            with open(panel_file, 'r') as f:
-                                panel_data = json.load(f)
-                                panel_data_map[panel_file.stem] = {
-                                    'id': panel_file.stem,  # e.g., 'bp_device_panel'
-                                    'name': panel_data.get('menuName', panel_file.stem),
-                                    'description': panel_data.get('menuDescription', ''),
-                                    'icon': panel_data.get('menuIcon', '')
-                                }
-                        except Exception as e:
-                            logger.warning(f"Failed to load panel {panel_file.name}: {e}")
-
-                    # Sort panels according to Qt order
-                    panels = []
-                    for panel_id in panel_order:
-                        if panel_id in panel_data_map:
-                            panels.append(panel_data_map[panel_id])
-
-                    # Add any panels not in the order list (for extensibility)
-                    for panel_id, panel_info in panel_data_map.items():
-                        if panel_id not in panel_order:
-                            panels.append(panel_info)
-
-                    self.send_json_response({
-                        'success': True,
-                        'panels': panels
-                    })
+                    from bluepilot.backend.params.settings_panels import build_panels, list_panels
+                    from bluepilot.backend.params.params_manager import _load_param_type_cache
+                    panels = build_panels(param_types=_load_param_type_cache())
+                    self.send_json_response({'success': True, 'panels': list_panels(panels)})
                 except Exception as e:
                     logger.error(f"Error listing panels: {e}", exc_info=True)
                     self.send_json_response({'success': False, 'error': str(e)}, 500)
 
             elif path.startswith('/api/panels/'):
-                # Get specific panel configuration
+                # Get one settings panel configuration
                 panel_id = path.split('/api/panels/')[1].strip('/')
-
                 try:
-                    panel_dir = Path(__file__).parent.parent.parent / 'selfdrive' / 'ui' / 'bluepilot' / 'menus'
-                    panel_file = panel_dir / f'{panel_id}.json'
-
-                    if not panel_file.exists():
+                    from bluepilot.backend.params.settings_panels import build_panels
+                    from bluepilot.backend.params.params_manager import _load_param_type_cache
+                    panel = build_panels(param_types=_load_param_type_cache()).get(panel_id)
+                    if panel is None:
                         self.send_json_response({'success': False, 'error': 'Panel not found'}, 404)
                         return
-
-                    with open(panel_file, 'r') as f:
-                        panel_data = json.load(f)
-
-                    self.send_json_response({
-                        'success': True,
-                        'panel': panel_data
-                    })
+                    self.send_json_response({'success': True, 'panel': panel})
                 except Exception as e:
                     logger.error(f"Error loading panel {panel_id}: {e}", exc_info=True)
                     self.send_json_response({'success': False, 'error': str(e)}, 500)
@@ -3381,8 +3323,8 @@ class WebRoutesHandler(BaseHTTPRequestHandler):
                                 }, 500)
                         else:
                             # Return current state
-                            current_username = params.get('GithubUsername', encoding='utf-8')
-                            current_keys = params.get('GithubSshKeys', encoding='utf-8')
+                            current_username = params.get('GithubUsername')
+                            current_keys = params.get('GithubSshKeys')
                             has_keys = bool(current_keys)
 
                             self.send_json_response({
@@ -3835,11 +3777,7 @@ def main():
     # Only wlan IPs are advertised to users (cellular IPs are filtered out)
     wifi_ip = get_wifi_ip()
     all_wifi_ips = get_all_wifi_ips()
-    try:
-        tethering_enabled = params.get_bool("EnableTethering")
-    except Exception:
-        # EnableTethering may not be registered in params schema
-        tethering_enabled = False
+    tethering_enabled = is_tethering_active(all_wifi_ips)
 
     # Always bind to all interfaces to support both WiFi and hotspot seamlessly
     bind_address = '0.0.0.0'

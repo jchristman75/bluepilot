@@ -5,6 +5,7 @@ Centralized configuration for the backend server
 """
 
 import os
+import sys
 import shutil
 import logging
 from pathlib import Path
@@ -82,6 +83,10 @@ def find_ffmpeg_binary():
     fallback_paths = [
         '/usr/bin/ffmpeg',
         '/usr/local/bin/ffmpeg',
+        # Comma device: the venv's ffmpeg (pip wrapper around a bundled binary). The manager's
+        # PATH doesn't include the venv bin dir, so which() misses it.
+        os.path.join(os.path.dirname(sys.executable), 'ffmpeg'),
+        '/usr/local/venv/bin/ffmpeg',
         '/data/openpilot/third_party/ffmpeg',  # Comma device custom install
         '/opt/homebrew/bin/ffmpeg',  # macOS
     ]
