@@ -22,8 +22,10 @@ def is_onroad():
     try:
         # "IsOnRoad" was never a param, so this always said offroad and the onroad lockout never applied
         return not params.get_bool("IsOffroad")
-    except:
-        return False
+    except Exception:
+        # Fail closed: if we can't tell, assume driving so the onroad lockout stays engaged
+        logger.warning("Could not read IsOffroad, assuming onroad", exc_info=True)
+        return True
 
 
 def should_server_run():
