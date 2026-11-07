@@ -109,7 +109,9 @@ def find_ffprobe_binary():
         return ffprobe_path
 
     # Try common paths
-    common_paths = ['/usr/bin/ffprobe', '/usr/local/bin/ffprobe']
+    # (the venv bin dir holds the comma's ffprobe and isn't on the manager PATH)
+    common_paths = ['/usr/bin/ffprobe', '/usr/local/bin/ffprobe',
+                    os.path.join(os.path.dirname(sys.executable), 'ffprobe'), '/usr/local/venv/bin/ffprobe']
     for path in common_paths:
         if os.path.exists(path):
             logger.info(f"Found ffprobe at: {path}")
