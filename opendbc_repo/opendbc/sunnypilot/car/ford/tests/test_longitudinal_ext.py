@@ -2,7 +2,7 @@
 from types import SimpleNamespace
 
 from opendbc.car.ford.values import CarControllerParams
-from opendbc.sunnypilot.car.ford.longitudinal_ext import LongitudinalExt
+from opendbc.sunnypilot.car.ford.longitudinal_ext import Lead, LongitudinalExt, encode_gas, follow_limits
 
 INACTIVE = CarControllerParams.INACTIVE_GAS
 
@@ -31,9 +31,8 @@ def cs(v_ego=15.0):
 
 
 def step(c, accel, v_ego=15.0, stopping=False, active=True, pitch=0.0):
-  # mirrors carcontroller: INACTIVE when long is off or below MIN_GAS
-  gas = accel if (active and accel >= CarControllerParams.MIN_GAS) else INACTIVE
-  return c.update(cc(active), cs(v_ego), accel, gas, pitch, v_ego * 2.23694, stopping, 0.0)
+  # carcontroller passes the raw planner request as gas; LongitudinalExt encodes INACTIVE itself
+  return c.update(cc(active), cs(v_ego), accel, accel, pitch, v_ego * 2.23694, stopping, 0.0)
 
 
 def test_stock_brake_flag_unchanged_when_off():
@@ -99,3 +98,27 @@ def test_lead_present_is_read():
   c.bpSpeedAllow = True
   r = step(c, -1.0, v_ego=27.0)
   assert r.accel == 0.0  # no lead: BP long coasts instead of braking (existing behavior)
+
+
+def test_encode_gas():
+  assert encode_gas(0.3, True, False) == 0.3
+  assert encode_gas(-0.5, True, False) == -0.5          # MIN_GAS itself is allowed
+  assert encode_gas(-0.51, True, False) == INACTIVE      # below what ford.h accepts
+  assert encode_gas(0.3, False, False) == INACTIVE       # long off
+  assert encode_gas(0.3, True, True) == INACTIVE         # never gas and brake together
+  assert encode_gas(9.0, True, False) == CarControllerParams.ACCEL_MAX
+
+
+def test_follow_limits_per_lead_state():
+  g, a = -0.3, -0.4
+  assert follow_limits(None, 999.0, g, a, 0.0) == (g, g, 0.0, 0.0)                    # no lead: coast
+  assert follow_limits(Lead(20, -1.0, 20), 1.0, g, a, 0.0) == (0.0, 0.0, a, a)         # gaining, close
+  assert follow_limits(Lead(60, -1.0, 20), 3.0, g, a, 0.0) == (g, g, a, a)             # gaining, far
+  assert follow_limits(Lead(40, 1.0, 25), 2.0, g, a, 0.0) == (g, g, a, a)              # trailing
+  assert follow_limits(Lead(40, 0.0, 25), 2.0, g, a, 0.1) == (0.0, 0.2 + 0.1, a, a)    # pacing cap + pitch
+
+
+def test_follow_limits_pacing_cap_never_below_gas_floor():
+  # steep downhill with downhill comp on: 0.2 - 0.9 would undercut MIN_GAS; the old sentinel path
+  # sent MIN_GAS in that case, so the cap is clamped to keep the same output
+  assert follow_limits(Lead(40, 0.0, 25), 2.0, -2.0, -1.0, -0.9)[1] == CarControllerParams.MIN_GAS

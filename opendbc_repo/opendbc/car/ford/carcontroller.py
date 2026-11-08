@@ -251,8 +251,9 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
       op_accel = float(np.clip(op_accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
       op_gas = float(np.clip(op_gas, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
 
-      if not CC.longActive or op_gas < CarControllerParams.MIN_GAS:
-        op_gas = CarControllerParams.INACTIVE_GAS
+      # BluePilot: op_gas stays the raw request; LongitudinalExt encodes INACTIVE_GAS once, at the
+      # end (upstream: `if not CC.longActive or op_gas < MIN_GAS: op_gas = INACTIVE_GAS` here)
+      # End BluePilot
 
       # Pitch compensation (upstream-identical)
       accel_due_to_pitch = 0.0

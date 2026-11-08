@@ -16,6 +16,9 @@ Key features:
     propulsion request (regen) like stock Ford ACC, with the brake flag kept for
     real braking. On the Mach-E the brake flag alone produces ~-1 m/s^2 for any
     request, which turned every small ease-off into a brake hit (logs 4d5/50a).
+
+The gas value is the raw planner request until encode_gas() turns it into the CAN
+value (INACTIVE_GAS when propulsion is off), once, at the end of update().
 """
 
 from collections import namedtuple
@@ -25,6 +28,8 @@ from numpy import clip
 
 from opendbc.car.ford.values import CarControllerParams
 
+INACTIVE_GAS = CarControllerParams.INACTIVE_GAS
+MIN_GAS = CarControllerParams.MIN_GAS
 
 # Result namedtuple returned by LongitudinalExt.update()
 LongitudinalResult = namedtuple('LongitudinalResult', [
@@ -37,6 +42,38 @@ LongitudinalResult = namedtuple('LongitudinalResult', [
   'target_speed',
   'bp_long_used',
 ])
+
+# Lead car as BP long sees it: distance (m), relative speed (m/s), lead speed (m/s)
+Lead = namedtuple('Lead', ['d_rel', 'v_rel', 'v_lead'])
+
+
+def follow_limits(lead, lead_time_sec, op_gas, op_accel, accel_due_to_pitch):
+  """(gas_lo, gas_hi, accel_lo, accel_hi) that BP long clips the planner request to.
+
+  gaining (closing in): no gas within 1.5 s of the lead
+  pacing (matching speed): gas capped at 0.2 (+ pitch), never below 0
+  trailing (falling behind): planner request unchanged
+  no lead: gas unchanged, accel held at 0 (coast; no friction brakes)
+  """
+  if lead is None:
+    return op_gas, op_gas, 0.0, 0.0
+  if lead.v_rel < -0.1:  # gaining
+    if lead_time_sec < 1.5:
+      return 0.0, 0.0, op_accel, op_accel
+    return op_gas, op_gas, op_accel, op_accel
+  if lead.v_rel > 0.1:  # trailing
+    return op_gas, op_gas, op_accel, op_accel
+  # pacing. The cap never goes below the gas floor: a steep downhill (pitch < -0.7) would
+  # otherwise push it under MIN_GAS.
+  return 0.0, max(0.2 + accel_due_to_pitch, MIN_GAS), op_accel, op_accel
+
+
+def encode_gas(gas, long_active, brake_actuate):
+  """Planner gas request -> AccPrpl_A_Rq. Propulsion is inactive when long is off, while
+  braking (never gas and brake together), or when the request is below what ford.h allows."""
+  if not long_active or brake_actuate or gas < MIN_GAS:
+    return INACTIVE_GAS
+  return float(clip(gas, MIN_GAS, CarControllerParams.ACCEL_MAX))
 
 
 class LongitudinalExt:
@@ -53,8 +90,6 @@ class LongitudinalExt:
 
   def __init__(self, CP, CP_SP):
     # BP longitudinal state
-    self._bp_long_active_last = False
-    self.bp_gas_last = 0.0
     self.bp_accel_last = 0.0
     self.bpSpeedAllow = False
 
@@ -88,6 +123,48 @@ class LongitudinalExt:
     self.disable_downhill_comp_UI = params.get_bool("disable_downhill_comp_UI")
     self.regen_blend_UI = params.get_bool("BPLongRegenBlend")
 
+  def _read_lead(self):
+    """leadOne from radarState, or None when it is missing or not present."""
+    if not self.sm.valid.get('radarState', False):
+      return None
+    lead = self.sm['radarState'].leadOne
+    if not lead.present:
+      return None
+    return Lead(float(lead.dRel), float(lead.vRel), float(lead.vLead))
+
+  def _bp_follow(self, CC, CS, op_accel, op_gas, accel_due_to_pitch):
+    """BP long follow control. Returns (accel, gas, brake_actuate, precharge_actuate, applied)."""
+    v_ego = max(CS.out.vEgo, 0.5)
+    lead = self._read_lead()
+
+    lead_time_sec = 999.0
+    ttc_sec = 120.0
+    v_lead_mph = 0.0
+    if lead is not None:
+      v_lead_mph = lead.v_lead * 2.23694
+      if lead.d_rel > 0:
+        lead_time_sec = lead.d_rel / v_ego
+      ttc_sec = lead.d_rel / (-lead.v_rel) if (lead.d_rel > 0 and lead.v_rel < 0) else 60.0
+    lead_time_sec = float(np.clip(lead_time_sec, 0.0, 999.0))
+    ttc_sec = float(np.clip(ttc_sec, 0.2, 120.0))
+
+    gas_lo, gas_hi, accel_lo, accel_hi = follow_limits(lead, lead_time_sec, op_gas, op_accel, accel_due_to_pitch)
+    bp_gas = clip(op_gas, gas_lo, gas_hi)
+    bp_accel = clip(op_accel, accel_lo, accel_hi)
+
+    # Rate limit downward accel changes (dampen initial brake hit); skip on imminent collision risk
+    if ttc_sec > 8.0 and lead_time_sec > 0.5:
+      bp_accel = clip(bp_accel, self.bp_accel_last - self.following_accel_ROC, 999)
+    self.bp_accel_last = bp_accel
+
+    # BP brake/precharge thresholds
+    bp_brake = bool(bp_accel < self.brake_actuate_target)
+    bp_precharge = bool(bp_accel < self.precharge_actuate_target)
+
+    applied = (self.bpSpeedAllow and not CS.out.gasPressed and not CS.out.brakePressed and
+               (lead is None or v_lead_mph > 40.0))
+    return bp_accel, bp_gas, bp_brake, bp_precharge, applied
+
   def update(self, CC, CS, op_accel, op_gas, accel_due_to_pitch, v_ego_mph, stopping, target_speed):
     """
     Apply BluePilot longitudinal follow control on top of stock op_accel/op_gas.
@@ -99,8 +176,8 @@ class LongitudinalExt:
       CC: CarControl with longActive
       CS: CarState with vEgo, gasPressed, brakePressed
       op_accel: Stock openpilot accel after creep comp + rate limit (m/s^2)
-      op_gas: Stock openpilot gas value (m/s^2)
-      accel_due_to_pitch: Pitch compensation value (m/s^2, may be clamped by downhill toggle)
+      op_gas: Planner gas request (m/s^2), raw: encode_gas() decides when propulsion is inactive
+      accel_due_to_pitch: Pitch compensation value (m/s^2, clamped by the downhill toggle in the caller)
       v_ego_mph: Current speed in mph
       stopping: True if in stopping state
       target_speed: Target cruise speed (km/h)
@@ -108,9 +185,6 @@ class LongitudinalExt:
     Returns:
       LongitudinalResult namedtuple with final accel, gas, brake, precharge values.
     """
-    # Downhill compensation disable: clamp negative pitch to 0 (already applied by caller,
-    # but this is where the logic lives conceptually)
-
     # Op brake actuate hysteresis
     accel_pitch_compensated = op_accel + accel_due_to_pitch
     op_brake_actuate = self.op_brake_actuate_last
@@ -118,147 +192,21 @@ class LongitudinalExt:
       op_brake_actuate = False
     elif accel_pitch_compensated < self.brake_actuate_target:
       op_brake_actuate = True
+    self.op_brake_actuate_last = op_brake_actuate
 
     # Speed deadband: engage above 50 mph, disallow below 45 mph
-    bpSpeedTooSlow = v_ego_mph < self.MAX_URBAN_SPEED_MPH
-    bpSpeedHighEnough = v_ego_mph > self.MAX_URBAN_SPEED_MPH + 5
-    if bpSpeedHighEnough:
+    if v_ego_mph > self.MAX_URBAN_SPEED_MPH + 5:
       self.bpSpeedAllow = True
-    if bpSpeedTooSlow:
+    if v_ego_mph < self.MAX_URBAN_SPEED_MPH:
       self.bpSpeedAllow = False
 
-    # BP longitudinal follow control
+    accel, gas, brake_actuate, precharge_actuate = op_accel, op_gas, op_brake_actuate, op_brake_actuate
+    bp_long_used = False
     if not self.disable_BP_long_UI:
-      # Read lead vehicle data from radarState (SubMaster is on self via mixin)
-      v_ego = max(CS.out.vEgo, 0.5)
-      lead_time_sec = 999.0
-      lead = None
-      v_rel = 0.0
-      v_lead = 0.0
-
-      if self.sm.valid.get('radarState', False):
-        rs = self.sm['radarState']
-        lead = getattr(rs, 'leadOne', None)
-        # LeadData.status was renamed to present upstream (#38339); reading
-        # 'status' returned the default and dropped every lead.
-        if lead is not None and not getattr(lead, 'present', False):
-          lead = None
-        if lead:
-          d_rel = float(getattr(lead, 'dRel', 0))
-          v_rel = float(getattr(lead, 'vRel', 0))
-          v_lead = float(getattr(lead, 'vLead', 0))
-          if d_rel > 0:
-            lead_time_sec = d_rel / v_ego
-
-      lead_time_sec = float(np.clip(lead_time_sec, 0.0, 999.0))
-      v_lead_mph = v_lead * 2.23694
-
-      # Time to collision
-      ttc_sec = 120.0
-      if lead:
-        d_rel = float(getattr(lead, 'dRel', 0))
-        v_rel = float(getattr(lead, 'vRel', 0))
-        if d_rel > 0 and v_rel < 0:
-          ttc_sec = d_rel / (-v_rel)
-        else:
-          ttc_sec = 60.0
-      ttc_sec = float(np.clip(ttc_sec, 0.2, 120.0))
-
-      # Classify lead state: gaining, pacing, or trailing
-      gaining = False
-      pacing = False
-      trailing = False
-      max_follow_gas = op_gas
-      min_follow_gas = op_gas
-      max_follow_accel = op_accel
-      min_follow_accel = op_accel
-      bp_brake_actuate = False
-      bp_precharge_actuate = False
-
-      if lead:
-        if v_rel < -0.1:
-          gaining = True
-        elif v_rel > 0.1:
-          trailing = True
-        else:
-          pacing = True
-
-      # Gas/accel limits per state
-      if gaining:
-        if lead_time_sec < 1.5:
-          max_follow_gas = 0.0  # within 1.5s and gaining — no gas
-          min_follow_gas = 0.0
-        else:
-          max_follow_gas = op_gas
-          min_follow_gas = op_gas
-        max_follow_accel = op_accel
-        min_follow_accel = op_accel
-
-      if pacing:
-        max_follow_gas = 0.2 + accel_due_to_pitch  # cap gas when pacing
-        min_follow_gas = 0.0
-        max_follow_accel = op_accel
-        min_follow_accel = op_accel
-
-      if trailing:
-        max_follow_gas = op_gas
-        min_follow_gas = op_gas
-        max_follow_accel = op_accel
-        min_follow_accel = op_accel
-
-      if lead is None:
-        max_follow_gas = op_gas
-        min_follow_gas = op_gas
-        max_follow_accel = 0
-        min_follow_accel = 0
-
-      # Apply BP gas and accel targets
-      bp_gas = clip(op_gas, min_follow_gas, max_follow_gas)
-      bp_accel = clip(op_accel, min_follow_accel, max_follow_accel)
-
-      # Rate limit downward accel changes (dampen initial brake hit)
-      # Skip rate limit if imminent collision risk
-      if ttc_sec > 8.0 and lead_time_sec > 0.5:
-        bp_accel = clip(bp_accel, self.bp_accel_last - self.following_accel_ROC, 999)
-
-      # BP brake/precharge hysteresis
-      if bp_accel < self.brake_actuate_target:
-        bp_brake_actuate = True
-      if bp_accel > self.brake_actuate_release:
-        bp_brake_actuate = False
-      if bp_accel < self.precharge_actuate_target:
-        bp_precharge_actuate = True
-      if bp_accel > self.precharge_actuate_release:
-        bp_precharge_actuate = False
-
-      # Decide whether to apply BP long
-      gasPressed = CS.out.gasPressed
-      brakePressed = CS.out.brakePressed
-      apply_bp_long = (not self.disable_BP_long_UI and self.bpSpeedAllow and
-                       not gasPressed and not brakePressed and
-                       (lead is None or v_lead_mph > 40.0))
-
-      if apply_bp_long and CC.longActive:
-        accel = bp_accel
-        gas = bp_gas
-        brake_actuate = bp_brake_actuate
-        precharge_actuate = bp_precharge_actuate
-      else:
-        accel = op_accel
-        gas = op_gas
-        brake_actuate = op_brake_actuate
-        precharge_actuate = op_brake_actuate
-
-      self.bp_gas_last = bp_gas
-      self.bp_accel_last = bp_accel
-      bp_long_used = apply_bp_long
-    else:
-      # BP long disabled — pass through stock values
-      accel = op_accel
-      gas = op_gas
-      brake_actuate = op_brake_actuate
-      precharge_actuate = op_brake_actuate
-      bp_long_used = False
+      bp_accel, bp_gas, bp_brake, bp_precharge, bp_long_used = self._bp_follow(CC, CS, op_accel, op_gas,
+                                                                               accel_due_to_pitch)
+      if bp_long_used and CC.longActive:
+        accel, gas, brake_actuate, precharge_actuate = bp_accel, bp_gas, bp_brake, bp_precharge
 
     # Regen blend: decel through negative propulsion (regen), brake flag only for real braking.
     # Any negative request counts as braking: gas is never positive while decelerating.
@@ -271,31 +219,17 @@ class LongitudinalExt:
         regen_brake = True
       elif accel_pitch > self.REGEN_BRAKE_OFF:
         regen_brake = False
-      brake_actuate = regen_brake
-      precharge_actuate = regen_brake
+      brake_actuate = precharge_actuate = regen_brake
 
-      # INACTIVE gas from upstream means op_gas < MIN_GAS: treat as max regen
-      gas_want = CarControllerParams.MIN_GAS if gas == CarControllerParams.INACTIVE_GAS else gas
-      decel_req = min(accel, gas_want)
+      decel_req = min(accel, gas)
       if not brake_actuate and decel_req < 0.0:
-        gas = max(decel_req, CarControllerParams.MIN_GAS)
-      self.regen_brake_actuate_last = regen_brake
-    else:
-      self.regen_brake_actuate_last = brake_actuate
+        gas = max(decel_req, MIN_GAS)
+    self.regen_brake_actuate_last = brake_actuate
 
-    # Mutual exclusion: no brake and gas at the same time
-    if brake_actuate:
-      gas = CarControllerParams.INACTIVE_GAS
-
-    # Clip to ford.h ACCDATA safety limits
     accel = float(clip(accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
-    if gas != CarControllerParams.INACTIVE_GAS:
-      gas = float(clip(gas, CarControllerParams.MIN_GAS, CarControllerParams.ACCEL_MAX))
+    gas = encode_gas(gas, CC.longActive, brake_actuate)
     # Stock Ford mirrors the propulsion request into AccPrpl_A_Pred (op sends INACTIVE)
-    accel_pred_send = gas if regen_active else CarControllerParams.INACTIVE_GAS
-
-    self._bp_long_active_last = bp_long_used
-    self.op_brake_actuate_last = op_brake_actuate
+    accel_pred_send = gas if regen_active else INACTIVE_GAS
 
     return LongitudinalResult(
       accel=accel,
