@@ -941,6 +941,18 @@ static safety_config ford_init(uint16_t param) {
   const uint16_t FORD_PARAM_CANFD = 2;
   const bool ford_canfd = GET_FLAG(param, FORD_PARAM_CANFD);
 
+  // BluePilot: start every safety-mode init clean. The 4-signal lateral state (last path angle /
+  // path offset / curvature rate for the rate checks, the reset bypass latch, and angle mode's
+  // Lane_Assist_Data1 flag + shadow curvature) would otherwise carry over from before the re-init:
+  // a latch armed earlier could waive the first checks after it.
+  desired_path_angle_last = 0;
+  desired_path_offset_last = 0;
+  desired_curvature_rate_last = 0;
+  reset_bypass_latch_counter = 0U;
+  ford_bp_angle_mode_engaged = false;
+  ford_bp_shadow_curvature_raw = 0;
+  // End BluePilot
+
   bool ford_longitudinal = false;
 
 #ifdef ALLOW_DEBUG

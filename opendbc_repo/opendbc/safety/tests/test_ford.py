@@ -602,8 +602,15 @@ class TestFordLongitudinalSafetyBase(TestFordSafetyBase):
           should_tx = should_tx and (controls_allowed or not brake_actuation)
           self.assertEqual(should_tx, self._tx(self._acc_command_msg(self.INACTIVE_GAS, brake, brake_actuation)))
 class TestFordLongitudinalSafety(TestFordLongitudinalSafetyBase):
-  # Make sure we enforce long safety even without long flag for CAN
-  SAFETY_PARAM = 0
+  # BluePilot: openpilot longitudinal needs the LONG_CONTROL flag on CAN too (upstream made it the CAN
+  # default; ford_init keeps it opt-in). Without the flag, ACCDATA may not be sent at all -- see
+  # test_no_accdata_without_long_flag.
+  SAFETY_PARAM = FordSafetyFlags.LONG_CONTROL
+
+  def test_no_accdata_without_long_flag(self):
+    self.safety.set_safety_hooks(CarParams.SafetyModel.ford, 0)
+    self.safety.set_controls_allowed(True)
+    self.assertFalse(self._tx(self._acc_command_msg(self.INACTIVE_GAS, self.INACTIVE_ACCEL, False)))
   STEER_MESSAGE = MSG_LateralMotionControl
 
   TX_MSGS = [
