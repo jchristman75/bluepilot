@@ -12,7 +12,7 @@ from bluepilot.backend.routes import processing
 
 FW = [
   ('eps', b'LJ8C-14D003-AE\x00\x00'),          # printable Ford part number (NULs stripped)
-  ('abs', bytes(range(0, 40))),                 # binary: first 16 bytes as hex
+  ('abs', bytes(range(40))),                    # binary: first 16 bytes as hex
   ('fwdCamera', b''),                           # empty
 ]
 

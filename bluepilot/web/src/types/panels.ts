@@ -67,6 +67,7 @@ interface BaseControl {
   confirm_yes_text?: string
   confirm_no_text?: string
   requiresReboot?: boolean
+  disabled?: boolean  // never editable here (blocked, or not available on this device)
 
   // Web UI support flag
   webSupported?: boolean // Set to false to hide control in web UI (defaults to true if omitted)

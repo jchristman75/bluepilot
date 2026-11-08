@@ -258,6 +258,7 @@ export const CerealDataPanel = ({ route, currentSegment, videoCurrentTime = 0 }:
                 <optgroup label="Localization">
                   <option value="extrinsicsCalibration">extrinsicsCalibration - Camera calibration</option>
                   <option value="deviceMotion">deviceMotion - Vehicle pose</option>
+                  <option value="gpsLocationExternal">gpsLocationExternal - GPS data (u-blox, comma four)</option>
                   <option value="gpsLocation">gpsLocation - GPS data</option>
                 </optgroup>
                 <optgroup label="Driver Monitoring">

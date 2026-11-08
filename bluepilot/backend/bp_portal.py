@@ -98,6 +98,8 @@ from bluepilot.backend.config import (
 from bluepilot.backend.core import ServerState
 from bluepilot.backend.core import process_manager, lifecycle
 
+from bluepilot.backend.params.settings_panels import list_panels, portal_panels
+
 # Network utilities
 from bluepilot.backend.network import (
     is_onroad, should_server_run,
@@ -2031,10 +2033,7 @@ class WebRoutesHandler(BaseHTTPRequestHandler):
             elif path == '/api/panels':
                 # List the settings panels (built from the Sunnylink settings schema)
                 try:
-                    from bluepilot.backend.params.settings_panels import build_panels, list_panels
-                    from bluepilot.backend.params.params_manager import _load_param_type_cache
-                    panels = build_panels(param_types=_load_param_type_cache())
-                    self.send_json_response({'success': True, 'panels': list_panels(panels)})
+                    self.send_json_response({'success': True, 'panels': list_panels(portal_panels())})
                 except Exception as e:
                     logger.error(f"Error listing panels: {e}", exc_info=True)
                     self.send_json_response({'success': False, 'error': str(e)}, 500)
@@ -2043,9 +2042,7 @@ class WebRoutesHandler(BaseHTTPRequestHandler):
                 # Get one settings panel configuration
                 panel_id = path.split('/api/panels/')[1].strip('/')
                 try:
-                    from bluepilot.backend.params.settings_panels import build_panels
-                    from bluepilot.backend.params.params_manager import _load_param_type_cache
-                    panel = build_panels(param_types=_load_param_type_cache()).get(panel_id)
+                    panel = portal_panels().get(panel_id)
                     if panel is None:
                         self.send_json_response({'success': False, 'error': 'Panel not found'}, 404)
                         return

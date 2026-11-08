@@ -139,41 +139,17 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _load_bluepilot_params() -> set:
-    """Load the BluePilot param names from the Sunnylink settings schema.
-
-    The Ford/BluePilot settings live under vehicle_settings.ford in
-    openpilot/sunnypilot/sunnylink/settings_ui.json (the old Qt panel JSONs under
-    selfdrive/ui/bluepilot/menus no longer exist). Those keys are 'BluePilot'
-    params; all others are 'System' params.
-    """
+    """The 'BluePilot' params: the Ford settings in the Sunnylink settings schema. All others are 'System'."""
     global _BLUEPILOT_PARAMS_CACHE
-    if _BLUEPILOT_PARAMS_CACHE is not None:
-        return _BLUEPILOT_PARAMS_CACHE
-
-    bp_params: set = set()
-
-    def _collect_keys(node):
-        if isinstance(node, dict):
-            key = node.get("key")
-            if isinstance(key, str):
-                bp_params.add(key)
-            for value in node.values():
-                _collect_keys(value)
-        elif isinstance(node, list):
-            for value in node:
-                _collect_keys(value)
-
-    settings_path = _REPO_ROOT / "openpilot" / "sunnypilot" / "sunnylink" / "settings_ui.json"
-    try:
-        with open(settings_path, 'r') as f:
-            settings = json.load(f)
-        _collect_keys(settings.get("vehicle_settings", {}).get("ford", {}))
-    except (json.JSONDecodeError, IOError) as e:
-        logger.warning(f"Error reading {settings_path}: {e}")
-
-    logger.info(f"Loaded {len(bp_params)} BluePilot params from {settings_path.name}")
-    _BLUEPILOT_PARAMS_CACHE = bp_params
-    return bp_params
+    if _BLUEPILOT_PARAMS_CACHE is None:
+        from bluepilot.backend.params.settings_panels import ford_setting_keys
+        try:
+            _BLUEPILOT_PARAMS_CACHE = ford_setting_keys()
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(f"Error reading the Sunnylink settings schema: {e}")
+            _BLUEPILOT_PARAMS_CACHE = set()
+        logger.info(f"Loaded {len(_BLUEPILOT_PARAMS_CACHE)} BluePilot params from the Sunnylink settings schema")
+    return _BLUEPILOT_PARAMS_CACHE
 
 
 def _load_param_type_cache() -> Dict[str, str]:
@@ -281,7 +257,7 @@ def write_param_direct(key: str, value: Any) -> Tuple[bool, Optional[str]]:
 def categorize_param(key: str) -> str:
     """Determine which category a param belongs to.
 
-    Params defined in BluePilot panel JSON files are 'BluePilot'.
+    The Ford settings in the Sunnylink settings schema are 'BluePilot'.
     All other params are 'System'.
 
     Args:

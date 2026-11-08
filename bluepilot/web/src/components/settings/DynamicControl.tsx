@@ -62,7 +62,9 @@ export function DynamicControl({ control, state, panelId, groupName }: DynamicCo
 
   // Check if enabled (using effective params so staged changes affect enabled state)
   const enabled = isControlEnabled(control, state, effectiveParams)
-  const disabledReason = !enabled ? getDisabledReason(control.enableConditions, state, effectiveParams) : null
+  const disabledReason = !enabled
+    ? (control.disabled ? 'Not available on this device' : getDisabledReason(control.enableConditions, state, effectiveParams))
+    : null
 
   // Check if this control is favorited
   const favorited = panelId && groupName ? isFavorite(panelId, groupName, control.title) : false

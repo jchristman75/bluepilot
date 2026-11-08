@@ -20,6 +20,7 @@ Rule mapping (Sunnylink -> web Conditions):
 
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -27,13 +28,28 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 SETTINGS_UI_PATH = _REPO_ROOT / "openpilot" / "sunnypilot" / "sunnylink" / "settings_ui.json"
 
 FORD_PANEL_ID = "bp_vehicle_panel"
-_IMPOSSIBLE = {"allConditionsTrue": [{"isOnroad": True}, {"isOffroad": True}]}
 _CATEGORY_RE = re.compile(r"^\s*\[([^\]]+)\]\s*(.*)$")
 
 
 def load_settings_ui(path: Path = SETTINGS_UI_PATH) -> dict:
   with open(path) as f:
     return json.load(f)
+
+
+def setting_keys(node) -> set:
+  """Every param key ('key' field) anywhere under a settings_ui.json node."""
+  if isinstance(node, dict):
+    own = {node['key']} if isinstance(node.get('key'), str) else set()
+    return own.union(*(setting_keys(v) for v in node.values()))
+  if isinstance(node, list):
+    return set().union(*(setting_keys(v) for v in node))
+  return set()
+
+
+def ford_setting_keys(settings: dict | None = None) -> set:
+  """The BluePilot (Ford) settings: vehicle_settings.ford in settings_ui.json."""
+  settings = settings if settings is not None else load_settings_ui()
+  return setting_keys(settings.get('vehicle_settings', {}).get('ford', {}))
 
 
 def load_capabilities() -> dict:
@@ -46,68 +62,92 @@ def load_capabilities() -> dict:
 
 # --- rules -------------------------------------------------------------------
 
-def _negate(cond):
-  """Negate a rule result: bool, or a dynamic Conditions dict (None if it can't be expressed)."""
-  if isinstance(cond, bool):
-    return not cond
-  if len(cond) == 1:
-    (k, v), = cond.items()
-    swaps = {"paramIsTrue": "paramIsFalse", "paramIsFalse": "paramIsTrue",
-             "isOffroad": "isOnroad", "isOnroad": "isOffroad"}
-    if k in swaps:
-      return {swaps[k]: v}
-  return None
+@dataclass(frozen=True)
+class Rule:
+  """A Sunnylink rule with the device capabilities folded in: always true, never true, or a
+  condition the web app evaluates live (`cond`, in its Conditions shape)."""
+  cond: dict | None = None
+  static: bool = True  # the result when cond is None
+
+  @property
+  def always(self) -> bool:
+    return self.cond is None and self.static
+
+  @property
+  def never(self) -> bool:
+    return self.cond is None and not self.static
 
 
-def _combine(parts: list, mode: str):
-  """Fold rule results with all/any semantics. Returns bool or Conditions."""
+ALWAYS = Rule(static=True)
+NEVER = Rule(static=False)
+
+
+def when(cond: dict) -> Rule:
+  return Rule(cond=cond)
+
+
+# A rule the web Conditions can't express is treated as ALWAYS: it never blocks a control.
+_INEXPRESSIBLE = ALWAYS
+_NEGATIONS = {"paramIsTrue": "paramIsFalse", "paramIsFalse": "paramIsTrue", "isOffroad": "isOnroad", "isOnroad": "isOffroad"}
+
+
+def _negate(rule: Rule) -> Rule:
+  if rule.cond is None:
+    return Rule(static=not rule.static)
+  if len(rule.cond) == 1:
+    (k, v), = rule.cond.items()
+    if k in _NEGATIONS:
+      return when({_NEGATIONS[k]: v})
+  return _INEXPRESSIBLE
+
+
+def _combine(rules: list[Rule], mode: str) -> Rule:
+  """all/any of the rules, with the static ones folded in."""
   dynamic = []
-  for p in parts:
-    if p is None:
-      continue  # inexpressible: don't block on it
-    if isinstance(p, bool):
-      if mode == "all" and not p:
-        return False
-      if mode == "any" and p:
-        return True
+  for r in rules:
+    if r.cond is None:
+      if mode == "all" and not r.static:
+        return NEVER
+      if mode == "any" and r.static:
+        return ALWAYS
       continue
-    dynamic.append(p)
+    dynamic.append(r.cond)
   if not dynamic:
-    return mode == "all"
+    return ALWAYS if mode == "all" else NEVER
   if len(dynamic) == 1:
-    return dynamic[0]
-  return {"allConditionsTrue" if mode == "all" else "anyConditionsTrue": dynamic}
+    return when(dynamic[0])
+  return when({"allConditionsTrue" if mode == "all" else "anyConditionsTrue": dynamic})
 
 
-def convert_rule(rule: dict, caps: dict):
-  """One Sunnylink rule -> True/False (static) or a web Conditions dict (dynamic)."""
+def convert_rule(rule: dict, caps: dict) -> Rule:
+  """One Sunnylink rule -> Rule."""
   t = rule.get("type")
   if t in ("offroad_only", "not_engaged"):
-    return {"isOffroad": True}
+    return when({"isOffroad": True})
   if t == "param":
     key, eq = rule.get("key"), rule.get("equals")
     if isinstance(eq, bool):
-      return {"paramIsTrue": key} if eq else {"paramIsFalse": key}
-    return {"paramValueEquals": {key: str(eq)}}
+      return when({"paramIsTrue": key} if eq else {"paramIsFalse": key})
+    return when({"paramValueEquals": {key: str(eq)}})
   if t == "param_compare":
     op, key, val = rule.get("op"), rule.get("key"), rule.get("value")
     if op == ">":
-      return {"paramValueGreaterThan": {key: val}}
+      return when({"paramValueGreaterThan": {key: val}})
     if op == "<":
-      return {"paramValueLessThan": {key: val}}
+      return when({"paramValueLessThan": {key: val}})
     if op in ("==", "="):
-      return {"paramValueEquals": {key: str(val)}}
-    return None
+      return when({"paramValueEquals": {key: str(val)}})
+    return _INEXPRESSIBLE
   if t == "capability":
-    return caps.get(rule.get("field")) == rule.get("equals")
+    return ALWAYS if caps.get(rule.get("field")) == rule.get("equals") else NEVER
   if t == "not":
     return _negate(convert_rule(rule.get("condition", {}), caps))
   if t in ("any", "all"):
     return _combine([convert_rule(r, caps) for r in rule.get("conditions", [])], t)
-  return None
+  return _INEXPRESSIBLE
 
 
-def convert_rules(rules: list | None, caps: dict):
+def convert_rules(rules: list | None, caps: dict) -> Rule:
   return _combine([convert_rule(r, caps) for r in (rules or [])], "all")
 
 
@@ -121,7 +161,7 @@ def _options(item: dict) -> list:
 def convert_item(item: dict, caps: dict, param_types: dict, title: str | None = None) -> dict | None:
   """One Sunnylink item -> web PanelControl, or None when it is hidden on this device."""
   visible = convert_rules(item.get("visibility"), caps)
-  if visible is False:
+  if visible.never:
     return None
   key = item.get("key")
   widget = item.get("widget")
@@ -146,19 +186,17 @@ def convert_item(item: dict, caps: dict, param_types: dict, title: str | None = 
 
   if item.get("needs_onroad_cycle"):
     control["requiresReboot"] = True
-  if isinstance(visible, dict):
-    control["visibleConditions"] = visible
-  enabled = convert_rules(item.get("enablement"), caps)
-  if item.get("blocked"):
-    enabled = False
-  if enabled is False:
-    control["enableConditions"] = _IMPOSSIBLE
-  elif isinstance(enabled, dict):
-    control["enableConditions"] = enabled
+  if visible.cond is not None:
+    control["visibleConditions"] = visible.cond
+  enabled = NEVER if item.get("blocked") else convert_rules(item.get("enablement"), caps)
+  if enabled.never:
+    control["disabled"] = True
+  elif enabled.cond is not None:
+    control["enableConditions"] = enabled.cond
   return control
 
 
-def _group(name: str, title: str, items: list, caps: dict, param_types: dict, visible=True) -> dict | None:
+def _group(name: str, title: str, items: list, caps: dict, param_types: dict, visible: Rule = ALWAYS) -> dict | None:
   controls = []
   for it in items:
     c = convert_item(it, caps, param_types)
@@ -168,12 +206,13 @@ def _group(name: str, title: str, items: list, caps: dict, param_types: dict, vi
       sc = convert_item(sub, caps, param_types)
       if sc:
         controls.append(sc)
-  if not controls or visible is False:
+  if not controls or visible.never:
     return None
   group = {"groupName": name, "title": title, "controls": controls}
-  if isinstance(visible, dict):
+  if visible.cond is not None:
     for c in controls:  # sub-panel trigger (e.g. Mads on) gates every control in it
-      c["visibleConditions"] = _combine([visible, c.get("visibleConditions", True)], "all")
+      own = when(c["visibleConditions"]) if "visibleConditions" in c else ALWAYS
+      c["visibleConditions"] = _combine([visible, own], "all").cond
   return group
 
 
@@ -186,7 +225,7 @@ def _panel_from_sp(panel: dict, caps: dict, param_types: dict) -> dict:
     if g:
       groups.append(g)
     for sub in sec.get("sub_panels", []) or []:
-      trigger = convert_rule(sub["trigger_condition"], caps) if sub.get("trigger_condition") else True
+      trigger = convert_rule(sub["trigger_condition"], caps) if sub.get("trigger_condition") else ALWAYS
       g = _group(sub.get("id", ""), sub.get("label", ""), sub.get("items", []), caps, param_types, trigger)
       if g:
         groups.append(g)
@@ -223,6 +262,12 @@ def build_panels(settings: dict | None = None, caps: dict | None = None,
     if panel["groups"]:
       panels[f"bp_{p['id']}_panel"] = panel
   return panels
+
+
+def portal_panels() -> dict[str, dict]:
+  """The panels for this device, as /api/panels serves them."""
+  from bluepilot.backend.params.params_manager import _load_param_type_cache
+  return build_panels(param_types=_load_param_type_cache())
 
 
 def list_panels(panels: dict[str, dict]) -> list[dict]:

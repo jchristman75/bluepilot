@@ -111,38 +111,20 @@ class ParamsWatcher:
             logger.error(f"Error updating params cache: {e}")
 
     def _read_param_value(self, key: str) -> Any:
-        """Read a param value using the Params instance"""
+        """A param's value as broadcast to the web app (JSON-friendly), None if unset or unreadable.
+
+        Params.get returns the declared type (bool/int/float/str/dict/bytes/datetime), so no
+        guessing is needed. TIME values (datetime) aren't JSON and stay unbroadcast (None).
+        """
         try:
-            # Try boolean first
-            if key.endswith("Enabled") or key.endswith("Toggle") or key in ["IsOffroad", "Passive"]:
-                return self.params.get_bool(key)
-
-            # Params.get returns the declared type (bool/int/float/str/dict/bytes);
-            # it no longer takes encoding= (that raised TypeError on every read)
             value = self.params.get(key)
-
-            if value is None or value == b'' or value == '':
-                return None
-
-            if isinstance(value, (bool, int, float, dict, list)):
-                return value
-
-            if isinstance(value, bytes):
-                value = value.decode('utf-8', errors='replace')
-
-            # Try to parse as number
-            if value.isdigit():
-                return int(value)
-
-            try:
-                return float(value)
-            except ValueError:
-                pass
-
-            return value
-
         except Exception:
             return None
+        if isinstance(value, bytes):
+            value = value.decode('utf-8', errors='replace')
+        if value is None or value == '' or not isinstance(value, (bool, int, float, str, dict, list)):
+            return None
+        return value
 
     def _check_for_changes(self):
         """Check for changes in params directory"""

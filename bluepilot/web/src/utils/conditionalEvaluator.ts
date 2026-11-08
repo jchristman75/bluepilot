@@ -333,6 +333,9 @@ export function isControlEnabled(
   state: PanelState,
   params: Record<string, any>
 ): boolean {
+  if (control.disabled) {
+    return false
+  }
   if (control.enableConditions) {
     return evaluateConditions(control.enableConditions, state, params)
   }
