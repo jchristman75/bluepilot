@@ -254,6 +254,13 @@ static const AngleSteeringParams ford_pinion_geometry[FORD_PINION_GEOMETRY_COUNT
 static bool ford_bp_pinion_curvature = false;
 static const AngleSteeringParams *ford_bp_pinion_params = &ford_pinion_geometry[0];
 
+// BluePilot: regen coasting (FordSafetyFlagsBP.REGEN_BLEND, bit 14 of current_safety_param_sp;
+// BluePilot allocates SP bits from 14 downward, sunnypilot from 0 upward; bit 15 is the sign
+// bit of the Int16 CarParamsSP.safetyParam it comes from),
+// set once in ford_init. When set, propulsion requests may go down to -0.9 m/s^2 instead of
+// -0.5: stock Ford ACC itself sends AccPrpl_A_Rq to ~-0.88 (regen) with the brake flag off.
+static bool ford_bp_regen_blend = false;
+
 
 
 static int desired_path_angle_last = 0;
@@ -498,6 +505,18 @@ static bool ford_tx_hook(const CANPacket_t *msg) {
     .inactive_gas = 0,       // -5.0 m/s^2
   };
 
+  // BluePilot: with regen coasting enabled at init, the gas floor is -0.9 (regen); all else equal
+  const LongitudinalLimits FORD_LONG_LIMITS_REGEN = {
+    .max_accel = 5641,
+    .min_accel = 4231,
+    .inactive_accel = 5128,
+    .max_gas = 700,
+    .min_gas = 410,          // -0.9 m/s^2
+    .inactive_gas = 0,
+  };
+  const LongitudinalLimits *ford_long_limits = ford_bp_regen_blend ? &FORD_LONG_LIMITS_REGEN : &FORD_LONG_LIMITS;
+  // End BluePilot
+
   bool tx = true;
 
   // Safety check for ACCDATA accel and brake requests
@@ -515,9 +534,9 @@ static bool ford_tx_hook(const CANPacket_t *msg) {
     bool brake_actuation = (msg->data[6] & 0xC0U) != 0U;
 
     bool violation = false;
-    violation |= longitudinal_accel_checks(accel, FORD_LONG_LIMITS);
-    violation |= longitudinal_gas_checks(gas, FORD_LONG_LIMITS);
-    violation |= longitudinal_gas_checks(gas_pred, FORD_LONG_LIMITS);
+    violation |= longitudinal_accel_checks(accel, *ford_long_limits);
+    violation |= longitudinal_gas_checks(gas, *ford_long_limits);
+    violation |= longitudinal_gas_checks(gas_pred, *ford_long_limits);
 
     // Safety check for stock AEB
     violation |= cmbb_deny;  // do not prevent stock AEB actuation
@@ -946,6 +965,10 @@ static safety_config ford_init(uint16_t param) {
   }
   ford_bp_pinion_curvature = pinion_enabled;
   ford_bp_pinion_params = pinion_enabled ? &ford_pinion_geometry[pinion_geometry_index] : &ford_pinion_geometry[0];
+
+  // BluePilot: regen coasting (bit 14): allow propulsion requests down to -0.9 m/s^2 (see ford_tx_hook)
+  const uint16_t FORD_PARAM_BP_REGEN_BLEND = 0x4000U;
+  ford_bp_regen_blend = GET_FLAG(current_safety_param_sp, FORD_PARAM_BP_REGEN_BLEND);
 
   // BluePilot: upstream replaced this runtime selection with a compile-time #ifdef ALLOW_DEBUG
   // gate. Not adopted -- BluePilot keeps the ford_longitudinal runtime path above so the CAN FD

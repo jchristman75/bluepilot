@@ -52,6 +52,27 @@ class FordSafetyFlagsSP:
   IntFlag: CP_SP.safetyParam must stay a plain int through capnp serialization in card.
   """
   STEER_ANGLE_CURVATURE = 1
+  # Bits 1-4 carry the pinion geometry index (FORD_PINION_GEOMETRY_SHIFT).
+
+
+class FordSafetyFlagsBP:
+  """BluePilot-only Ford safety flags, in the same SP safety param (current_safety_param_sp,
+  a uint16) as FordSafetyFlagsSP.
+
+  sunnypilot allocates brand SP flags from bit 0 upward; BluePilot allocates from bit 14
+  downward so an upstream Ford SP flag can't land on a BP bit. Bit 15 is unusable: CP_SP
+  .safetyParam is an Int16 in custom.capnp, and 1 << 15 doesn't fit (card would fail to
+  serialize CarParamsSP). Next free BP bit: 13.
+  """
+  # Regen coasting (BPLongRegenBlend) set at car init: the panda then accepts propulsion
+  # (AccPrpl_A_Rq/AccPrpl_A_Pred) requests down to REGEN_MIN_GAS instead of MIN_GAS.
+  REGEN_BLEND = 1 << 14
+
+
+# Deepest propulsion (regen) request with FordSafetyFlagsBP.REGEN_BLEND set, m/s^2. Stock Ford ACC (Mach-E,
+# routes 4e6/4f8) sends AccPrpl_A_Rq down to ~-0.88 with the brake flag off, and the car
+# delivers it; -0.9 stays inside that observed envelope. Must match ford.h (raw 410).
+REGEN_MIN_GAS = -0.9
 
 
 # Geometry-table index for the steering-angle curvature measurement, packed into
@@ -128,4 +149,3 @@ def apply_bp_device_mount(car_docs, CP):
     car_docs.car_parts = CarParts([Device.threex_angled_mount, harness])
   else:
     car_docs.car_parts = CarParts([Device.threex, harness])
-

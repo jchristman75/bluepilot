@@ -14,7 +14,7 @@ from opendbc.car.lateral import MAX_LATERAL_ACCEL as ISO_MAX_LATERAL_ACCEL, MAX_
 from opendbc.car.ford.values import CAR, FordFlags, FordSafetyFlags
 from opendbc.car import scale_tire_stiffness_per_mass
 from opendbc.car.vehicle_model import VehicleModel, calc_slip_factor
-from opendbc.sunnypilot.car.ford.values_ext import FORD_PINION_GEOMETRY_INDEX, FORD_PINION_GEOMETRY_SHIFT, FordSafetyFlagsSP
+from opendbc.sunnypilot.car.ford.values_ext import FORD_PINION_GEOMETRY_INDEX, FORD_PINION_GEOMETRY_SHIFT, FordSafetyFlagsBP, FordSafetyFlagsSP, REGEN_MIN_GAS
 from opendbc.car.structs import CarParams
 
 MSG_BrakeSysFeatures = 0x415       # RX from ABS, for vehicle speed
@@ -834,6 +834,33 @@ class TestFordPinionBroncoSportSafety(FordBroncoSportPinionGeometry, TestFordPin
 
 class TestFordPinionF150Safety(FordF150PinionGeometry, TestFordPinionCurvatureSafetyBase, TestFordCANFDLongitudinalSafety):
   pass
+
+
+# =============================================================================
+# BluePilot: regen coasting (FordSafetyFlagsBP.REGEN_BLEND, bit 14). With the flag the propulsion
+# request may go down to REGEN_MIN_GAS (-0.9); without it the stock -0.5 floor holds (every
+# class above re-checks that). The inherited test_gas_safety_check sweeps both signals.
+
+class TestFordRegenCANFDLongitudinalSafety(TestFordCANFDLongitudinalSafety):
+  SAFETY_PARAM_SP = FordSafetyFlagsBP.REGEN_BLEND
+  MIN_GAS = REGEN_MIN_GAS
+
+  def test_deep_regen_needs_the_flag(self):
+    """The deeper floor is the flag's doing: same message, flag cleared at init -> rejected."""
+    self.safety.set_controls_allowed(True)
+    self.assertTrue(self._tx(self._acc_command_msg(-0.9, self.INACTIVE_ACCEL, False)))
+    self.SAFETY_PARAM_SP = 0  # re-run init without the flag
+    self.setUp()
+    self.safety.set_controls_allowed(True)
+    self.assertFalse(self._tx(self._acc_command_msg(-0.9, self.INACTIVE_ACCEL, False)))
+    self.assertTrue(self._tx(self._acc_command_msg(-0.5, self.INACTIVE_ACCEL, False)))
+
+
+class TestFordPinionRegenCANFDLongitudinalSafety(FordExplorerPinionGeometry, TestFordPinionCurvatureSafetyBase,
+                                                 TestFordCANFDLongitudinalSafety):
+  """Both SP features at once: the regen bit must not disturb the pinion flag/index, or vice versa."""
+  SAFETY_PARAM_SP = FordExplorerPinionGeometry.SAFETY_PARAM_SP | FordSafetyFlagsBP.REGEN_BLEND
+  MIN_GAS = REGEN_MIN_GAS
 
 
 class TestFordPinionGeometryTable(unittest.TestCase):

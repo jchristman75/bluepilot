@@ -611,7 +611,7 @@ class BluePilotLayout(Widget):
     # Regen coasting: gentle decel via regen (stock-like), brake flag only for real braking
     self._regen_blend = toggle_item(
       lambda: tr("Regen Coasting (Stock-Like Decel)"),
-      lambda: tr("Slow gently with regen like stock Ford ACC and use the brakes only for real braking."),
+      lambda: tr("Slow with regen like stock Ford ACC and use the friction brakes only for firmer braking. Turning it on takes effect after a restart."),
       initial_state=self._safe_get_bool(self._params, "BPLongRegenBlend"),
       callback=lambda state: self._toggle_callback(state, "BPLongRegenBlend"),
       icon="chffr_wheel.png"

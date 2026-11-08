@@ -21,7 +21,7 @@ from opendbc.car.subaru.values import SubaruFlags
 from opendbc.car.toyota.values import ToyotaFlags
 from opendbc.car.volkswagen.values import VolkswagenFlags
 from opendbc.car.toyota.values import ToyotaSafetyFlags
-from opendbc.sunnypilot.car.ford.values_ext import FORD_PINION_GEOMETRY_INDEX, FORD_PINION_GEOMETRY_SHIFT, FordSafetyFlagsSP
+from opendbc.sunnypilot.car.ford.values_ext import FORD_PINION_GEOMETRY_INDEX, FORD_PINION_GEOMETRY_SHIFT, FordSafetyFlagsBP, FordSafetyFlagsSP
 from opendbc.sunnypilot.car.hyundai.enable_radar_tracks import enable_radar_tracks as hyundai_enable_radar_tracks
 from opendbc.sunnypilot.car.hyundai.longitudinal.helpers import LongitudinalTuningType
 from opendbc.sunnypilot.car.hyundai.values import HyundaiFlagsSP
@@ -202,6 +202,12 @@ def _initialize_ford(CP: structs.CarParams, CP_SP: structs.CarParamsSP, params_d
     # Read at car init, so it takes effect after an onroad cycle / reboot.
     if int(params_dict.get("disable_ford_radar_UI", 0) or 0) == 1:
       CP.radarUnavailable = True
+
+    # BluePilot: regen coasting. Tells the panda (ford.h) to accept propulsion requests down to
+    # REGEN_MIN_GAS; LongitudinalExt only goes below MIN_GAS when this was set at init. Read at
+    # car init, so turning it on takes effect after an onroad cycle; turning it off is immediate.
+    if int(params_dict.get("BPLongRegenBlend", 0) or 0) == 1:
+      CP_SP.safetyParam |= FordSafetyFlagsBP.REGEN_BLEND
 
 
 def _initialize_toyota(CP: structs.CarParams, CP_SP: structs.CarParamsSP, params_dict: dict[str, str]) -> None:

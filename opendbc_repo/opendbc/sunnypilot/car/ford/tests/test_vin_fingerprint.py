@@ -73,3 +73,36 @@ if __name__ == '__main__':
   test_match_vin_to_car()
   test_no_platform_matches_two_ways()
   print('ok')
+
+
+def test_regen_blend_flag_set_at_init():
+  from opendbc.car import structs
+  from opendbc.sunnypilot.car.interfaces import _initialize_ford
+  from opendbc.sunnypilot.car.ford.values_ext import FordSafetyFlagsBP, FordSafetyFlagsSP
+  for on in (False, True):
+    for pinion in (False, True):
+      CP = structs.CarParams()
+      CP.brand = 'ford'
+      CP.carFingerprint = 'FORD_MUSTANG_MACH_E_MK1'
+      CP_SP = structs.CarParamsSP()
+      _initialize_ford(CP, CP_SP, {"BPLongRegenBlend": on, "FordPrefSteerAngleCurvature": pinion})
+      assert bool(CP_SP.safetyParam & FordSafetyFlagsBP.REGEN_BLEND) == on
+      assert bool(CP_SP.safetyParam & FordSafetyFlagsSP.STEER_ANGLE_CURVATURE) == pinion  # untouched
+
+
+def test_ford_sp_and_bp_flags_fit_the_int16_safety_param():
+  """CP_SP.safetyParam is an Int16 in custom.capnp: every flag combination must serialize (bit 15
+  would make card fail to publish CarParamsSP), and SP (from bit 0) and BP (from bit 14) bits
+  must not overlap."""
+  from opendbc.car import structs
+  from opendbc.sunnypilot.car.ford.values_ext import (FORD_PINION_GEOMETRY_INDEX, FORD_PINION_GEOMETRY_SHIFT,
+                                                       FordSafetyFlagsBP, FordSafetyFlagsSP)
+  from openpilot.selfdrive.car.helpers import convert_to_capnp
+  sp_bits = FordSafetyFlagsSP.STEER_ANGLE_CURVATURE | (max(FORD_PINION_GEOMETRY_INDEX.values()) << FORD_PINION_GEOMETRY_SHIFT)
+  sp_mask = FordSafetyFlagsSP.STEER_ANGLE_CURVATURE | (0xF << FORD_PINION_GEOMETRY_SHIFT)
+  bp_bits = FordSafetyFlagsBP.REGEN_BLEND
+  assert sp_mask & bp_bits == 0
+  for value in (sp_bits, bp_bits, sp_bits | bp_bits):
+    CP_SP = structs.CarParamsSP()
+    CP_SP.safetyParam = value
+    assert convert_to_capnp(CP_SP).safetyParam == value

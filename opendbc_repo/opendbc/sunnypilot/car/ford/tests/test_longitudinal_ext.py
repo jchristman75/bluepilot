@@ -155,3 +155,64 @@ def test_bp_path_brake_decision_includes_pitch():
   assert not step(c, -0.10, v_ego=27.0, pitch=0.0).brake_actuate
   c = _bp_ctrl()
   assert step(c, -0.10, v_ego=27.0, pitch=-0.10).brake_actuate  # -0.2 with the (downhill) pitch
+
+
+# ---- deep regen (FordSafetyFlagsBP.REGEN_BLEND set at car init) ----
+
+from opendbc.sunnypilot.car.ford.values_ext import FordSafetyFlagsBP, REGEN_MIN_GAS
+
+
+class DeepCtrl(Ctrl):
+  def __init__(self, regen=True, flag=True, **kw):
+    LongitudinalExt.__init__(self, None, SimpleNamespace(safetyParam=FordSafetyFlagsBP.REGEN_BLEND if flag else 0))
+    self.regen_blend_UI = regen
+    self.disable_BP_long_UI = kw.get('disable_bp_long', False)
+    self.sm = FakeSM(kw.get('lead'))
+
+
+def test_deep_regen_covers_medium_slowing_without_friction():
+  c = DeepCtrl()
+  for a in (-0.3, -0.6, -0.85, -0.9):
+    r = step(c, a)
+    assert not r.brake_actuate, a
+    assert r.gas == a and r.accel_pred_send == a
+
+
+def test_deep_regen_brake_flag_thresholds():
+  c = DeepCtrl()
+  r = step(c, -0.93)                       # between the floor and the flag: regen at the floor
+  assert not r.brake_actuate and r.gas == REGEN_MIN_GAS
+  assert step(c, -1.0).brake_actuate       # below -0.95: friction
+  assert step(c, -0.85).brake_actuate      # band -0.95..-0.80 holds
+  r = step(c, -0.75)
+  assert not r.brake_actuate and r.gas == -0.75
+
+
+def test_deep_regen_needs_the_init_flag():
+  """Toggled on without the init flag (panda still at -0.5): today's regen floor and thresholds."""
+  c = DeepCtrl(flag=False)
+  r = step(c, -0.6)
+  assert r.brake_actuate                    # BRAKE_REGEN on at -0.55
+  c = DeepCtrl(flag=False)
+  assert step(c, -0.5).gas == -0.5 and step(c, -0.52).gas == -0.5
+
+
+def test_deep_regen_flag_but_regen_off_is_stock():
+  c = DeepCtrl(regen=False)
+  r = step(c, -0.3)
+  assert r.brake_actuate and r.gas == INACTIVE   # stock: flag below -0.14, gas inactive
+  c = DeepCtrl(regen=False)
+  assert step(c, -0.7).gas == INACTIVE           # never below -0.5 without regen active
+
+
+def test_gas_never_below_what_the_panda_allows():
+  for flag in (False, True):
+    for regen in (False, True):
+      c = DeepCtrl(regen=regen, flag=flag)
+      floor = REGEN_MIN_GAS if (flag and regen) else CarControllerParams.MIN_GAS
+      for a in [x / 20 for x in range(-60, 20)]:
+        r = step(c, a)
+        if r.gas != INACTIVE:
+          assert r.gas >= floor - 1e-9
+        if r.accel_pred_send != INACTIVE:
+          assert r.accel_pred_send >= floor - 1e-9

@@ -54,3 +54,34 @@ def test_scenarios_exercise_every_path(golden):
   assert ((d['AccPrpl_A_Rq'] < 0) & ~inactive).sum() > 5000   # regen gas
   assert inactive.sum() > 5000                     # inactive gas
   assert (d['AccPrpl_A_Pred'] > -4.9).sum() > 5000  # mirrored pred (regen)
+
+
+def _panda_accepts(acc_frames, regen_flag):
+  """Run ACCDATA frames through the compiled panda safety (ford.h), CAN FD + long control."""
+  from opendbc.car.ford.values import FordSafetyFlags
+  from opendbc.car.structs import CarParams
+  from opendbc.safety.tests.libsafety import libsafety_py
+  from opendbc.sunnypilot.car.ford.values_ext import FordSafetyFlagsBP
+  safety = libsafety_py.libsafety
+  safety.set_current_safety_param_sp(FordSafetyFlagsBP.REGEN_BLEND if regen_flag else 0)
+  safety.set_safety_hooks(CarParams.SafetyModel.ford, FordSafetyFlags.LONG_CONTROL | FordSafetyFlags.CANFD)
+  safety.init_tests()
+  safety.set_controls_allowed(True)
+  ok = np.array([safety.safety_tx_hook(libsafety_py.make_CANPacket(H.ACCDATA, 0, bytes(f))) for f in acc_frames])
+  safety.set_current_safety_param_sp(0)
+  return ok
+
+
+def test_panda_accepts_every_frame_the_controller_sends(current):
+  """Controller and panda agree on the gas floor: with the init flag, every ACCDATA frame of the
+  deep-regen scenarios passes ford.h; the same frames without the flag are rejected exactly when
+  they ask for regen below -0.5."""
+  deep = np.concatenate([acc for name, (acc, _bp) in current.items() if name.endswith('-deep')])
+  normal = np.concatenate([acc for name, (acc, _bp) in current.items() if name.endswith(('-dh0', '-dh1'))])
+  assert _panda_accepts(deep, regen_flag=True).all()
+  assert _panda_accepts(normal, regen_flag=False).all()
+  ok_without_flag = _panda_accepts(deep, regen_flag=False)
+  g = H.decode(deep)['AccPrpl_A_Rq']
+  below_stock = (g < -0.5 - 1e-6) & (g > -4.9)
+  assert below_stock.sum() > 1000
+  assert np.array_equal(~ok_without_flag, below_stock)

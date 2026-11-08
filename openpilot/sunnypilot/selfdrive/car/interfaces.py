@@ -109,6 +109,7 @@ def initialize_params(params) -> list[dict[str, Any]]:
   keys.extend([
     "FordPrefSteerAngleCurvature",
     "disable_ford_radar_UI",  # BluePilot: vision-only leads
+    "BPLongRegenBlend",  # BluePilot: deeper regen floor in the panda (FordSafetyFlagsBP.REGEN_BLEND)
   ])
 
   # hyundai

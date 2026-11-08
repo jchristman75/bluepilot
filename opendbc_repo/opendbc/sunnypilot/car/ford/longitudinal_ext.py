@@ -27,6 +27,7 @@ import numpy as np
 from numpy import clip
 
 from opendbc.car.ford.values import CarControllerParams
+from opendbc.sunnypilot.car.ford.values_ext import REGEN_MIN_GAS, FordSafetyFlagsBP
 
 INACTIVE_GAS = CarControllerParams.INACTIVE_GAS
 MIN_GAS = CarControllerParams.MIN_GAS
@@ -53,6 +54,9 @@ BRAKE_STOCK = BrakeThresholds(on=-0.14, off=-0.06)
 # Stock Ford ACC (Mach-E, routes 4e6/4f8) sends AccPrpl_A_Rq ~= AccBrkTot_A_Rq down to ~-0.9 with
 # the flag off and mirrors gas into AccPrpl_A_Pred; panda (ford.h) limits gas to MIN_GAS.
 BRAKE_REGEN = BrakeThresholds(on=-0.55, off=-0.40)
+# With the panda's deeper regen floor (FordSafetyFlagsBP.REGEN_BLEND at init), regen covers down
+# to REGEN_MIN_GAS (-0.9) and the friction brakes only come in below -0.95.
+BRAKE_REGEN_DEEP = BrakeThresholds(on=-0.95, off=-0.80)
 REGEN_MIN_SPEED = 3.0  # m/s; below this (and when stopping) the stock thresholds apply
 
 
@@ -91,12 +95,13 @@ def follow_limits(lead, lead_time_sec, op_gas, op_accel, accel_due_to_pitch):
   return 0.0, max(0.2 + accel_due_to_pitch, MIN_GAS), op_accel, op_accel
 
 
-def encode_gas(gas, long_active, brake_actuate):
+def encode_gas(gas, long_active, brake_actuate, min_gas=MIN_GAS):
   """Planner gas request -> AccPrpl_A_Rq. Propulsion is inactive when long is off, while
-  braking (never gas and brake together), or when the request is below what ford.h allows."""
-  if not long_active or brake_actuate or gas < MIN_GAS:
+  braking (never gas and brake together), or when the request is below what ford.h allows
+  (min_gas: MIN_GAS, or REGEN_MIN_GAS when the panda was told about regen coasting)."""
+  if not long_active or brake_actuate or gas < min_gas:
     return INACTIVE_GAS
-  return float(clip(gas, MIN_GAS, CarControllerParams.ACCEL_MAX))
+  return float(clip(gas, min_gas, CarControllerParams.ACCEL_MAX))
 
 
 class LongitudinalExt:
@@ -122,6 +127,8 @@ class LongitudinalExt:
 
     self.brake = BrakeHysteresis()
     self.regen_blend_UI = False
+    # The panda's gas floor is fixed at init (ford.h reads REGEN_BLEND once): never go deeper than it
+    self.deep_regen_allowed = CP_SP is not None and bool(CP_SP.safetyParam & FordSafetyFlagsBP.REGEN_BLEND)
 
     # Toggles (updated from Params each frame)
     self.disable_BP_long_UI = False
@@ -208,16 +215,18 @@ class LongitudinalExt:
     # How to deliver it: one brake flag decision on the final request
     regen_active = (self.regen_blend_UI and CC.longActive and not stopping and
                     CS.out.vEgo > REGEN_MIN_SPEED)
-    brake_actuate = self.brake.update(accel + accel_due_to_pitch, BRAKE_REGEN if regen_active else BRAKE_STOCK,
-                                      CC.longActive)
+    deep_regen = regen_active and self.deep_regen_allowed
+    gas_floor = REGEN_MIN_GAS if deep_regen else MIN_GAS
+    thresholds = BRAKE_REGEN_DEEP if deep_regen else BRAKE_REGEN if regen_active else BRAKE_STOCK
+    brake_actuate = self.brake.update(accel + accel_due_to_pitch, thresholds, CC.longActive)
     # Regen: any negative request is braking, so gas is never positive while decelerating
     if regen_active and not brake_actuate:
       decel_req = min(accel, gas)
       if decel_req < 0.0:
-        gas = max(decel_req, MIN_GAS)
+        gas = max(decel_req, gas_floor)
 
     accel = float(clip(accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
-    gas = encode_gas(gas, CC.longActive, brake_actuate)
+    gas = encode_gas(gas, CC.longActive, brake_actuate, gas_floor)
     # Stock Ford mirrors the propulsion request into AccPrpl_A_Pred (op sends INACTIVE)
     accel_pred_send = gas if regen_active else INACTIVE_GAS
 

@@ -1758,8 +1758,9 @@
        "type": "toggle"
       },
       {
-       "desc": "Slow gently with regen like stock Ford ACC and use the brakes only for real braking (below -0.55 m/s^2).",
+       "desc": "Slow with regen like stock Ford ACC, down to -0.9 m/s^2, and use the friction brakes only for firmer braking. Turning it on takes effect after a restart; turning it off is immediate.",
        "param": "BPLongRegenBlend",
+       "requiresReboot": true,
        "title": "Regen Coasting (Stock-Like Decel)",
        "type": "toggle"
       },

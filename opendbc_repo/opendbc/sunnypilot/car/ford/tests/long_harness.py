@@ -27,8 +27,10 @@ from opendbc.car.ford.values import CAR
 import opendbc.car.ford.carcontroller as carcontroller_mod
 import opendbc.sunnypilot.car.ford.lateral_curv_ext as lateral_curv_ext_mod
 from opendbc.sunnypilot.car.ford.longitudinal_ext import LongitudinalExt
+from opendbc.sunnypilot.car.ford.values_ext import FordSafetyFlagsBP
 
 GOLDEN_PATH = os.path.join(os.path.dirname(__file__), 'long_golden.npz')
+DEEP_REGEN = '_deep_regen_flag'  # scenario key (not a Param): set FordSafetyFlagsBP.REGEN_BLEND at init
 ACCDATA = 0x186
 DT = 0.01  # CarController runs at 100 Hz
 LongCtrlState = structs.CarControl.Actuators.LongControlState
@@ -148,6 +150,11 @@ def build_scenarios():
       for downhill_off in (False, True):
         param_sets.append({'BPLongRegenBlend': regen, 'disable_BP_long_UI': bp_long_off,
                            'disable_downhill_comp_UI': downhill_off})
+  # regen coasting with the panda's deeper floor (FordSafetyFlagsBP.REGEN_BLEND set at init)
+  for bp_long_off in (False, True):
+    for downhill_off in (False, True):
+      param_sets.append({'BPLongRegenBlend': True, 'disable_BP_long_UI': bp_long_off,
+                         'disable_downhill_comp_UI': downhill_off, DEEP_REGEN: True})
   shapes = [('city', 'mixed'), ('city', 'invalid'), ('highway_cross', 'pacing'), ('highway_cross', 'none'),
             ('highway', 'gaining'), ('highway', 'trailing'), ('highway', 'close'), ('stop', 'gaining')]
   seed = 0
@@ -172,6 +179,7 @@ def build_scenarios():
                             long_active=long_active, gas_pressed=gas, brake_pressed=brake,
                             stopping=stopping, lead=lead[i]))
       flags = f"regen{int(p['BPLongRegenBlend'])}-bpoff{int(p['disable_BP_long_UI'])}-dh{int(p['disable_downhill_comp_UI'])}"
+      flags += '-deep' if p.get(DEEP_REGEN) else ''
       name = f"{speed_kind}-{lead_kind}-{flags}"
       scenarios.append(Scenario(name, p, frames))
   return scenarios
@@ -215,6 +223,8 @@ def run_scenario(sc: Scenario):
     CP = CarInterface.get_non_essential_params(CAR.FORD_MUSTANG_MACH_E_MK1)
     CP.openpilotLongitudinalControl = True
     CP_SP = CarInterface.get_non_essential_params_sp(CP, CAR.FORD_MUSTANG_MACH_E_MK1)
+    if sc.params.get(DEEP_REGEN):
+      CP_SP.safetyParam |= FordSafetyFlagsBP.REGEN_BLEND
     CI = CarInterface(CP, CP_SP)
     CS = CI.CS
     CS.buttons_stock_values = _zeros('Steering_Data_FD1')
