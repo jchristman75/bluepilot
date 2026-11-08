@@ -127,12 +127,9 @@ def create_acc_msg(packer, CAN: CanBus, long_active: bool, gas: float, accel: fl
   """
   Creates a CAN message for the Ford ACC Command.
 
-  BluePilot extension: split brake control into brake_actuate and precharge_actuate
-  (each with independent hysteresis thresholds) for smoother deceleration. Also
-  accepts accel_pred as a parameter instead of hardcoding -5.0.
-
-  Precharge engages slightly before full brake for smoother initial decel feel.
-  Both use configurable hysteresis to avoid binary on/off feel.
+  BluePilot extension: separate brake_actuate and precharge_actuate inputs (LongitudinalExt
+  currently drives both from its single brake hysteresis). Also accepts accel_pred as a
+  parameter instead of hardcoding -5.0.
 
   Frequency is 50Hz.
   """
@@ -143,7 +140,7 @@ def create_acc_msg(packer, CAN: CanBus, long_active: bool, gas: float, accel: fl
     "AccPrpl_A_Pred": accel_pred,                      # Predicted accel (from carcontroller, not hardcoded)
     "AccResumEnbl_B_Rq": 1 if long_active else 0,
     "AccVeh_V_Trg": v_ego_kph,                         # Target speed: [0|255] km/h
-    "AccBrkPrchg_B_Rq": 1 if precharge_actuate else 0, # Pre-charge brake request (independent hysteresis)
+    "AccBrkPrchg_B_Rq": 1 if precharge_actuate else 0, # Pre-charge brake request (LongitudinalExt: = brake flag)
     "AccBrkDecel_B_Rq": 1 if brake_actuate else 0,     # Deceleration request (independent hysteresis)
     "AccStopStat_B_Rq": 1 if stopping else 0,
   }

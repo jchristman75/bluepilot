@@ -171,8 +171,8 @@ def build_scenarios():
         frames.append(Frame(accel=float(accel[i]), v_ego=float(v[i]), pitch=float(pitch[i]),
                             long_active=long_active, gas_pressed=gas, brake_pressed=brake,
                             stopping=stopping, lead=lead[i]))
-      name = f"{speed_kind}-{lead_kind}-regen{int(p['BPLongRegenBlend'])}-bpoff{int(p['disable_BP_long_UI'])}" \
-             f"-dh{int(p['disable_downhill_comp_UI'])}"
+      name = (f"{speed_kind}-{lead_kind}-regen{int(p['BPLongRegenBlend'])}-bpoff{int(p['disable_BP_long_UI'])}"
+              f"-dh{int(p['disable_downhill_comp_UI'])}")
       scenarios.append(Scenario(name, p, frames))
   return scenarios
 

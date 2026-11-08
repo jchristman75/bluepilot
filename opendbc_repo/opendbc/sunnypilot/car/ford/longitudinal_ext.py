@@ -46,6 +46,29 @@ LongitudinalResult = namedtuple('LongitudinalResult', [
 # Lead car as BP long sees it: distance (m), relative speed (m/s), lead speed (m/s)
 Lead = namedtuple('Lead', ['d_rel', 'v_rel', 'v_lead'])
 
+# Brake flag (AccBrkDecel_B_Rq) thresholds on pitch-compensated accel: on below `on`, off above `off`
+BrakeThresholds = namedtuple('BrakeThresholds', ['on', 'off'])
+BRAKE_STOCK = BrakeThresholds(on=-0.14, off=-0.06)
+# Regen blend: decel down to MIN_GAS goes through regen, the brake flag only for real braking.
+# Stock Ford ACC (Mach-E, routes 4e6/4f8) sends AccPrpl_A_Rq ~= AccBrkTot_A_Rq down to ~-0.9 with
+# the flag off and mirrors gas into AccPrpl_A_Pred; panda (ford.h) limits gas to MIN_GAS.
+BRAKE_REGEN = BrakeThresholds(on=-0.55, off=-0.40)
+REGEN_MIN_SPEED = 3.0  # m/s; below this (and when stopping) the stock thresholds apply
+
+
+class BrakeHysteresis:
+  """The single brake flag decision. One state, whichever thresholds are in force."""
+
+  def __init__(self):
+    self.on = False
+
+  def update(self, accel_pitch, thresholds, long_active):
+    if not long_active or accel_pitch > thresholds.off:
+      self.on = False
+    elif accel_pitch < thresholds.on:
+      self.on = True
+    return self.on
+
 
 def follow_limits(lead, lead_time_sec, op_gas, op_accel, accel_due_to_pitch):
   """(gas_lo, gas_hi, accel_lo, accel_hi) that BP long clips the planner request to.
@@ -97,21 +120,8 @@ class LongitudinalExt:
     self.MAX_URBAN_SPEED_MPH = 45.0
     self.following_accel_ROC = 0.002  # max accel change per scan in following mode
 
-    # Brake hysteresis thresholds
-    self.brake_actuate_target = -0.14   # engage brakes below this accel
-    self.brake_actuate_release = -0.06  # release brakes above this accel
-    self.precharge_actuate_target = -0.12
-    self.precharge_actuate_release = -0.06
-    self.op_brake_actuate_last = False
-
-    # Regen blend (BPLongRegenBlend). Stock Ford ACC (Mach-E, routes 4e6/4f8)
-    # sends AccPrpl_A_Rq ~= AccBrkTot_A_Rq down to ~-0.9 with the brake flag off,
-    # and mirrors the gas value into AccPrpl_A_Pred. Panda limits gas to -0.5.
+    self.brake = BrakeHysteresis()
     self.regen_blend_UI = False
-    self.REGEN_BRAKE_ON = -0.55     # brake flag on below this (pitch-compensated accel)
-    self.REGEN_BRAKE_OFF = -0.40    # brake flag off above this
-    self.REGEN_MIN_SPEED = 3.0      # m/s; below this (and when stopping) use the stock brake logic
-    self.regen_brake_actuate_last = False
 
     # Toggles (updated from Params each frame)
     self.disable_BP_long_UI = False
@@ -133,7 +143,7 @@ class LongitudinalExt:
     return Lead(float(lead.dRel), float(lead.vRel), float(lead.vLead))
 
   def _bp_follow(self, CC, CS, op_accel, op_gas, accel_due_to_pitch):
-    """BP long follow control. Returns (accel, gas, brake_actuate, precharge_actuate, applied)."""
+    """BP long follow control. Returns (accel, gas, applied)."""
     v_ego = max(CS.out.vEgo, 0.5)
     lead = self._read_lead()
 
@@ -157,13 +167,9 @@ class LongitudinalExt:
       bp_accel = clip(bp_accel, self.bp_accel_last - self.following_accel_ROC, 999)
     self.bp_accel_last = bp_accel
 
-    # BP brake/precharge thresholds
-    bp_brake = bool(bp_accel < self.brake_actuate_target)
-    bp_precharge = bool(bp_accel < self.precharge_actuate_target)
-
     applied = (self.bpSpeedAllow and not CS.out.gasPressed and not CS.out.brakePressed and
                (lead is None or v_lead_mph > 40.0))
-    return bp_accel, bp_gas, bp_brake, bp_precharge, applied
+    return bp_accel, bp_gas, applied
 
   def update(self, CC, CS, op_accel, op_gas, accel_due_to_pitch, v_ego_mph, stopping, target_speed):
     """
@@ -185,46 +191,30 @@ class LongitudinalExt:
     Returns:
       LongitudinalResult namedtuple with final accel, gas, brake, precharge values.
     """
-    # Op brake actuate hysteresis
-    accel_pitch_compensated = op_accel + accel_due_to_pitch
-    op_brake_actuate = self.op_brake_actuate_last
-    if accel_pitch_compensated > self.brake_actuate_release or not CC.longActive:
-      op_brake_actuate = False
-    elif accel_pitch_compensated < self.brake_actuate_target:
-      op_brake_actuate = True
-    self.op_brake_actuate_last = op_brake_actuate
-
     # Speed deadband: engage above 50 mph, disallow below 45 mph
     if v_ego_mph > self.MAX_URBAN_SPEED_MPH + 5:
       self.bpSpeedAllow = True
     if v_ego_mph < self.MAX_URBAN_SPEED_MPH:
       self.bpSpeedAllow = False
 
-    accel, gas, brake_actuate, precharge_actuate = op_accel, op_gas, op_brake_actuate, op_brake_actuate
+    # Which accel/gas request to send: the planner's, or BP long follow's
+    accel, gas = op_accel, op_gas
     bp_long_used = False
     if not self.disable_BP_long_UI:
-      bp_accel, bp_gas, bp_brake, bp_precharge, bp_long_used = self._bp_follow(CC, CS, op_accel, op_gas,
-                                                                               accel_due_to_pitch)
+      bp_accel, bp_gas, bp_long_used = self._bp_follow(CC, CS, op_accel, op_gas, accel_due_to_pitch)
       if bp_long_used and CC.longActive:
-        accel, gas, brake_actuate, precharge_actuate = bp_accel, bp_gas, bp_brake, bp_precharge
+        accel, gas = bp_accel, bp_gas
 
-    # Regen blend: decel through negative propulsion (regen), brake flag only for real braking.
-    # Any negative request counts as braking: gas is never positive while decelerating.
+    # How to deliver it: one brake flag decision on the final request
     regen_active = (self.regen_blend_UI and CC.longActive and not stopping and
-                    CS.out.vEgo > self.REGEN_MIN_SPEED)
-    if regen_active:
-      accel_pitch = accel + accel_due_to_pitch
-      regen_brake = self.regen_brake_actuate_last
-      if accel_pitch < self.REGEN_BRAKE_ON:
-        regen_brake = True
-      elif accel_pitch > self.REGEN_BRAKE_OFF:
-        regen_brake = False
-      brake_actuate = precharge_actuate = regen_brake
-
+                    CS.out.vEgo > REGEN_MIN_SPEED)
+    brake_actuate = self.brake.update(accel + accel_due_to_pitch, BRAKE_REGEN if regen_active else BRAKE_STOCK,
+                                      CC.longActive)
+    # Regen: any negative request is braking, so gas is never positive while decelerating
+    if regen_active and not brake_actuate:
       decel_req = min(accel, gas)
-      if not brake_actuate and decel_req < 0.0:
+      if decel_req < 0.0:
         gas = max(decel_req, MIN_GAS)
-    self.regen_brake_actuate_last = brake_actuate
 
     accel = float(clip(accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
     gas = encode_gas(gas, CC.longActive, brake_actuate)
@@ -235,7 +225,7 @@ class LongitudinalExt:
       accel=accel,
       gas=gas,
       brake_actuate=brake_actuate,
-      precharge_actuate=precharge_actuate,
+      precharge_actuate=brake_actuate,
       accel_pred_send=accel_pred_send,
       stopping=stopping,
       target_speed=target_speed,

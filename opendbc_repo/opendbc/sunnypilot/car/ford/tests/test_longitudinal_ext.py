@@ -122,3 +122,36 @@ def test_follow_limits_pacing_cap_never_below_gas_floor():
   # steep downhill with downhill comp on: 0.2 - 0.9 would undercut MIN_GAS; the old sentinel path
   # sent MIN_GAS in that case, so the cap is clamped to keep the same output
   assert follow_limits(Lead(40, 0.0, 25), 2.0, -2.0, -1.0, -0.9)[1] == CarControllerParams.MIN_GAS
+
+
+def _bp_ctrl():
+  # 60 mph behind a pacing lead with BP long allowed: the BP follow path is in control
+  c = Ctrl(regen=False, lead=SimpleNamespace(present=True, dRel=40.0, vRel=0.0, vLead=27.0))
+  c.bpSpeedAllow = True
+  c.following_accel_ROC = 99.0  # no ramp, so the test drives the request directly
+  return c
+
+
+def test_bp_path_brake_flag_has_real_hysteresis():
+  """BP path used to reset its flag every call (no memory): inside the -0.14..-0.06 band it
+  dropped out. It now shares the one brake hysteresis, so the flag holds in the band."""
+  c = _bp_ctrl()
+  r = step(c, -0.20, v_ego=27.0)
+  assert r.bp_long_used and r.brake_actuate
+  assert step(c, -0.10, v_ego=27.0).brake_actuate        # in the band: holds
+  assert not step(c, -0.05, v_ego=27.0).brake_actuate    # above release: off
+  assert not step(c, -0.10, v_ego=27.0).brake_actuate    # in the band from below: stays off
+
+
+def test_precharge_follows_brake_flag_everywhere():
+  for c, v in ((_bp_ctrl(), 27.0), (Ctrl(regen=False), 15.0), (Ctrl(regen=True), 15.0)):
+    for a in (-0.1, -0.3, -0.7, -0.3, 0.2):
+      r = step(c, a, v_ego=v)
+      assert r.precharge_actuate == r.brake_actuate
+
+
+def test_bp_path_brake_decision_includes_pitch():
+  c = _bp_ctrl()
+  assert not step(c, -0.10, v_ego=27.0, pitch=0.0).brake_actuate
+  c = _bp_ctrl()
+  assert step(c, -0.10, v_ego=27.0, pitch=-0.10).brake_actuate  # -0.2 with the (downhill) pitch
