@@ -329,6 +329,21 @@ class HardwareComma(HardwareBase):
       # Texas sun, because the kernel thermal framework throttles max freq REACTIVELY by temperature.
       # Leave frequency management to that native framework. If re-merging comma's cap, drop it here.
       # Re-checked at the 2026-07-26 sync: upstream still writes the cap; still rejected.
+      #
+      # AGNOS 19.9 moved the same cap into the OS: /usr/comma/comma.sh writes 1689600 to policy0 and
+      # policy4 at every boot ("use max freq to boot up quickly, then limit"), so not writing it here
+      # is no longer enough. Capped, core 4 (card + controlsd + selfdrived, all RT) sits at 100%, the
+      # kernel logs "workqueue lockup ... cpus=4", and carState / pandaStates delivery stalls for
+      # seconds -> commIssue (route 521 t=409, 10 s). Lift it back to the hardware max when going
+      # onroad; the thermal-cpufreq cooling devices still throttle by temperature.
+      if not powersave_enabled:
+        try:
+          with open(f'/sys/devices/system/cpu/cpufreq/policy{n}/cpuinfo_max_freq') as f:
+            hw_max = f.read().strip()
+          sudo_write(hw_max, f'/sys/devices/system/cpu/cpufreq/policy{n}/scaling_max_freq')
+        except OSError:
+          pass  # no cpufreq policy (PC / unusual kernel): nothing to lift
+      # End BluePilot
 
     # *** IRQ config ***
 
