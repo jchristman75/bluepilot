@@ -26,9 +26,10 @@ SOUND_PACK_FILES = {
     AudibleAlert.engage: os.path.join(BASEDIR, "openpilot", "selfdrive", "assets", "sounds", "engage.wav"),
     AudibleAlert.disengage: os.path.join(BASEDIR, "openpilot", "selfdrive", "assets", "sounds", "disengage.wav"),
   },
+  # upstream removed the 3X sounds (engage_tizi.wav, #38404); BluePilot keeps its own copies
   CustomSoundSelection.COMMA_3X: {
-    AudibleAlert.engage: os.path.join(BASEDIR, "openpilot", "selfdrive", "assets", "sounds", "engage_tizi.wav"),
-    AudibleAlert.disengage: os.path.join(BASEDIR, "openpilot", "selfdrive", "assets", "sounds", "disengage_tizi.wav"),
+    AudibleAlert.engage: os.path.join(CUSTOM_SOUND_DIR, "comma3x_engage.wav"),
+    AudibleAlert.disengage: os.path.join(CUSTOM_SOUND_DIR, "comma3x_disengage.wav"),
   },
   CustomSoundSelection.TESLA: {
     AudibleAlert.engage: os.path.join(CUSTOM_SOUND_DIR, "tesla_engage.wav"),
