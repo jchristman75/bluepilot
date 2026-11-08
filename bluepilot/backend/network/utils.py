@@ -89,11 +89,11 @@ def get_all_wifi_ips():
 TETHERING_IP_ADDRESS = "192.168.43.1"
 
 
-def is_tethering_active(all_wifi_ips=None):
-    """True when the device hotspot is up. Tethering state lives in NetworkManager, not in a
-    param (there is no EnableTethering key), so detect it from the hotspot address."""
-    ips = all_wifi_ips if all_wifi_ips is not None else get_all_wifi_ips()
-    return any(ip == TETHERING_IP_ADDRESS for _iface, ip in ips)
+def is_tethering_active(all_wifi_ips):
+    """True when the device hotspot is up, given get_all_wifi_ips(). Tethering state lives in
+    NetworkManager, not in a param (there is no EnableTethering key), so detect it from the
+    hotspot address."""
+    return any(ip == TETHERING_IP_ADDRESS for _iface, ip in all_wifi_ips)
 
 
 def get_connection_type():

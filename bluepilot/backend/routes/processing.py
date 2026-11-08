@@ -814,8 +814,8 @@ def extract_drive_stats_from_segments(segments):
                 logger.debug(f"Error reading log {log_path}: {e}")
 
         result = stats.result()
-        logger.info(f"✓ Extracted drive stats: {result['durationStr']}, {result['opEngagedPercent']}% engaged, "
-                    f"{result['disengagementCount']} disengagements")
+        engaged, disengaged = result['opEngagedPercent'], result['disengagementCount']
+        logger.info(f"✓ Extracted drive stats: {result['durationStr']}, {engaged}% engaged, {disengaged} disengagements")
         return result
     except Exception as e:
         logger.error(f"✗ Error extracting drive stats: {e}", exc_info=True)

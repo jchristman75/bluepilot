@@ -31,6 +31,8 @@ MICI_BALL_BORDER_MARGIN = 25  # half of 50px MICI border thickness
 _SWIPE_DOWN_THRESHOLD = 80  # minimum downward travel (px) to trigger lateral debug
 
 
+PARAM_REFRESH_FRAMES = 60  # display params are re-read about once a second
+
 class _VerticalSwipeDetector(Widget):
   """Transparent overlay that detects swipe-down gestures.
 
@@ -78,6 +80,10 @@ class MiciAugmentedRoadViewBP(MiciCameraViewBP, AugmentedRoadView, BlindspotRend
     super().__init__(*args, **kwargs)
     self._init_blindspot()
     self._bp_params = Params()
+    # display toggles, re-read about once a second (PARAM_REFRESH_FRAMES) rather than every frame
+    self._hide_fade = False
+    self._hide_border = False
+    self._param_frame_counter = PARAM_REFRESH_FRAMES
     self._fade_alpha_filter = FirstOrderFilter(0, 0.1, 1 / gui_app.target_fps)
 
     # BluePilot: Replace HUD renderer with BP version (brake coloring + powerflow)
@@ -100,6 +106,13 @@ class MiciAugmentedRoadViewBP(MiciCameraViewBP, AugmentedRoadView, BlindspotRend
 
     # BluePilot: Rad Racer 8-bit theme (MICI-scaled; no gauge cluster on the small screen)
     self._rad_racer_theme = RadRacerThemeMici()
+
+  def _refresh_display_params(self):
+    self._param_frame_counter += 1
+    if self._param_frame_counter >= PARAM_REFRESH_FRAMES:
+      self._param_frame_counter = 0
+      self._hide_fade = self._bp_params.get_bool("mici_hide_onroad_fade")
+      self._hide_border = self._bp_params.get_bool("BPHideOnroadBorder")
 
   def _on_swipe_down(self):
     if not ui_state.is_onroad():
@@ -125,6 +138,7 @@ class MiciAugmentedRoadViewBP(MiciCameraViewBP, AugmentedRoadView, BlindspotRend
   def _render(self, _):
     """Override render to place confidence ball on left, offset driver state, and conditionally hide border."""
     bp_ui_log.tick()  # refresh BPUIDebugLog enabled state (mirrors TICI; MICI had no tick, so the toggle was inert)
+    self._refresh_display_params()
     start_draw = time.monotonic()
     self._switch_stream_if_needed(ui_state.sm)
     self._update_calibration()
@@ -172,7 +186,7 @@ class MiciAugmentedRoadViewBP(MiciCameraViewBP, AugmentedRoadView, BlindspotRend
 
     # Fade out bottom overlay (only when engaged; mici_hide_onroad_fade turns it off)
     fade_alpha = self._fade_alpha_filter.update(ui_state.status != UIStatus.DISENGAGED)
-    if fade_alpha > 1e-2 and not self._bp_params.get_bool("mici_hide_onroad_fade"):
+    if fade_alpha > 1e-2 and not self._hide_fade:
       rl.draw_texture_ex(self._fade_texture, rl.Vector2(self._content_rect.x, self._content_rect.y), 0.0, 1.0,
                          rl.Color(255, 255, 255, int(255 * fade_alpha)))
 
@@ -203,7 +217,7 @@ class MiciAugmentedRoadViewBP(MiciCameraViewBP, AugmentedRoadView, BlindspotRend
     rl.end_scissor_mode()
 
     # BluePilot: Conditionally draw MICI rounded border
-    if not self._bp_params.get_bool("BPHideOnroadBorder"):
+    if not self._hide_border:
       rl.draw_rectangle_rounded_lines_ex(self._content_rect, 0.2 * 1.02, 10, 50, rl.BLACK)
 
     # BluePilot: Blindspot indicators (outside scissor, on screen edges)

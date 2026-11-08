@@ -71,54 +71,34 @@ RATE_LIMIT_REQUESTS_PER_SECOND_OFFROAD = 30  # 30 req/s when parked - allows fas
 RATE_LIMIT_REQUESTS_PER_SECOND_ONROAD = 30   # 30 req/s when driving - allows settings management
 
 # FFmpeg binary detection
-def find_ffmpeg_binary():
-    """Find ffmpeg binary with fallback paths for different systems"""
-    # Try standard PATH lookup first
-    ffmpeg_path = shutil.which('ffmpeg')
-    if ffmpeg_path:
-        logger.info(f"Found ffmpeg in PATH: {ffmpeg_path}")
-        return ffmpeg_path
-
-    # Try common installation paths for Comma devices and Ubuntu
-    fallback_paths = [
-        '/usr/bin/ffmpeg',
-        '/usr/local/bin/ffmpeg',
-        # Comma device: the venv's ffmpeg (pip wrapper around a bundled binary). The manager's
-        # PATH doesn't include the venv bin dir, so which() misses it.
-        os.path.join(os.path.dirname(sys.executable), 'ffmpeg'),
-        '/usr/local/venv/bin/ffmpeg',
-        '/data/openpilot/third_party/ffmpeg',  # Comma device custom install
-        '/opt/homebrew/bin/ffmpeg',  # macOS
-    ]
-
-    for path in fallback_paths:
+def _find_binary(name):
+    """PATH first, then the usual install locations. On the comma the venv's ffmpeg/ffprobe (pip
+    wrappers around bundled binaries) aren't on the manager's PATH, so which() misses them."""
+    path = shutil.which(name)
+    if path:
+        logger.info(f"Found {name} in PATH: {path}")
+        return path
+    for path in (f'/usr/bin/{name}', f'/usr/local/bin/{name}',
+                 os.path.join(os.path.dirname(sys.executable), name), f'/usr/local/venv/bin/{name}',
+                 f'/data/openpilot/third_party/{name}', f'/opt/homebrew/bin/{name}'):
         if os.path.exists(path) and os.access(path, os.X_OK):
-            logger.info(f"Found ffmpeg at fallback path: {path}")
+            logger.info(f"Found {name} at fallback path: {path}")
             return path
-
-    logger.error("FFmpeg binary not found! Video playback will not work.")
-    logger.error("Install with: apt-get install ffmpeg")
     return None
+
+
+def find_ffmpeg_binary():
+    path = _find_binary('ffmpeg')
+    if path is None:
+        logger.error("FFmpeg binary not found! Video playback will not work. Install with: apt-get install ffmpeg")
+    return path
 
 
 def find_ffprobe_binary():
-    """Find ffprobe binary with fallback paths"""
-    ffprobe_path = shutil.which('ffprobe')
-    if ffprobe_path:
-        logger.info(f"Found ffprobe in PATH: {ffprobe_path}")
-        return ffprobe_path
-
-    # Try common paths
-    # (the venv bin dir holds the comma's ffprobe and isn't on the manager PATH)
-    common_paths = ['/usr/bin/ffprobe', '/usr/local/bin/ffprobe',
-                    os.path.join(os.path.dirname(sys.executable), 'ffprobe'), '/usr/local/venv/bin/ffprobe']
-    for path in common_paths:
-        if os.path.exists(path):
-            logger.info(f"Found ffprobe at: {path}")
-            return path
-
-    logger.warning("ffprobe not found - HLS playlists will use estimated durations")
-    return None
+    path = _find_binary('ffprobe')
+    if path is None:
+        logger.warning("ffprobe not found - HLS playlists will use estimated durations")
+    return path
 
 
 # Initialize FFmpeg binaries
