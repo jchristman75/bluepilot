@@ -31,6 +31,14 @@ from opendbc.sunnypilot.car.ford.values_ext import FordSafetyFlagsBP
 
 GOLDEN_PATH = os.path.join(os.path.dirname(__file__), 'long_golden.npz')
 DEEP_REGEN = '_deep_regen_flag'  # scenario key (not a Param): set FordSafetyFlagsBP.REGEN_BLEND at init
+REGEN_LIMIT_KW = '_regen_limit_kw'  # scenario key: frame -> pack charge-power limit (kW), or None
+CAR_NO_REGEN = '_car_no_regen'      # scenario key: the car silently delivers no regen (coasts instead)
+LIMIT_SHAPES = [('city', 'mixed'), ('highway_cross', 'gaining'), ('stop', 'gaining')]
+
+
+def _limit_ramp(i, n=2000):
+  """Pack charge-power limit falling from 120 kW to 0 over the scenario (full battery / cold pack)."""
+  return max(0.0, 120.0 * (1.0 - i / (0.8 * n)))
 ACCDATA = 0x186
 DT = 0.01  # CarController runs at 100 Hz
 LongCtrlState = structs.CarControl.Actuators.LongControlState
@@ -155,11 +163,16 @@ def build_scenarios():
     for downhill_off in (False, True):
       param_sets.append({'BPLongRegenBlend': True, 'disable_BP_long_UI': bp_long_off,
                          'disable_downhill_comp_UI': downhill_off, DEEP_REGEN: True})
+  for deep in (False, True):
+    param_sets.append({'BPLongRegenBlend': True, 'disable_BP_long_UI': False, 'disable_downhill_comp_UI': True,
+                       DEEP_REGEN: deep, REGEN_LIMIT_KW: _limit_ramp})
+  param_sets.append({'BPLongRegenBlend': True, 'disable_BP_long_UI': False, 'disable_downhill_comp_UI': True,
+                     DEEP_REGEN: True, CAR_NO_REGEN: True})
   shapes = [('city', 'mixed'), ('city', 'invalid'), ('highway_cross', 'pacing'), ('highway_cross', 'none'),
             ('highway', 'gaining'), ('highway', 'trailing'), ('highway', 'close'), ('stop', 'gaining')]
   seed = 0
   for p in param_sets:
-    for speed_kind, lead_kind in shapes:
+    for speed_kind, lead_kind in (LIMIT_SHAPES if (REGEN_LIMIT_KW in p or CAR_NO_REGEN in p) else shapes):
       seed += 1
       rng = np.random.default_rng(seed)
       n = 2000 if speed_kind != 'stop' else 2000
@@ -180,6 +193,8 @@ def build_scenarios():
                             stopping=stopping, lead=lead[i]))
       flags = f"regen{int(p['BPLongRegenBlend'])}-bpoff{int(p['disable_BP_long_UI'])}-dh{int(p['disable_downhill_comp_UI'])}"
       flags += '-deep' if p.get(DEEP_REGEN) else ''
+      flags += '-lim' if REGEN_LIMIT_KW in p else ''
+      flags += '-noregen' if p.get(CAR_NO_REGEN) else ''
       name = f"{speed_kind}-{lead_kind}-{flags}"
       scenarios.append(Scenario(name, p, frames))
   return scenarios
@@ -233,17 +248,37 @@ def run_scenario(sc: Scenario):
     CS.lat_ctl_lim_stat = 0
     CC_SP = messaging.new_message('carControlSP').as_reader().carControlSP
     acc = []
+    # the car answers the last ACCDATA it got: 0.15 s delay + 0.3 s first-order lag (fit on 50e/50f/511)
+    a_car, target, pending = 0.0, 0.0, [0.0] * 15
     for i, fr in enumerate(sc.frames):
+      pending.append(target)
+      a_car += DT / (0.3 + DT) * (pending.pop(0) - a_car)
+      CS.out.aEgo = a_car
+      CS.regen_power_limit_kw = sc.params.get(REGEN_LIMIT_KW, lambda _i: None)(i)
       CS.out.vEgo = CS.out.vEgoRaw = fr.v_ego
       CS.out.gasPressed, CS.out.brakePressed = fr.gas_pressed, fr.brake_pressed
       CS.out.standstill = fr.v_ego < 0.01
       CI.CC.sm.set_lead(fr.lead)
       _, sends = CI.CC.update(_make_cc(fr), CC_SP, CS, int(i * DT * 1e9))
-      acc.extend(np.frombuffer(dat, dtype=np.uint8) for addr, dat, _bus in sends if addr == ACCDATA)
+      for addr, dat, _bus in sends:
+        if addr == ACCDATA:
+          acc.append(np.frombuffer(dat, dtype=np.uint8))
+          target = _car_target(dat, regen_works=not sc.params.get(CAR_NO_REGEN))
     return np.array(acc, dtype=np.uint8), np.array(bp_used, dtype=bool)
   finally:
     LongitudinalExt.update = orig_update
     lateral_curv_ext_mod.messaging, carcontroller_mod.Params = orig_sm, orig_params
+
+
+def _car_target(dat, regen_works=True):
+  """What the car does with an ACCDATA frame: brake request when the brake flag is on, else the
+  propulsion request when active, else coast. (Bit layout as in safety/modes/ford.h.)"""
+  if dat[6] & 0xC0:
+    return (((dat[0] & 0x1F) << 8) | dat[1]) * 0.0039 - 20.0
+  gas = (((dat[6] & 0x3) << 8) | dat[7]) * 0.01 - 5.0
+  if gas <= -4.9 or (gas < 0.0 and not regen_works):
+    return 0.0
+  return gas
 
 
 def run_all():

@@ -149,3 +149,13 @@ def apply_bp_device_mount(car_docs, CP):
     car_docs.car_parts = CarParts([Device.threex_angled_mount, harness])
   else:
     car_docs.car_parts = CarParts([Device.threex, harness])
+
+
+# Loaded mass (kg) for estimating how much regen the pack can absorb: max regen decel ~= charge
+# power limit / (mass x speed). Deliberately heavy (curb + people/cargo): overestimating mass
+# underestimates regen, which only hands braking to the friction brakes sooner.
+FORD_REGEN_MASS_KG = {
+  'FORD_MUSTANG_MACH_E_MK1': 2500.,
+  'FORD_F_150_LIGHTNING_MK1': 3500.,
+}
+FORD_REGEN_MASS_DEFAULT_KG = 3000.

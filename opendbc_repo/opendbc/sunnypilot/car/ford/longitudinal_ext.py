@@ -21,13 +21,14 @@ The gas value is the raw planner request until encode_gas() turns it into the CA
 value (INACTIVE_GAS when propulsion is off), once, at the end of update().
 """
 
-from collections import namedtuple
+from collections import deque, namedtuple
 
 import numpy as np
 from numpy import clip
 
 from opendbc.car.ford.values import CarControllerParams
-from opendbc.sunnypilot.car.ford.values_ext import REGEN_MIN_GAS, FordSafetyFlagsBP
+from opendbc.sunnypilot.car.ford.values_ext import (FORD_REGEN_MASS_DEFAULT_KG, FORD_REGEN_MASS_KG, REGEN_MIN_GAS,
+                                                     FordSafetyFlagsBP)
 
 INACTIVE_GAS = CarControllerParams.INACTIVE_GAS
 MIN_GAS = CarControllerParams.MIN_GAS
@@ -58,6 +59,58 @@ BRAKE_REGEN = BrakeThresholds(on=-0.55, off=-0.40)
 # to REGEN_MIN_GAS (-0.9) and the friction brakes only come in below -0.95.
 BRAKE_REGEN_DEEP = BrakeThresholds(on=-0.95, off=-0.80)
 REGEN_MIN_SPEED = 3.0  # m/s; below this (and when stopping) the stock thresholds apply
+
+# How much of the pack's reported charge-power limit regen is assumed to use. Drivetrain efficiency
+# and drag would each add braking, so ignoring them already errs toward less regen.
+REGEN_LIMIT_MARGIN = 0.8
+
+
+def regen_floor(panda_floor, limit_kw, v_ego, mass_kg):
+  """Deepest regen (m/s^2) to ask for: the panda's floor, or shallower when the pack can't absorb it
+  (full battery, cold pack). limit_kw None = not reported: the panda floor."""
+  if limit_kw is None:
+    return panda_floor
+  max_regen_decel = REGEN_LIMIT_MARGIN * limit_kw * 1000. / (mass_kg * max(v_ego, 1.))
+  return max(panda_floor, -max_regen_decel)
+
+
+def regen_thresholds(floor, panda_floor):
+  """Brake flag thresholds for a regen floor: the friction brakes take over just past what regen can
+  do. Unlimited regen -> exactly BRAKE_REGEN(_DEEP); no regen at all -> BRAKE_STOCK."""
+  base = BRAKE_REGEN_DEEP if panda_floor == REGEN_MIN_GAS else BRAKE_REGEN
+  if floor <= panda_floor:
+    return base
+  on = float(clip(floor - 0.05, base.on, BRAKE_STOCK.on))
+  return BrakeThresholds(on=on, off=float(clip(on + 0.15, base.off, BRAKE_STOCK.off)))
+
+
+class RegenShortfallMonitor:
+  """Backup for when regen under-delivers without the limit saying so (stale or unreported limit):
+  compares aEgo with how the car normally answers the regen request (0.15 s delay, 0.3 s lag, fit on
+  routes 50e/50f/511) and reports a clear shortfall held for 0.8 s. Tuned on drives 50e-515 (52 min):
+  0.25/0.5 s fired 7 times, mostly on slow drive-to-regen transitions that settle on their own; these
+  settings fire 0 times there and still catch regen that never arrives within 0.9 s."""
+  DT = 0.02  # called at 50 Hz
+  DELAY_FRAMES = 8
+  K = DT / (0.3 + DT)
+  MIN_DECEL = 0.25       # only judge a meaningful regen request
+  SHORTFALL = 0.35       # m/s^2 less decel than expected...
+  HOLD_FRAMES = 40       # ...for 0.8 s
+
+  def __init__(self):
+    self.reset(0.0)
+
+  def reset(self, a_ego):
+    self.history = deque([a_ego] * self.DELAY_FRAMES, maxlen=self.DELAY_FRAMES)
+    self.expected = a_ego
+    self.count = 0
+
+  def update(self, regen_cmd, a_ego):
+    self.expected += self.K * (self.history[0] - self.expected)
+    self.history.append(regen_cmd)
+    short = self.expected < -self.MIN_DECEL and (a_ego - self.expected) > self.SHORTFALL
+    self.count = self.count + 1 if short else 0
+    return self.count >= self.HOLD_FRAMES
 
 
 class BrakeHysteresis:
@@ -129,6 +182,8 @@ class LongitudinalExt:
     self.regen_blend_UI = False
     # The panda's gas floor is fixed at init (ford.h reads REGEN_BLEND once): never go deeper than it
     self.deep_regen_allowed = CP_SP is not None and bool(CP_SP.safetyParam & FordSafetyFlagsBP.REGEN_BLEND)
+    self.regen_mass_kg = FORD_REGEN_MASS_KG.get(CP.carFingerprint if CP is not None else None, FORD_REGEN_MASS_DEFAULT_KG)
+    self.regen_monitor = RegenShortfallMonitor()
 
     # Toggles (updated from Params each frame)
     self.disable_BP_long_UI = False
@@ -215,15 +270,26 @@ class LongitudinalExt:
     # How to deliver it: one brake flag decision on the final request
     regen_active = (self.regen_blend_UI and CC.longActive and not stopping and
                     CS.out.vEgo > REGEN_MIN_SPEED)
-    deep_regen = regen_active and self.deep_regen_allowed
-    gas_floor = REGEN_MIN_GAS if deep_regen else MIN_GAS
-    thresholds = BRAKE_REGEN_DEEP if deep_regen else BRAKE_REGEN if regen_active else BRAKE_STOCK
+    gas_floor = REGEN_MIN_GAS if (regen_active and self.deep_regen_allowed) else MIN_GAS  # what the panda allows
+    if regen_active:
+      # how much regen the pack can take right now (full battery / cold pack -> less)
+      floor = regen_floor(gas_floor, CS.regen_power_limit_kw, CS.out.vEgo, self.regen_mass_kg)
+      thresholds = regen_thresholds(floor, gas_floor)
+    else:
+      thresholds = BRAKE_STOCK
     brake_actuate = self.brake.update(accel + accel_due_to_pitch, thresholds, CC.longActive)
     # Regen: any negative request is braking, so gas is never positive while decelerating
+    regen_only = False
     if regen_active and not brake_actuate:
       decel_req = min(accel, gas)
       if decel_req < 0.0:
-        gas = max(decel_req, gas_floor)
+        gas = max(decel_req, floor)
+        regen_only = gas < 0.0
+    # Backup: regen clearly under-delivering -> friction brakes (released by the usual hysteresis)
+    if regen_only and self.regen_monitor.update(gas, CS.out.aEgo):
+      self.brake.on = brake_actuate = True
+    if not regen_only:
+      self.regen_monitor.reset(CS.out.aEgo)
 
     accel = float(clip(accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
     gas = encode_gas(gas, CC.longActive, brake_actuate, gas_floor)

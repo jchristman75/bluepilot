@@ -100,6 +100,9 @@ class CarStateExt:
   def __init__(self, CP, CP_SP):
     self.CP = CP
     self.CP_SP = CP_SP
+    # BluePilot: pack charge-power limit (kW) = how much regen the pack will take right now, for
+    # LongitudinalExt's regen floor. None when the car doesn't report it (no CHARGING_DATA).
+    self.regen_power_limit_kw = None
 
     self.button_events = []
     self.button_states = {button.event_type: False for button in BUTTONS}
@@ -480,6 +483,7 @@ class CarStateExt:
           # reads 50-127 kW while driving, and on a DC fast charge (route 00000464) it rose
           # 122 -> 135 kW while the pack actually took 115 -> 89 kW. It is what the pack will accept.
           charging.powerLimitKw = batt_data5["BattTrac2_Pw_ChrgInst"] / 1000.0
+          self.regen_power_limit_kw = charging.powerLimitKw
           if self.CP.flags & FordFlags.HV_CURRENT_DATA:
             # Real pack power = pack voltage x pack current (HV_Battery_Current_BP, + = discharge); report
             # charging as positive. Route 00000464: 83 -> 67 kW, while ChrgInst read 122 -> 135.

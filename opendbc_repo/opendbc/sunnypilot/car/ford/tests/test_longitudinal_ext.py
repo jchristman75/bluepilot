@@ -1,4 +1,5 @@
 """Tests for LongitudinalExt: regen blend (BPLongRegenBlend) and lead detection."""
+import pytest
 from types import SimpleNamespace
 
 from opendbc.car.ford.values import CarControllerParams
@@ -26,13 +27,15 @@ def cc(active=True):
   return SimpleNamespace(longActive=active)
 
 
-def cs(v_ego=15.0):
-  return SimpleNamespace(out=SimpleNamespace(vEgo=v_ego, gasPressed=False, brakePressed=False))
+def cs(v_ego=15.0, a_ego=0.0):
+  # regen_power_limit_kw None: the car doesn't report the pack limit
+  return SimpleNamespace(out=SimpleNamespace(vEgo=v_ego, aEgo=a_ego, gasPressed=False, brakePressed=False),
+                         regen_power_limit_kw=None)
 
 
 def step(c, accel, v_ego=15.0, stopping=False, active=True, pitch=0.0):
   # carcontroller passes the raw planner request as gas; LongitudinalExt encodes INACTIVE itself
-  return c.update(cc(active), cs(v_ego), accel, accel, pitch, v_ego * 2.23694, stopping, 0.0)
+  return c.update(cc(active), cs(v_ego, a_ego=accel), accel, accel, pitch, v_ego * 2.23694, stopping, 0.0)
 
 
 def test_stock_brake_flag_unchanged_when_off():
@@ -62,7 +65,7 @@ def test_regen_brake_hysteresis():
 
 def test_regen_never_positive_gas_while_decelerating():
   c = Ctrl(regen=True)
-  r = c.update(cc(), cs(), -0.3, 0.4, 0.0, 33.0, False, 0.0)
+  r = c.update(cc(), cs(a_ego=-0.3), -0.3, 0.4, 0.0, 33.0, False, 0.0)
   assert r.gas <= 0.0 and r.gas == -0.3
 
 
@@ -216,3 +219,78 @@ def test_gas_never_below_what_the_panda_allows():
           assert r.gas >= floor - 1e-9
         if r.accel_pred_send != INACTIVE:
           assert r.accel_pred_send >= floor - 1e-9
+
+
+# ---- regen limited by the pack (full battery / cold): live floor + shortfall monitor ----
+
+from opendbc.sunnypilot.car.ford.longitudinal_ext import (BRAKE_REGEN, BRAKE_REGEN_DEEP, BRAKE_STOCK,
+                                                           regen_floor, regen_thresholds)
+
+
+def cs_full(v_ego=25.0, limit_kw=None, a_ego=0.0):
+  return SimpleNamespace(out=SimpleNamespace(vEgo=v_ego, aEgo=a_ego, gasPressed=False, brakePressed=False),
+                         regen_power_limit_kw=limit_kw)
+
+
+def step_lim(c, accel, v_ego=18.0, limit_kw=None, a_ego=None):  # 40 mph: below the BP-long switch
+  a_ego = accel if a_ego is None else a_ego  # default: the car does what it is asked
+  return c.update(cc(True), cs_full(v_ego, limit_kw, a_ego), accel, accel, 0.0, v_ego * 2.23694, False, 0.0)
+
+
+def test_regen_floor_from_pack_limit():
+  # unknown limit or plenty of regen: the panda floor, unchanged
+  assert regen_floor(REGEN_MIN_GAS, None, 25.0, 2500.0) == REGEN_MIN_GAS
+  assert regen_floor(REGEN_MIN_GAS, 100.0, 25.0, 2500.0) == REGEN_MIN_GAS
+  # 20 kW at 25 m/s, 2500 kg, 0.8 margin -> regen can do ~0.256 m/s^2
+  assert regen_floor(REGEN_MIN_GAS, 20.0, 25.0, 2500.0) == pytest.approx(-0.256)
+  # full battery: no regen at all
+  assert regen_floor(REGEN_MIN_GAS, 0.0, 25.0, 2500.0) == 0.0
+
+
+def test_thresholds_follow_the_floor():
+  assert regen_thresholds(REGEN_MIN_GAS, REGEN_MIN_GAS) == BRAKE_REGEN_DEEP     # not limited: exact constants
+  assert regen_thresholds(CarControllerParams.MIN_GAS, CarControllerParams.MIN_GAS) == BRAKE_REGEN
+  t = regen_thresholds(-0.256, REGEN_MIN_GAS)
+  assert t.on == pytest.approx(-0.306) and t.off == pytest.approx(-0.156)
+  assert regen_thresholds(0.0, REGEN_MIN_GAS) == BRAKE_STOCK                   # no regen: stock thresholds
+
+
+def test_high_limit_changes_nothing():
+  for flag in (False, True):
+    a, b = DeepCtrl(flag=flag), DeepCtrl(flag=flag)
+    for x in (-0.2, -0.45, -0.6, -0.85, -1.0, -0.3, 0.2):
+      ra, rb = step_lim(a, x, limit_kw=None), step_lim(b, x, limit_kw=120.0)
+      assert (ra.gas, ra.brake_actuate, ra.accel_pred_send) == (rb.gas, rb.brake_actuate, rb.accel_pred_send)
+
+
+def test_limited_regen_hands_off_to_friction_early():
+  c = DeepCtrl()
+  r = step_lim(c, -0.2, limit_kw=20.0)      # within what regen can do (20 kW, 18 m/s, 3000 kg: -0.296)
+  assert not r.brake_actuate and r.gas == -0.2
+  r = step_lim(c, -0.4, limit_kw=20.0)      # beyond it: friction now, not after the PID winds up
+  assert r.brake_actuate and r.gas == CarControllerParams.INACTIVE_GAS
+
+
+def test_no_regen_at_all_behaves_like_stock():
+  c = DeepCtrl()
+  r = step_lim(c, -0.1, limit_kw=0.0)
+  assert not r.brake_actuate and r.gas == 0.0   # never ask for regen that isn't there (and never positive gas)
+  assert step_lim(c, -0.2, limit_kw=0.0).brake_actuate
+
+
+def test_shortfall_monitor_forces_friction():
+  c = DeepCtrl()
+  # asked for -0.6 of regen, the car keeps coasting (aEgo 0): friction after ~0.8 s of clear shortfall
+  forced_at = None
+  for i in range(100):  # 2 s at 50 Hz
+    r = step_lim(c, -0.6, a_ego=0.0)
+    if r.brake_actuate:
+      forced_at = i
+      break
+  assert forced_at is not None and 40 <= forced_at <= 80
+
+
+def test_shortfall_monitor_quiet_when_regen_delivers():
+  c = DeepCtrl()
+  for _ in range(200):
+    assert not step_lim(c, -0.6, a_ego=-0.6).brake_actuate

@@ -85,3 +85,54 @@ def test_panda_accepts_every_frame_the_controller_sends(current):
   below_stock = (g < -0.5 - 1e-6) & (g > -4.9)
   assert below_stock.sum() > 1000
   assert np.array_equal(~ok_without_flag, below_stock)
+
+
+def _scenario_speeds(name):
+  sc = next(s for s in H.build_scenarios() if s.name == name)
+  return np.array([f.v_ego for f in sc.frames])[1::2]  # ACCDATA is every other 100 Hz frame
+
+
+def test_limited_regen_never_asks_for_more_than_the_pack_takes(current):
+  """With the pack limit falling to 0, regen requests stay within limit x 0.8 / (mass x speed)."""
+  from opendbc.sunnypilot.car.ford.longitudinal_ext import REGEN_LIMIT_MARGIN, REGEN_MIN_SPEED
+  from opendbc.sunnypilot.car.ford.values_ext import FORD_REGEN_MASS_KG
+  mass = FORD_REGEN_MASS_KG['FORD_MUSTANG_MACH_E_MK1']
+  names = [n for n in current if n.endswith('-lim')]
+  assert len(names) == 2 * len(H.LIMIT_SHAPES)
+  for name in names:
+    acc, _bp = current[name]
+    d = H.decode(acc)
+    gas, v = d['AccPrpl_A_Rq'], _scenario_speeds(name)[:len(acc)]
+    limit = np.array([H._limit_ramp(2 * i + 1) for i in range(len(acc))])
+    allowed = REGEN_LIMIT_MARGIN * limit * 1000 / (mass * np.maximum(v, 1.0))
+    # regen coasting runs above REGEN_MIN_SPEED (below it, and while stopping, the stock path sends
+    # the planner's small creep-speed requests as before)
+    sc = next(x for x in H.build_scenarios() if x.name == name)
+    stopping = np.array([f.stopping for f in sc.frames])[1::2][:len(acc)]
+    regen = (gas < 0) & (gas > -4.9) & (v > REGEN_MIN_SPEED) & ~stopping
+    assert np.all(-gas[regen] <= allowed[regen] + 0.011), name   # 0.01 CAN resolution
+    assert regen.any()  # and regen is still used while the pack can take it
+
+
+def test_silent_regen_shortfall_hands_off_to_friction(current):
+  """The car reports plenty of regen but delivers none: the monitor puts the friction brakes on
+  instead of coasting while regen is requested."""
+  engaged = 0
+  for name in (n for n in current if n.endswith('-noregen')):
+    d = H.decode(current[name][0])
+    gas, brake = d['AccPrpl_A_Rq'], d['AccBrkDecel_B_Rq'] > 0.5
+    regen = (gas < -0.15) & (gas > -4.9)
+    # longest unbroken run of regen-only frames (no friction) must stay short: 0.8 s hold + response lag
+    longest, run = 0, 0
+    for r in regen & ~brake:
+      run = run + 1 if r else 0
+      longest = max(longest, run)
+    assert longest <= 50, f'{name}: regen requested without effect for {longest / 50:.1f} s'
+    engaged += int(brake.any())
+  assert engaged > 0  # the monitor did put the friction brakes on somewhere
+
+
+def test_panda_accepts_limited_and_shortfall_scenarios(current):
+  for name in (n for n in current if n.endswith(('-lim', '-noregen'))):
+    deep = '-deep' in name
+    assert _panda_accepts(current[name][0], regen_flag=deep).all(), name
