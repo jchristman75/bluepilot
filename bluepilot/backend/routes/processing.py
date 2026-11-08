@@ -198,6 +198,10 @@ def reverse_geocode(lat, lon):
         return None
 
 
+# comma four (u-blox) logs gpsLocationExternal; qcom devices log gpsLocation
+GPS_SERVICES = ('gpsLocationExternal', 'gpsLocation')
+
+
 def extract_gps_metrics_from_segment(segment_path):
     """Extract GPS metrics from a single segment's qlog
 
@@ -232,20 +236,12 @@ def extract_gps_metrics_from_segment(segment_path):
 
         # Extract GPS data only (fast parsing)
         for msg in lr:
-            if msg.which() == 'gpsLocation':
-                gps = msg.gpsLocation
-                if hasattr(gps, 'latitude') and hasattr(gps, 'longitude'):
-                    lat = float(gps.latitude)
-                    lon = float(gps.longitude)
-
-                    # Skip invalid coordinates
-                    if lat != 0 and lon != 0:
-                        speed = float(gps.speed) if hasattr(gps, 'speed') else 0
-                        gps_coords.append({
-                            'lat': lat,
-                            'lon': lon,
-                            'speed': speed
-                        })
+            service = msg.which()
+            if service in GPS_SERVICES:
+                gps = getattr(msg, service)
+                lat, lon = float(gps.latitude), float(gps.longitude)
+                if lat != 0 and lon != 0:  # 0,0 = no fix
+                    gps_coords.append({'lat': lat, 'lon': lon, 'speed': float(gps.speed)})
 
         if not gps_coords:
             return None
@@ -449,6 +445,61 @@ def generate_thumbnail(route_base):
         return None
 
 
+def _segment_log(segment_path):
+    """rlog when present (has every message), else qlog; None when the segment has no log."""
+    for filename in ('rlog.zst', 'rlog.bz2', 'qlog.zst', 'qlog.bz2'):
+        candidate = os.path.join(segment_path, filename)
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
+FINGERPRINT_SOURCES = ('can', 'fw', 'fixed')
+
+
+def _firmware_display(fw_bytes):
+    """Printable firmware (Ford part numbers) as text, up to 32 chars; anything else as hex of 16 bytes."""
+    try:
+        text = fw_bytes.decode('ascii').strip('\x00')
+    except UnicodeDecodeError:
+        text = ''
+    if text and all(c.isprintable() for c in text):
+        return text[:32]
+    return fw_bytes[:16].hex()
+
+
+def _fingerprint_info(cp):
+    """CarParams (live or logged) -> the portal's fingerprint dict."""
+    source = str(cp.fingerprintSource)
+    return {
+        'carFingerprint': str(cp.carFingerprint),
+        'carVin': str(cp.carVin),
+        'brand': str(cp.brand),
+        'fingerprintSource': source if source in FINGERPRINT_SOURCES else None,
+        'fuzzyFingerprint': bool(cp.fuzzyFingerprint),
+        'firmwareVersions': [{'ecu': str(fw.ecu), 'version': _firmware_display(bytes(fw.fwVersion))} for fw in cp.carFw],
+    }
+
+
+def _cached_car_params(segment_path):
+    """The live CarParams from Params when this segment belongs to the current route, else None."""
+    try:
+        from opendbc.car.structs import car
+        import openpilot.cereal.messaging as messaging
+        from openpilot.common.params import Params
+
+        params = Params()
+        current_route = params.get("CurrentRoute")
+        if current_route and current_route in segment_path:
+            car_params_bytes = params.get("CarParams", block=False)
+            if car_params_bytes:
+                logger.debug("Using cached CarParams from Params")
+                return messaging.log_from_bytes(car_params_bytes, car.CarParams)
+    except Exception as e:
+        logger.debug(f"Could not use Params method: {e}")
+    return None
+
+
 def extract_fingerprint_from_segment(segment_path):
     """Extract vehicle fingerprint data from a single segment's log
 
@@ -464,160 +515,25 @@ def extract_fingerprint_from_segment(segment_path):
         - fuzzyFingerprint: True if not exact match
         - firmwareVersions: List of all ECU firmware versions
     """
-    # Try method 1: Use runtime messaging module (works on device without pycapnp dependency)
-    try:
-        from opendbc.car.structs import car
-        import openpilot.cereal.messaging as messaging
-        from openpilot.common.params import Params
+    # Current route: the live CarParams (works on device without pycapnp)
+    cp = _cached_car_params(segment_path)
+    if cp is not None:
+        return _fingerprint_info(cp)
 
-        # Check if this is the current route by checking Params
-        params = Params()
-        current_route = params.get("CurrentRoute")
-
-        # If this segment is part of the current route, we can use cached CarParams
-        if current_route and current_route in segment_path:
-            car_params_bytes = params.get("CarParams", block=False)
-            if car_params_bytes:
-                logger.debug("Using cached CarParams from Params")
-                cp = messaging.log_from_bytes(car_params_bytes, car.CarParams)
-
-                # Extract basic fingerprint info
-                car_fingerprint = str(cp.carFingerprint) if hasattr(cp, 'carFingerprint') else None
-                car_vin = str(cp.carVin) if hasattr(cp, 'carVin') else None
-                brand = str(cp.brand) if hasattr(cp, 'brand') else None
-                fuzzy = bool(cp.fuzzyFingerprint) if hasattr(cp, 'fuzzyFingerprint') else False
-
-                # Get fingerprint source as string
-                fingerprint_source = None
-                if hasattr(cp, 'fingerprintSource'):
-                    source_enum = cp.fingerprintSource
-                    # Convert enum to string (can/fw/fixed)
-                    if str(source_enum) == 'can':
-                        fingerprint_source = 'can'
-                    elif str(source_enum) == 'fw':
-                        fingerprint_source = 'fw'
-                    elif str(source_enum) == 'fixed':
-                        fingerprint_source = 'fixed'
-
-                # Extract all firmware versions
-                fw_versions = []
-                if hasattr(cp, 'carFw'):
-                    for fw in cp.carFw:
-                        ecu_name = str(fw.ecu) if hasattr(fw, 'ecu') else 'unknown'
-                        fw_bytes = bytes(fw.fwVersion) if hasattr(fw, 'fwVersion') else b''
-
-                        # Convert firmware bytes to hex string (more compact than full bytes)
-                        # Only show first 16 bytes to keep it readable
-                        fw_hex = fw_bytes[:16].hex() if fw_bytes else ''
-
-                        # Try to decode as ASCII for more readable Ford firmware strings
-                        try:
-                            fw_str = fw_bytes.decode('ascii').strip('\x00')
-                            if fw_str and all(c.isprintable() for c in fw_str):
-                                fw_display = fw_str[:32]  # Limit length
-                            else:
-                                fw_display = fw_hex
-                        except (UnicodeDecodeError, AttributeError):
-                            fw_display = fw_hex
-
-                        fw_versions.append({
-                            'ecu': ecu_name,
-                            'version': fw_display
-                        })
-
-                return {
-                    'carFingerprint': car_fingerprint,
-                    'carVin': car_vin,
-                    'brand': brand,
-                    'fingerprintSource': fingerprint_source,
-                    'fuzzyFingerprint': fuzzy,
-                    'firmwareVersions': fw_versions
-                }
-    except Exception as e:
-        logger.debug(f"Could not use Params method: {e}")
-
-    # Method 2: Use LogReader (requires pycapnp, typically only on dev machines)
+    # Otherwise the carParams message in the log (LogReader needs pycapnp)
     try:
         from openpilot.tools.lib.logreader import LogReader
     except ImportError:
         logger.debug("LogReader not available - fingerprint extraction disabled")
         return None
-
-    # Try rlog first (has carParams), fallback to qlog
-    log_path = None
-    for filename in ['rlog.zst', 'rlog.bz2', 'qlog.zst', 'qlog.bz2']:
-        candidate = os.path.join(segment_path, filename)
-        if os.path.exists(candidate):
-            log_path = candidate
-            break
-
+    log_path = _segment_log(segment_path)
     if not log_path:
         return None
-
     try:
-        lr = LogReader(log_path)
-
-        # Look for carParams message (sent once per drive)
-        for msg in lr:
+        for msg in LogReader(log_path):
             if msg.which() == 'carParams':
-                cp = msg.carParams
-
-                # Extract basic fingerprint info
-                car_fingerprint = str(cp.carFingerprint) if hasattr(cp, 'carFingerprint') else None
-                car_vin = str(cp.carVin) if hasattr(cp, 'carVin') else None
-                brand = str(cp.brand) if hasattr(cp, 'brand') else None
-                fuzzy = bool(cp.fuzzyFingerprint) if hasattr(cp, 'fuzzyFingerprint') else False
-
-                # Get fingerprint source as string
-                fingerprint_source = None
-                if hasattr(cp, 'fingerprintSource'):
-                    source_enum = cp.fingerprintSource
-                    # Convert enum to string (can/fw/fixed)
-                    if str(source_enum) == 'can':
-                        fingerprint_source = 'can'
-                    elif str(source_enum) == 'fw':
-                        fingerprint_source = 'fw'
-                    elif str(source_enum) == 'fixed':
-                        fingerprint_source = 'fixed'
-
-                # Extract all firmware versions
-                fw_versions = []
-                if hasattr(cp, 'carFw'):
-                    for fw in cp.carFw:
-                        ecu_name = str(fw.ecu) if hasattr(fw, 'ecu') else 'unknown'
-                        fw_bytes = bytes(fw.fwVersion) if hasattr(fw, 'fwVersion') else b''
-
-                        # Convert firmware bytes to hex string (more compact than full bytes)
-                        # Only show first 16 bytes to keep it readable
-                        fw_hex = fw_bytes[:16].hex() if fw_bytes else ''
-
-                        # Try to decode as ASCII for more readable Ford firmware strings
-                        try:
-                            fw_str = fw_bytes.decode('ascii').strip('\x00')
-                            if fw_str and all(c.isprintable() for c in fw_str):
-                                fw_display = fw_str[:32]  # Limit length
-                            else:
-                                fw_display = fw_hex
-                        except (UnicodeDecodeError, AttributeError):
-                            fw_display = fw_hex
-
-                        fw_versions.append({
-                            'ecu': ecu_name,
-                            'version': fw_display
-                        })
-
-                return {
-                    'carFingerprint': car_fingerprint,
-                    'carVin': car_vin,
-                    'brand': brand,
-                    'fingerprintSource': fingerprint_source,
-                    'fuzzyFingerprint': fuzzy,
-                    'firmwareVersions': fw_versions
-                }
-
-        # No carParams message found
+                return _fingerprint_info(msg.carParams)
         return None
-
     except Exception as e:
         logger.debug(f"Error extracting fingerprint from {segment_path}: {e}")
         return None
@@ -671,6 +587,203 @@ def get_route_fingerprint(route_base, segments):
     return fingerprint_data
 
 
+MPS_TO_MPH = 2.23694
+METERS_PER_MILE = 1609.34
+DISENGAGE_REASONS = ('userDisable', 'immediateDisable', 'softDisable')
+SAFETY_EVENTS = ('fcw', 'aeb', 'stockFcw', 'stockAeb')
+ENGAGED_STATES = ('enabled', 'overriding')
+
+
+class DriveStats:
+    """Drive statistics accumulated over a route's log messages.
+
+    Call start_segment() before each segment's messages, handle() for every message, and
+    result() at the end. State that spans segments (time, speed, engagement, active events)
+    carries over; per-segment state (control loop timing) resets in start_segment().
+    """
+
+    def __init__(self):
+        self.duration = 0.0
+        self.distance_m = 0.0
+        self.speed_sum_mph = 0.0
+        self.speed_count = 0
+        self.max_speed_mph = 0.0
+        self.engaged_time = 0.0
+        self.state_times = {'disabled': 0.0, 'preEnabled': 0.0, 'enabled': 0.0, 'softDisabling': 0.0, 'overriding': 0.0}
+        self.disengagements = []
+        self.alerts = []
+        self.lane_changes = 0
+        self.safety_events = dict.fromkeys(SAFETY_EVENTS, 0)
+        self.steering_saturated = 0
+        self.lag_sum_ms = 0.0
+        self.lag_count = 0
+        self.lag_max_ms = 0.0
+
+        self._prev_time = None
+        self._state = None          # selfdriveState.state
+        self._mads_active = False   # MADS steering-only engagement (selfdriveStateSP)
+        self._prev_car_state = None  # (time, vEgo) of the previous carState
+        self._event_names = set()   # onroadEvents is republished while events stay active
+        self._prev_controls_time = None
+        self._full_rate_log = True
+        self._handlers = {
+            'carState': self._on_car_state,
+            'selfdriveState': self._on_selfdrive_state,
+            'selfdriveStateSP': self._on_selfdrive_state_sp,
+            'controlsState': self._on_controls_state,
+            'onroadEvents': self._on_onroad_events,
+        }
+
+    def start_segment(self, full_rate_log):
+        """qlogs decimate controlsState, so loop timing is only measured from rlogs."""
+        self._full_rate_log = full_rate_log
+        self._prev_controls_time = None
+
+    def handle(self, msg):
+        t = msg.logMonoTime / 1e9
+        if self._prev_time is not None and 0 < t - self._prev_time < 1.0:
+            dt = t - self._prev_time
+            self.duration += dt
+            if self._state is not None:
+                self.state_times[self._state] = self.state_times.get(self._state, 0.0) + dt
+                if self._state in ENGAGED_STATES or self._mads_active:
+                    self.engaged_time += dt
+        handler = self._handlers.get(msg.which())
+        if handler is not None:
+            handler(msg, t)
+        self._prev_time = t
+
+    def _on_car_state(self, msg, t):
+        v = float(msg.carState.vEgo)
+        speed_mph = v * MPS_TO_MPH
+        self.max_speed_mph = max(self.max_speed_mph, speed_mph)
+        self.speed_sum_mph += speed_mph
+        self.speed_count += 1
+        if self._prev_car_state is not None:
+            t_prev, v_prev = self._prev_car_state
+            if 0 < t - t_prev < 1.0:
+                self.distance_m += 0.5 * (v + v_prev) * (t - t_prev)
+        self._prev_car_state = (t, v)
+
+    def _on_selfdrive_state(self, msg, t):
+        self._state = str(msg.selfdriveState.state)
+
+    def _on_selfdrive_state_sp(self, msg, t):
+        self._mads_active = bool(msg.selfdriveStateSP.mads.active)
+
+    def _on_controls_state(self, msg, t):
+        # lateralControlState is a union (angleState/pidState/torqueState/...): read the active member
+        lat = msg.controlsState.lateralControlState
+        if getattr(lat, lat.which()).saturated:
+            self.steering_saturated += 1
+        # cumLagMs is gone upstream: measure how late each 100 Hz controlsState is past its 10 ms period
+        if self._full_rate_log and self._prev_controls_time is not None and 0 < t - self._prev_controls_time < 1.0:
+            lag_ms = max(0.0, (t - self._prev_controls_time - 0.01) * 1000.0)
+            self.lag_sum_ms += lag_ms
+            self.lag_count += 1
+            self.lag_max_ms = max(self.lag_max_ms, lag_ms)
+        self._prev_controls_time = t
+
+    def _on_onroad_events(self, msg, t):
+        names_now = set()
+        for event in msg.onroadEvents:
+            name = str(event.name)
+            names_now.add(name)
+            if name not in self._event_names:  # count each event once, when it first appears
+                self._on_new_event(event, name, t)
+        self._event_names = names_now
+
+    def _on_new_event(self, event, name, t):
+        reason = next((r for r in DISENGAGE_REASONS if getattr(event, r)), None)
+        if reason is not None:
+            self.disengagements.append({'time': t, 'type': name, 'reason': reason})
+        if event.warning:
+            self.alerts.append({'time': t, 'type': name, 'level': 'warning'})
+        if name in self.safety_events:
+            self.safety_events[name] += 1
+        if name == 'laneChange':  # each lane change also raises preLaneChange*
+            self.lane_changes += 1
+
+    def result(self):
+        hours, rem = divmod(int(self.duration), 3600)
+        minutes, seconds = divmod(rem, 60)
+        avg_lag = self.lag_sum_ms / self.lag_count if self.lag_count else 0.0
+        return {
+            'duration': self.duration,
+            'durationStr': f"{hours}h {minutes}m {seconds}s" if hours else f"{minutes}m {seconds}s",
+            'distance': round(self.distance_m / METERS_PER_MILE, 2),
+            'avgSpeed': round(self.speed_sum_mph / self.speed_count, 1) if self.speed_count else 0.0,
+            'maxSpeed': round(self.max_speed_mph, 1),
+            'opEngagedTime': round(self.engaged_time, 1),
+            'opEngagedPercent': round(self.engaged_time / self.duration * 100, 1) if self.duration > 0 else 0.0,
+            'opStateTimes': {k: round(v, 1) for k, v in self.state_times.items()},
+            'disengagements': self.disengagements,
+            'disengagementCount': len(self.disengagements),
+            'alerts': self.alerts,
+            'alertCount': len(self.alerts),
+            'laneChanges': self.lane_changes,
+            'safetyEvents': self.safety_events,
+            'controlMetrics': {
+                'steeringSaturated': self.steering_saturated,
+                'avgControlLag': round(avg_lag, 2),
+                'maxControlLag': round(self.lag_max_ms, 2),
+            },
+        }
+
+
+def _read_messages_manual(log_path):
+    """Yield log messages by decompressing by hand (for devices without LogReader)."""
+    import bz2
+    import struct
+    import openpilot.cereal.messaging as messaging
+
+    try:
+        if log_path.endswith('.zst'):
+            try:
+                import zstandard as zstd
+                with open(log_path, 'rb') as f, zstd.ZstdDecompressor().stream_reader(f) as reader:
+                    data = reader.read()
+            except ImportError:
+                data = subprocess.run(['zstd', '-d', '-c', log_path], capture_output=True, check=True).stdout
+        elif log_path.endswith('.bz2'):
+            with bz2.open(log_path, 'rb') as f:
+                data = f.read()
+        else:
+            return
+    except Exception as e:
+        logger.debug(f"Error decompressing {log_path}: {e}")
+        return
+
+    # Each message is: 4 bytes length + message data
+    offset = 0
+    while offset + 4 <= len(data):
+        msg_len = struct.unpack('<I', data[offset:offset + 4])[0]
+        offset += 4
+        if offset + msg_len > len(data) or msg_len > 10_000_000:  # sanity check
+            break
+        msg_data = data[offset:offset + msg_len]
+        offset += msg_len
+        try:
+            yield messaging.log_from_bytes(msg_data)
+        except Exception as e:
+            logger.debug(f"Error deserializing message: {e}")
+
+
+def _message_reader():
+    """The best available log reader: LogReader, else manual decompression, else None."""
+    try:
+        from openpilot.tools.lib.logreader import LogReader
+        return LogReader
+    except ImportError as e:
+        logger.warning(f"✗ LogReader not available: {e}; trying manual method")
+    try:
+        import openpilot.cereal.messaging  # noqa: F401
+        return _read_messages_manual
+    except ImportError as e:
+        logger.debug(f"cereal.messaging not available, drive stats disabled: {e}")
+        return None
+
+
 def extract_drive_stats_from_segments(segments):
     """Extract comprehensive drive statistics from route segments
 
@@ -678,353 +791,32 @@ def extract_drive_stats_from_segments(segments):
         segments: List of segment dictionaries with 'path' key
 
     Returns:
-        dict with drive statistics or None if extraction fails:
-        - duration: Total drive duration in seconds
-        - distance: Total distance in miles
-        - avgSpeed: Average speed in mph
-        - maxSpeed: Maximum speed in mph
-        - opEngagedTime: Time with OP engaged in seconds
-        - opEngagedPercent: Percentage of time OP was engaged
-        - disengagements: List of disengagement events with type and time
-        - disengagementCount: Total number of disengagements
-        - alerts: List of alert events with type and time
-        - alertCount: Total number of alerts
-        - laneChanges: Number of lane changes
-        - safetyEvents: Count of safety events (FCW, AEB, etc.)
-        - controlMetrics: Control performance metrics
+        dict with drive statistics (see DriveStats.result()) or None if extraction fails
     """
     if not segments:
         return None
+    reader = _message_reader()
+    if reader is None:
+        return None
 
-    # Try method 1: LogReader (preferred when pycapnp is available)
-    use_logreader = False
+    stats = DriveStats()
     try:
-        from openpilot.tools.lib.logreader import LogReader
-        use_logreader = True
-        logger.info("✓ LogReader available - using for drive stats extraction")
-    except ImportError as e:
-        logger.warning(f"✗ LogReader not available: {e}")
-        logger.info("Trying manual method...")
-
-    # Try method 2: Manual decompression + cereal.messaging (fallback for device without pycapnp)
-    use_manual_method = False
-    if not use_logreader:
-        try:
-            import openpilot.cereal.messaging as messaging
-            from openpilot.cereal import log as log_capnp
-            import bz2
-            import subprocess
-
-            # Try to import zstandard Python module
-            try:
-                import zstandard as zstd
-                use_zstd_module = True
-            except ImportError:
-                # Fall back to system zstd command if Python module not available
-                use_zstd_module = False
-                logger.debug("zstandard module not available, using system zstd command")
-
-            use_manual_method = True
-            logger.debug("Using manual decompression method for drive stats extraction")
-        except ImportError as e:
-            logger.debug(f"cereal.messaging not available: {e}")
-            logger.debug("Drive stats extraction disabled - no extraction method available")
-            return None
-
-    # Initialize accumulators
-    total_duration = 0.0
-    total_distance = 0.0
-    speed_sum = 0.0
-    speed_count = 0
-    max_speed = 0.0
-
-    op_engaged_time = 0.0
-    op_state_times = {'disabled': 0.0, 'preEnabled': 0.0, 'enabled': 0.0, 'softDisabling': 0.0, 'overriding': 0.0}
-
-    disengagements = []
-    alerts = []
-    lane_changes = 0
-    safety_events = {'fcw': 0, 'aeb': 0, 'stockFcw': 0, 'stockAeb': 0}
-
-    steering_saturated_count = 0
-    control_lag_sum = 0.0
-    control_lag_count = 0
-    control_lag_max = 0.0
-    mads_active = False  # MADS lateral-only engagement lives in selfdriveStateSP, not selfdriveState
-    prev_event_names = set()  # onroadEvents is republished while an event stays active: count rising edges
-    prev_controls_time = None
-
-    prev_time = None
-    prev_speed = None
-    prev_state = None
-
-    def read_messages_manual(log_path):
-        """Read messages using manual decompression + cereal.messaging"""
-        import struct
-
-        # Decompress file
-        try:
-            if log_path.endswith('.zst'):
-                if use_zstd_module:
-                    # Use Python zstandard module
-                    with open(log_path, 'rb') as f:
-                        dctx = zstd.ZstdDecompressor()
-                        # Use streaming decompression to handle files without content size header
-                        with dctx.stream_reader(f) as reader:
-                            data = reader.read()
-                else:
-                    # Use system zstd command
-                    result = subprocess.run(['zstd', '-d', '-c', log_path],
-                                          capture_output=True, check=True)
-                    data = result.stdout
-            elif log_path.endswith('.bz2'):
-                with bz2.open(log_path, 'rb') as f:
-                    data = f.read()
-            else:
-                return
-        except Exception as e:
-            logger.debug(f"Error decompressing {log_path}: {e}")
-            return
-
-        # Parse message stream
-        offset = 0
-        while offset < len(data):
-            # Each message is: 4 bytes length + message data
-            if offset + 4 > len(data):
-                break
-
-            try:
-                msg_len = struct.unpack('<I', data[offset:offset+4])[0]
-            except struct.error:
-                break
-
-            offset += 4
-
-            if offset + msg_len > len(data) or msg_len > 10_000_000:  # Sanity check
-                break
-
-            msg_data = data[offset:offset+msg_len]
-            offset += msg_len
-
-            try:
-                msg = messaging.log_from_bytes(msg_data)
-                yield msg
-            except Exception as e:
-                logger.debug(f"Error deserializing message: {e}")
-                continue
-
-    try:
-        # Process each segment
         for segment in segments:
-            segment_path = segment['path']
-
-            # Try rlog first (has all messages), fallback to qlog
-            log_path = None
-            for filename in ['rlog.zst', 'rlog.bz2', 'qlog.zst', 'qlog.bz2']:
-                candidate = os.path.join(segment_path, filename)
-                if os.path.exists(candidate):
-                    log_path = candidate
-                    break
-
+            log_path = _segment_log(segment['path'])
             if not log_path:
-                logger.debug(f"No log file found in {segment_path}")
+                logger.debug(f"No log file found in {segment['path']}")
                 continue
-
-            logger.debug(f"Processing drive stats from {os.path.basename(segment_path)}")
-            # qlogs decimate controlsState, so loop timing can only be measured from rlogs
-            full_rate_log = os.path.basename(log_path).startswith('rlog')
-            prev_controls_time = None
-
+            stats.start_segment(full_rate_log=os.path.basename(log_path).startswith('rlog'))
             try:
-                # Choose appropriate message reader
-                if use_logreader:
-                    lr = LogReader(log_path)
-                    msg_iterator = lr
-                elif use_manual_method:
-                    msg_iterator = read_messages_manual(log_path)
-                else:
-                    logger.warning(f"No extraction method available for {log_path}")
-                    continue
-
-                for msg in msg_iterator:
-                    msg_type = msg.which()
-                    current_time = msg.logMonoTime / 1e9  # Convert to seconds
-
-                    # Track time deltas
-                    if prev_time is not None:
-                        dt = current_time - prev_time
-                        if dt > 0 and dt < 1.0:  # Sanity check (less than 1 second)
-                            total_duration += dt
-
-                            # Track state time
-                            if prev_state is not None:
-                                op_state_times[prev_state] = op_state_times.get(prev_state, 0.0) + dt
-                                if prev_state in ['enabled', 'overriding'] or mads_active:
-                                    op_engaged_time += dt
-
-                    # Process carState messages for speed and distance
-                    if msg_type == 'carState':
-                        cs = msg.carState
-
-                        # Speed tracking
-                        if hasattr(cs, 'vEgo'):
-                            speed_mps = float(cs.vEgo)
-                            speed_mph = speed_mps * 2.23694  # m/s to mph
-
-                            if speed_mph > max_speed:
-                                max_speed = speed_mph
-
-                            speed_sum += speed_mph
-                            speed_count += 1
-
-                            # Distance calculation
-                            if prev_speed is not None and prev_time is not None:
-                                dt = current_time - prev_time
-                                if dt > 0 and dt < 1.0:
-                                    # Average speed over interval * time = distance
-                                    avg_speed_mps = (speed_mps + prev_speed) / 2.0
-                                    distance_m = avg_speed_mps * dt
-                                    distance_mi = distance_m / 1609.34  # meters to miles
-                                    total_distance += distance_mi
-
-                            prev_speed = speed_mps
-
-                    # Process selfdriveState for engagement tracking
-                    elif msg_type == 'selfdriveState':
-                        sds = msg.selfdriveState
-
-                        if hasattr(sds, 'state'):
-                            state_str = str(sds.state)
-                            prev_state = state_str
-
-                    # MADS: steering can be engaged while selfdriveState stays 'disabled'
-                    elif msg_type == 'selfdriveStateSP':
-                        try:
-                            mads_active = bool(msg.selfdriveStateSP.mads.active)
-                        except Exception:
-                            mads_active = False
-
-                    # Process controlsState for control metrics
-                    elif msg_type == 'controlsState':
-                        ctrl = msg.controlsState
-
-                        # Track steering saturation. lateralControlState is a union
-                        # (angleState/pidState/torqueState/...): read the active member.
-                        try:
-                            lat_state = ctrl.lateralControlState
-                            if getattr(lat_state, lat_state.which()).saturated:
-                                steering_saturated_count += 1
-                        except Exception:
-                            pass
-
-                        # Track control lag. cumLagMs was removed upstream, so measure how late
-                        # each 100 Hz controlsState arrives past its 10 ms period.
-                        if full_rate_log and prev_controls_time is not None:
-                            gap_s = current_time - prev_controls_time
-                            if 0 < gap_s < 1.0:
-                                lag_ms = max(0.0, (gap_s - 0.01) * 1000.0)
-                                control_lag_sum += lag_ms
-                                control_lag_count += 1
-                                if lag_ms > control_lag_max:
-                                    control_lag_max = lag_ms
-                        prev_controls_time = current_time
-
-                    # Process onroadEvents for disengagements, alerts, and safety events.
-                    # The service is onroadEvents (a list), republished while events stay active.
-                    elif msg_type == 'onroadEvents':
-                        names_now = set()
-                        for event in msg.onroadEvents:
-                            event_name = str(event.name)
-                            names_now.add(event_name)
-                            if event_name in prev_event_names:
-                                continue
-
-                            # Disengagement events
-                            if hasattr(event, 'userDisable') and event.userDisable:
-                                disengagements.append({
-                                    'time': current_time,
-                                    'type': event_name,
-                                    'reason': 'userDisable'
-                                })
-                            elif hasattr(event, 'immediateDisable') and event.immediateDisable:
-                                disengagements.append({
-                                    'time': current_time,
-                                    'type': event_name,
-                                    'reason': 'immediateDisable'
-                                })
-                            elif hasattr(event, 'softDisable') and event.softDisable:
-                                disengagements.append({
-                                    'time': current_time,
-                                    'type': event_name,
-                                    'reason': 'softDisable'
-                                })
-
-                            # Alert events (warnings and critical)
-                            if hasattr(event, 'warning') and event.warning:
-                                alerts.append({
-                                    'time': current_time,
-                                    'type': event_name,
-                                    'level': 'warning'
-                                })
-
-                            # Safety events
-                            if event_name == 'fcw':
-                                safety_events['fcw'] += 1
-                            elif event_name == 'aeb':
-                                safety_events['aeb'] += 1
-                            elif event_name == 'stockFcw':
-                                safety_events['stockFcw'] += 1
-                            elif event_name == 'stockAeb':
-                                safety_events['stockAeb'] += 1
-
-                            # Lane changes
-                            if event_name == 'laneChange':  # each lane change also raises preLaneChange*
-                                lane_changes += 1
-
-                        prev_event_names = names_now
-
-                    prev_time = current_time
-
+                for msg in reader(log_path):
+                    stats.handle(msg)
             except Exception as e:
                 logger.debug(f"Error reading log {log_path}: {e}")
-                continue
 
-        # Calculate derived metrics
-        avg_speed = speed_sum / speed_count if speed_count > 0 else 0.0
-        op_engaged_percent = (op_engaged_time / total_duration * 100) if total_duration > 0 else 0.0
-        avg_control_lag = control_lag_sum / control_lag_count if control_lag_count > 0 else 0.0
-
-        # Format duration as HH:MM:SS
-        hours = int(total_duration // 3600)
-        minutes = int((total_duration % 3600) // 60)
-        seconds = int(total_duration % 60)
-        duration_str = f"{hours}h {minutes}m {seconds}s" if hours > 0 else f"{minutes}m {seconds}s"
-
-        stats = {
-            'duration': total_duration,
-            'durationStr': duration_str,
-            'distance': round(total_distance, 2),
-            'avgSpeed': round(avg_speed, 1),
-            'maxSpeed': round(max_speed, 1),
-            'opEngagedTime': round(op_engaged_time, 1),
-            'opEngagedPercent': round(op_engaged_percent, 1),
-            'opStateTimes': {k: round(v, 1) for k, v in op_state_times.items()},
-            'disengagements': disengagements,
-            'disengagementCount': len(disengagements),
-            'alerts': alerts,
-            'alertCount': len(alerts),
-            'laneChanges': lane_changes,
-            'safetyEvents': safety_events,
-            'controlMetrics': {
-                'steeringSaturated': steering_saturated_count,
-                'avgControlLag': round(avg_control_lag, 2),
-                'maxControlLag': round(control_lag_max, 2)
-            }
-        }
-
-        logger.info(f"✓ Extracted drive stats: {duration_str}, {round(op_engaged_percent, 1)}% engaged, {len(disengagements)} disengagements")
-        return stats
-
+        result = stats.result()
+        logger.info(f"✓ Extracted drive stats: {result['durationStr']}, {result['opEngagedPercent']}% engaged, "
+                    f"{result['disengagementCount']} disengagements")
+        return result
     except Exception as e:
         logger.error(f"✗ Error extracting drive stats: {e}", exc_info=True)
         return None
