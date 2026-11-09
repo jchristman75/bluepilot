@@ -171,12 +171,21 @@ class LongitudinalExt:
 
   def __init__(self, CP, CP_SP):
     # BP longitudinal state
-    self.bp_accel_last = 0.0
+    self.bp_accel_last = 0.0  # last accel request actually sent (BP's or the planner's): the ramp starts here
     self.bpSpeedAllow = False
+    self.bp_used_last = False
+    self.handoff_ramp = False  # BP just handed back to the planner: ramp down to its request, don't step
+    self.urgent = False
 
     # Thresholds
     self.MAX_URBAN_SPEED_MPH = 45.0
-    self.following_accel_ROC = 0.002  # max accel change per scan in following mode
+    # Max downward accel change per 50 Hz scan while BP follows a lead (and on the hand-back): 1.5 m/s^3.
+    # It was 0.002 (0.1 m/s^3): a lead appearing at highway speed got ~0 decel for over a second while
+    # controlsd's PID wound up, then the hand-back stepped the wound-up request onto the friction
+    # brakes (-2..-3.5 m/s^2 behind a lead doing -0.3..-1, route 52d t=342/529/658).
+    self.following_accel_ROC = 0.03
+    self.URGENT_TTC_S = 4.0         # no ramp when a collision is this close...
+    self.URGENT_LEAD_TIME_S = 1.0   # ...or the lead is this close in time
 
     self.brake = BrakeHysteresis()
     self.regen_blend_UI = False
@@ -224,10 +233,11 @@ class LongitudinalExt:
     bp_gas = clip(op_gas, gas_lo, gas_hi)
     bp_accel = clip(op_accel, accel_lo, accel_hi)
 
-    # Rate limit downward accel changes (dampen initial brake hit); skip on imminent collision risk
-    if ttc_sec > 8.0 and lead_time_sec > 0.5:
+    # Rate limit downward accel changes (dampen initial brake hit), from what was last sent; skip it
+    # when a collision is close
+    self.urgent = ttc_sec < self.URGENT_TTC_S or lead_time_sec < self.URGENT_LEAD_TIME_S
+    if not self.urgent:
       bp_accel = clip(bp_accel, self.bp_accel_last - self.following_accel_ROC, 999)
-    self.bp_accel_last = bp_accel
 
     applied = (self.bpSpeedAllow and not CS.out.gasPressed and not CS.out.brakePressed and
                (lead is None or v_lead_mph > 40.0))
@@ -266,6 +276,18 @@ class LongitudinalExt:
       bp_accel, bp_gas, bp_long_used = self._bp_follow(CC, CS, op_accel, op_gas, accel_due_to_pitch)
       if bp_long_used and CC.longActive:
         accel, gas = bp_accel, bp_gas
+    # Hand-back from BP to the planner: the planner's request may have wound up while BP held it back,
+    # so ramp down to it instead of stepping onto the friction brakes (unless a collision is close)
+    if self.bp_used_last and not (bp_long_used and CC.longActive) and CC.longActive:
+      self.handoff_ramp = True
+    if self.handoff_ramp:
+      if CC.longActive and not self.urgent and accel < self.bp_accel_last - self.following_accel_ROC:
+        accel = self.bp_accel_last - self.following_accel_ROC
+        gas = max(gas, accel)  # regen no deeper than the ramp either
+      else:
+        self.handoff_ramp = False
+    self.bp_used_last = bp_long_used and CC.longActive
+    self.bp_accel_last = accel
 
     # How to deliver it: one brake flag decision on the final request
     regen_active = (self.regen_blend_UI and CC.longActive and not stopping and

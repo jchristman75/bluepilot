@@ -294,3 +294,67 @@ def test_shortfall_monitor_quiet_when_regen_delivers():
   c = DeepCtrl()
   for _ in range(200):
     assert not step_lim(c, -0.6, a_ego=-0.6).brake_actuate
+
+
+# ---- BP follow ramp and hand-back (route 52d t=342/529/658: harsh braking behind a slowing lead) ----
+
+def _set_lead(c, lead):
+  c.sm['radarState'] = SimpleNamespace(leadOne=lead)
+  c.sm.valid['radarState'] = lead is not None
+
+
+def _drops(seq):
+  return [b - a for a, b in zip(seq, seq[1:], strict=False)]
+
+
+def test_lead_appearing_at_highway_speed_brakes_within_a_second():
+  """74 mph, a lead appears 55 m ahead closing at 4.5 m/s (TTC ~12 s) and the planner ramps to -1.5
+  over 1 s. The old 0.002/scan limit sent ~-0.1 after a second while the car coasted; the request must
+  now follow the planner closely, still without a step."""
+  c = Ctrl(regen=False, lead=SimpleNamespace(present=False, dRel=0.0, vRel=0.0, vLead=0.0))
+  c.bpSpeedAllow = True
+  for _ in range(20):
+    step(c, 0.0, v_ego=33.0)
+  _set_lead(c, SimpleNamespace(present=True, dRel=55.0, vRel=-4.5, vLead=28.5))
+  sent = []
+  for i in range(60):
+    r = step(c, -1.5 * min(1.0, (i + 1) / 50), v_ego=33.0)
+    assert r.bp_long_used
+    sent.append(r.accel)
+  assert sent[49] <= -1.4
+  assert min(_drops(sent)) >= -c.following_accel_ROC - 1e-9
+
+
+def test_handoff_to_planner_ramps_instead_of_stepping():
+  """BP holds -0.3 behind a lead; then the car slows below 45 mph and the planner (wound up) asks -2.4.
+  The request must ramp at the follow rate, not jump to -2.4."""
+  c = Ctrl(regen=False, lead=SimpleNamespace(present=True, dRel=40.0, vRel=-1.0, vLead=26.0))
+  c.bpSpeedAllow = True
+  for _ in range(100):
+    r = step(c, -0.3, v_ego=27.0)
+  assert r.bp_long_used and r.accel == pytest.approx(-0.3)
+  sent = []
+  for _ in range(100):
+    r = step(c, -2.4, v_ego=19.5)  # 43.6 mph: BP long switches off
+    assert not r.bp_long_used
+    sent.append(r.accel)
+  assert sent[0] >= -0.3 - c.following_accel_ROC - 1e-9
+  assert min(_drops(sent)) >= -c.following_accel_ROC - 1e-9
+  assert sent[-1] == pytest.approx(-2.4)  # caught up, then the planner's request passes through
+  assert not c.handoff_ramp
+
+
+def test_urgent_lead_is_not_ramped():
+  c = Ctrl(regen=False, lead=SimpleNamespace(present=True, dRel=12.0, vRel=-6.0, vLead=21.0))  # TTC 2 s
+  c.bpSpeedAllow = True
+  r = step(c, -3.0, v_ego=27.0)
+  assert r.bp_long_used and r.accel == pytest.approx(-3.0)
+
+
+def test_city_driving_is_not_ramped():
+  # below the BP-long speed BP never takes over, so nothing changes for the planner's request
+  c = Ctrl(regen=False, lead=SimpleNamespace(present=True, dRel=20.0, vRel=-3.0, vLead=12.0))
+  for _ in range(5):
+    step(c, 0.0, v_ego=15.0)
+  r = step(c, -2.0, v_ego=15.0)
+  assert not r.bp_long_used and r.accel == pytest.approx(-2.0)
