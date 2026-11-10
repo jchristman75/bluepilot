@@ -2671,6 +2671,13 @@
           "description": "Ignore the vehicle radar and drive leads exclusively from the vision model. Requires reboot."
         },
         {
+          "key": "BPRawRadar",
+          "widget": "toggle",
+          "needs_onroad_cycle": true,
+          "title": "[Longitudinal Tuning] Full Radar Tracking (CAN-FD Fords)",
+          "description": "Track every radar return, not just the one object Ford's collision system picks, so stopped cars ahead are seen sooner and braking starts earlier and gentler. Mach-E, F-150, Lightning and Ranger. Ignored when Ford radar is disabled."
+        },
+        {
           "key": "disable_BP_lat_UI",
           "widget": "toggle",
           "title": "[Lateral Tuning] Disable BP Lateral Control",

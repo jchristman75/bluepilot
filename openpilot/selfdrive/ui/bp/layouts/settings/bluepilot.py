@@ -102,6 +102,7 @@ class BluePilotLayout(Widget):
       ("disable_downhill_comp_UI", self._disable_dowhill_comp),
       ("BPLongRegenBlend", self._regen_blend),
       ("disable_ford_radar_UI", self._disable_ford_radar),
+      ("BPRawRadar", self._raw_radar),
       ("BpShowLateralControl", self._show_lateral_control),
       ("BPUIDebugLog", self._ui_debug_log),
     )
@@ -635,6 +636,17 @@ class BluePilotLayout(Widget):
       icon="chffr_wheel.png"
     )
 
+    # Raw Delphi radar for CAN-FD Fords (bluepilot/selfdrive/controls/radar)
+    self._raw_radar = toggle_item(
+      lambda: tr("Full Radar Tracking (CAN-FD Fords)"),
+      lambda: tr("Track every radar return, not just the one object Ford's collision system picks, so stopped cars ahead are seen " +
+                 "sooner and braking starts earlier and gentler. Mach-E, F-150, Lightning and Ranger. Ignored when Ford radar is " +
+                 "disabled. Takes effect on the next drive."),
+      initial_state=self._safe_get_bool(self._params, "BPRawRadar"),
+      callback=lambda state: self._toggle_callback(state, "BPRawRadar"),
+      icon="chffr_wheel.png"
+    )
+
     # Show lateral control mode overlay toggle
     self._show_lateral_control = toggle_item(
       lambda: tr("Show Lateral Control Mode"),
@@ -766,6 +778,7 @@ class BluePilotLayout(Widget):
         self._regen_blend,
         self._disable_dowhill_comp,
         self._disable_ford_radar,
+        self._raw_radar,
       ]) +
       lateral_section
     )

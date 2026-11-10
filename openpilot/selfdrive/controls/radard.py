@@ -284,6 +284,12 @@ def main() -> None:
   CP_SP = messaging.log_from_bytes(Params().get("CarParamsSP", block=True), custom.CarParamsSP)
   cloudlog.info("radard got CarParamsSP")
 
+  # BluePilot: CAN-FD Fords with BPRawRadar on use the raw Delphi MRR radar (bluepilot/selfdrive/controls/radar)
+  from openpilot.bluepilot.selfdrive.controls.radar import radard_bp
+  if radard_bp.raw_radar_enabled(CP):
+    return radard_bp.main(CP, CP_SP)
+  # End BluePilot
+
   # *** setup messaging
   sm = messaging.SubMaster(['modelV2', 'carState', 'radarTracks'], poll='modelV2')
   pm = messaging.PubMaster(['radarState'])

@@ -287,6 +287,11 @@ sections:
     title: '[Longitudinal Tuning] Disable Ford Radar (Vision-Only Leads)'
     description: Ignore the vehicle radar and drive leads exclusively from the vision model. Requires reboot.
     needs_onroad_cycle: true
+  - key: BPRawRadar
+    widget: toggle
+    title: '[Longitudinal Tuning] Full Radar Tracking (CAN-FD Fords)'
+    description: Track every radar return, not just the one object Ford's collision system picks, so stopped cars ahead are seen sooner and braking starts earlier and gentler. Mach-E, F-150, Lightning and Ranger. Ignored when Ford radar is disabled.
+    needs_onroad_cycle: true
   # --- Lateral Tuning ---
   # Mirrors the on-device BluePilot menu: disable toggle and mode selector up top, mode-agnostic
   # items next, then the angle-only and curvature-only groups (hidden when the other control
