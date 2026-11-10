@@ -132,8 +132,10 @@ class MiciAugmentedRoadViewBP(MiciCameraViewBP, AugmentedRoadView, BlindspotRend
       return
     icon = gui_app.texture("icons_mici/settings/device/reboot.png", 64, 64)
     # the main layout pops this when the car leaves standstill
+    # short title: the slider fits ~3 short lines; the full detail goes to the log
+    title = tr("eGPU not found. reboot to fix?") if problem == "missing" else tr("eGPU slow. reboot to fix?")
     gui_app.push_widget(BigConfirmationDialog(
-      tr("eGPU link {problem}. reboot to fix?").format(problem=problem), icon,
+      title, icon,
       confirm_callback=lambda: self._bp_params.put_bool("DoReboot", True, block=False)))
 
   def _on_swipe_down(self):
