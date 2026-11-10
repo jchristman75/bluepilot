@@ -14,6 +14,10 @@ from openpilot.selfdrive.ui.bp.onroad.driver_state_bp import DriverStateRenderer
 from openpilot.selfdrive.ui.bp.lib.dm_icon_style import DMIconStyle
 from openpilot.selfdrive.ui.bp.mici.onroad.complication import MiciComplication
 from openpilot.selfdrive.ui.bp.mici.onroad.egpu_watts_icon import EgpuWattsIcon
+from openpilot.selfdrive.ui.bp.lib.egpu_link import EgpuLinkWatchdog
+from openpilot.selfdrive.ui.mici.widgets.dialog import BigConfirmationDialog
+from openpilot.system.ui.lib.multilang import tr
+from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.ui.bp.mici.onroad.alert_renderer_bp import MiciAlertRendererBP
 from openpilot.selfdrive.ui.bp.mici.onroad.confidence_ball_bp import ConfidenceBallMiciBP
 from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
@@ -97,6 +101,8 @@ class MiciAugmentedRoadViewBP(MiciCameraViewBP, AugmentedRoadView, BlindspotRend
     self._complication = MiciComplication()
     # BluePilot: eGPU badge with live wattage, upper right above the complication
     self._egpu_icon = EgpuWattsIcon()
+    # BluePilot: offer a reboot (parked) when the eGPU came up missing or below SuperSpeed
+    self._egpu_link = EgpuLinkWatchdog()
     # BluePilot: alert text steps around the eGPU badge
     self._alert_renderer = MiciAlertRendererBP()
 
@@ -113,6 +119,22 @@ class MiciAugmentedRoadViewBP(MiciCameraViewBP, AugmentedRoadView, BlindspotRend
       self._param_frame_counter = 0
       self._hide_fade = self._bp_params.get_bool("mici_hide_onroad_fade")
       self._hide_border = self._bp_params.get_bool("BPHideOnroadBorder")
+
+  def _check_egpu_link(self):
+    try:
+      sm = ui_state.sm
+      problem = self._egpu_link.update(ui_state.started, sm['deviceState'].usbState, ui_state.chestnut_compiled,
+                                       ui_state.chestnut_active, sm['carState'])
+    except Exception:
+      cloudlog.exception("bp egpu link check failed")
+      return
+    if problem is None:
+      return
+    icon = gui_app.texture("icons_mici/settings/device/reboot.png", 64, 64)
+    # the main layout pops this when the car leaves standstill
+    gui_app.push_widget(BigConfirmationDialog(
+      tr("eGPU link {problem}. reboot to fix?").format(problem=problem), icon,
+      confirm_callback=lambda: self._bp_params.put_bool("DoReboot", True, block=False)))
 
   def _on_swipe_down(self):
     if not ui_state.is_onroad():
@@ -139,6 +161,7 @@ class MiciAugmentedRoadViewBP(MiciCameraViewBP, AugmentedRoadView, BlindspotRend
     """Override render to place confidence ball on left, offset driver state, and conditionally hide border."""
     bp_ui_log.tick()  # refresh BPUIDebugLog enabled state (mirrors TICI; MICI had no tick, so the toggle was inert)
     self._refresh_display_params()
+    self._check_egpu_link()
     start_draw = time.monotonic()
     self._switch_stream_if_needed(ui_state.sm)
     self._update_calibration()
