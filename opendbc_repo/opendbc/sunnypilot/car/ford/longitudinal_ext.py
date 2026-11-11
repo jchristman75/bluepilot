@@ -60,6 +60,20 @@ BRAKE_REGEN = BrakeThresholds(on=-0.55, off=-0.40)
 BRAKE_REGEN_DEEP = BrakeThresholds(on=-0.95, off=-0.80)
 REGEN_MIN_SPEED = 3.0  # m/s; below this (and when stopping) the stock thresholds apply
 
+# Launch from a stop (BPLaunchBoost). At a green light with no lead the e2e model pulls away with
+# +0.15..+0.35 m/s^2; a held Mach-E doesn't move on that (route 537 t=373/501: +0.2..+0.34 for 1-1.5 s,
+# v stayed 0), the model then decides to stop again and op holds the brake until the driver presses the
+# gas. +0.4..+0.55 took ~2.3 s to roll (538 t=100). So for the first moments of a launch from a stop,
+# ask for at least LAUNCH_ACCEL, until the car rolls, the planner stops again, or LAUNCH_MAX_FRAMES.
+LAUNCH_ACCEL = 0.6            # m/s^2
+LAUNCH_END_SPEED = 1.0        # m/s: rolling, the planner's own request takes over
+LAUNCH_MAX_FRAMES = 100       # 2 s at 50 Hz
+LAUNCH_MIN_REQUEST = 0.1      # only when the planner itself asks to go (the hesitant releases were +0.13..+0.34)...
+LAUNCH_CONFIRM_FRAMES = 5     # ...for 0.1 s, so a one-frame blip at a stop doesn't launch
+LAUNCH_HELD_SPEED = 0.1       # m/s: "stopped" for arming
+LAUNCH_LEAD_MIN_GAP = 8.0     # m: no boost toward a stopped/slow car this close
+LAUNCH_LEAD_SLOW = 1.0        # m/s
+
 # How much of the pack's reported charge-power limit regen is assumed to use. Drivetrain efficiency
 # and drag would each add braking, so ignoring them already errs toward less regen.
 REGEN_LIMIT_MARGIN = 0.8
@@ -194,15 +208,22 @@ class LongitudinalExt:
     self.regen_mass_kg = FORD_REGEN_MASS_KG.get(CP.carFingerprint if CP is not None else None, FORD_REGEN_MASS_DEFAULT_KG)
     self.regen_monitor = RegenShortfallMonitor()
 
+    # Launch from a stop
+    self.launch_armed = False
+    self.launch_frames_left = 0
+    self.launch_request_frames = 0
+
     # Toggles (updated from Params each frame)
     self.disable_BP_long_UI = False
     self.disable_downhill_comp_UI = True
+    self.launch_boost_UI = True
 
   def update_long_params(self, params):
     """Read longitudinal-related Params from the UI. Called each frame."""
     self.disable_BP_long_UI = params.get_bool("disable_BP_long_UI")
     self.disable_downhill_comp_UI = params.get_bool("disable_downhill_comp_UI")
     self.regen_blend_UI = params.get_bool("BPLongRegenBlend")
+    self.launch_boost_UI = params.get_bool("BPLaunchBoost")
 
   def _read_lead(self):
     """leadOne from radarState, or None when it is missing or not present."""
@@ -242,6 +263,39 @@ class LongitudinalExt:
     applied = (self.bpSpeedAllow and not CS.out.gasPressed and not CS.out.brakePressed and
                (lead is None or v_lead_mph > 40.0))
     return bp_accel, bp_gas, applied
+
+  def _launch_boost(self, CC, CS, accel, gas, stopping):
+    """Launch from a stop: at least LAUNCH_ACCEL until the car rolls (see LAUNCH_ACCEL). Returns (accel, gas).
+
+    Decides on the planner's raw request (CC.actuators.accel), not `accel`: the carcontroller rate-limits
+    `accel` downward from what was last sent, so after a 0.6 boost it stays positive for a while even when
+    the planner already asks to stop, and the boost would keep itself going."""
+    v_ego = CS.out.vEgo
+    request = float(CC.actuators.accel)
+    if not (CC.longActive and self.launch_boost_UI) or CS.out.gasPressed or CS.out.brakePressed:
+      self.launch_armed = False
+      self.launch_frames_left = 0
+      self.launch_request_frames = 0
+      return accel, gas
+    if stopping:
+      # held at a stop: arm; the planner stopping again also ends a launch in progress
+      self.launch_armed = v_ego < LAUNCH_HELD_SPEED
+      self.launch_frames_left = 0
+      self.launch_request_frames = 0
+      return accel, gas
+    self.launch_request_frames = self.launch_request_frames + 1 if request > LAUNCH_MIN_REQUEST else 0
+    if self.launch_armed and self.launch_request_frames >= LAUNCH_CONFIRM_FRAMES:
+      self.launch_armed = False
+      lead = self._read_lead()
+      blocked = lead is not None and lead.d_rel < LAUNCH_LEAD_MIN_GAP and lead.v_lead < LAUNCH_LEAD_SLOW
+      self.launch_frames_left = 0 if blocked else LAUNCH_MAX_FRAMES
+    if self.launch_frames_left > 0:
+      if v_ego >= LAUNCH_END_SPEED or request <= 0.0:
+        self.launch_frames_left = 0
+      else:
+        self.launch_frames_left -= 1
+        accel, gas = max(accel, LAUNCH_ACCEL), max(gas, LAUNCH_ACCEL)
+    return accel, gas
 
   def update(self, CC, CS, op_accel, op_gas, accel_due_to_pitch, v_ego_mph, stopping, target_speed):
     """
@@ -287,6 +341,7 @@ class LongitudinalExt:
       else:
         self.handoff_ramp = False
     self.bp_used_last = bp_long_used and CC.longActive
+    accel, gas = self._launch_boost(CC, CS, accel, gas, stopping)
     self.bp_accel_last = accel
 
     # How to deliver it: one brake flag decision on the final request

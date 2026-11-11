@@ -23,8 +23,9 @@ class Ctrl(LongitudinalExt):
     self.sm = FakeSM(lead)
 
 
-def cc(active=True):
-  return SimpleNamespace(longActive=active)
+def cc(active=True, accel=0.0):
+  # accel: the planner's raw request (CC.actuators.accel), before the carcontroller's limits
+  return SimpleNamespace(longActive=active, actuators=SimpleNamespace(accel=accel))
 
 
 def cs(v_ego=15.0, a_ego=0.0):
@@ -35,7 +36,7 @@ def cs(v_ego=15.0, a_ego=0.0):
 
 def step(c, accel, v_ego=15.0, stopping=False, active=True, pitch=0.0):
   # carcontroller passes the raw planner request as gas; LongitudinalExt encodes INACTIVE itself
-  return c.update(cc(active), cs(v_ego, a_ego=accel), accel, accel, pitch, v_ego * 2.23694, stopping, 0.0)
+  return c.update(cc(active, accel), cs(v_ego, a_ego=accel), accel, accel, pitch, v_ego * 2.23694, stopping, 0.0)
 
 
 def test_stock_brake_flag_unchanged_when_off():
@@ -358,3 +359,116 @@ def test_city_driving_is_not_ramped():
     step(c, 0.0, v_ego=15.0)
   r = step(c, -2.0, v_ego=15.0)
   assert not r.bp_long_used and r.accel == pytest.approx(-2.0)
+
+
+# ---- launch from a stop (route 537 t=373/501: green light, model asks +0.2..+0.34, car never moves,
+#      model gives up after ~1 s and op holds the brake again until the driver presses the gas) ----
+
+from opendbc.sunnypilot.car.ford.longitudinal_ext import LAUNCH_ACCEL, LAUNCH_CONFIRM_FRAMES, LAUNCH_END_SPEED, LAUNCH_MAX_FRAMES
+
+
+def _hold_at_stop(c, frames=50):
+  for _ in range(frames):
+    r = step(c, -2.0, v_ego=0.0, stopping=True)
+  return r
+
+
+def _release(c, a=0.2, frames=LAUNCH_CONFIRM_FRAMES):
+  """The planner releases the stop and asks `a` for `frames` frames; returns the sent accels."""
+  return [step(c, a, v_ego=0.0).accel for _ in range(frames)]
+
+
+def test_launch_gets_enough_to_roll():
+  c = Ctrl(regen=True)
+  _hold_at_stop(c)
+  sent = _release(c, 0.15)
+  assert sent[-1] == pytest.approx(LAUNCH_ACCEL)
+  for a in (0.25, 0.34):
+    r = step(c, a, v_ego=0.0)
+    assert r.accel == pytest.approx(LAUNCH_ACCEL) and r.gas == pytest.approx(LAUNCH_ACCEL)
+    assert not r.brake_actuate
+
+
+def test_a_one_frame_blip_at_a_stop_does_not_launch():
+  c = Ctrl()
+  _hold_at_stop(c)
+  sent = _release(c, 0.2, LAUNCH_CONFIRM_FRAMES - 1)
+  assert all(a == pytest.approx(0.2) for a in sent)
+  assert step(c, 0.05, v_ego=0.0).accel == pytest.approx(0.05)   # below the request threshold
+  assert c.launch_frames_left == 0
+
+
+def test_launch_boost_ends_once_rolling():
+  c = Ctrl()
+  _hold_at_stop(c)
+  _release(c)
+  r = step(c, 0.2, v_ego=LAUNCH_END_SPEED + 0.1)
+  assert r.accel == pytest.approx(0.2)
+  r = step(c, 0.2, v_ego=0.5)  # does not come back on its own while still moving slowly
+  assert r.accel == pytest.approx(0.2)
+
+
+def test_launch_boost_is_time_limited():
+  c = Ctrl()
+  _hold_at_stop(c)
+  sent = _release(c, 0.2, LAUNCH_CONFIRM_FRAMES - 1 + LAUNCH_MAX_FRAMES + 20)[LAUNCH_CONFIRM_FRAMES - 1:]
+  assert all(a == pytest.approx(LAUNCH_ACCEL) for a in sent[:LAUNCH_MAX_FRAMES])
+  assert all(a == pytest.approx(0.2) for a in sent[LAUNCH_MAX_FRAMES:])
+
+
+def test_launch_boost_stops_the_moment_the_planner_stops_again():
+  c = Ctrl()
+  _hold_at_stop(c)
+  _release(c)
+  r = step(c, -0.3, v_ego=0.0, stopping=True)
+  assert r.accel < 0 and r.brake_actuate
+  assert _release(c)[-1] == pytest.approx(LAUNCH_ACCEL)  # a new release from a stop boosts again
+
+
+def test_launch_boost_ends_when_the_planner_brakes_even_if_the_rate_limited_accel_is_still_positive():
+  """The carcontroller passes `accel` rate-limited down from what was last sent (0.6 -> 0.53 -> ...).
+  The boost must follow the planner's raw request, or it keeps renewing itself."""
+  c = Ctrl()
+  _hold_at_stop(c)
+  assert _release(c)[-1] == pytest.approx(LAUNCH_ACCEL)
+  r = c.update(cc(True, -0.3), cs(0.2, 0.0), 0.53, 0.53, 0.0, 0.0, False, 0.0)
+  assert r.accel == pytest.approx(0.53)
+  assert c.launch_frames_left == 0
+
+
+def test_launch_boost_never_lowers_a_bigger_request_or_applies_while_moving():
+  c = Ctrl()
+  _hold_at_stop(c)
+  assert _release(c, 1.5)[-1] == pytest.approx(1.5)
+  c = Ctrl()
+  for _ in range(20):
+    r = step(c, 0.2, v_ego=5.0)  # rolling, never stopped: untouched
+  assert r.accel == pytest.approx(0.2)
+
+
+def test_launch_boost_respects_the_pedals_and_disengage():
+  c = Ctrl()
+  _hold_at_stop(c)
+  s = cs(0.0, 0.0)
+  s.out.brakePressed = True
+  for _ in range(LAUNCH_CONFIRM_FRAMES + 2):
+    r = c.update(cc(True, 0.2), s, 0.2, 0.2, 0.0, 0.0, False, 0.0)
+  assert r.accel == pytest.approx(0.2)
+  c = Ctrl()
+  _hold_at_stop(c)
+  for _ in range(LAUNCH_CONFIRM_FRAMES + 2):
+    r = step(c, 0.2, v_ego=0.0, active=False)
+  assert r.gas == INACTIVE
+
+
+def test_launch_boost_off_by_toggle():
+  c = Ctrl()
+  c.launch_boost_UI = False
+  _hold_at_stop(c)
+  assert _release(c, 0.2, LAUNCH_CONFIRM_FRAMES + 5)[-1] == pytest.approx(0.2)
+
+
+def test_no_launch_boost_toward_a_stopped_car_close_ahead():
+  c = Ctrl(lead=SimpleNamespace(present=True, dRel=5.0, vRel=0.0, vLead=0.0))
+  _hold_at_stop(c)
+  assert _release(c, 0.2, LAUNCH_CONFIRM_FRAMES + 5)[-1] == pytest.approx(0.2)

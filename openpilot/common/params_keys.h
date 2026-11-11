@@ -348,6 +348,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"disable_BP_long_UI", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"disable_downhill_comp_UI", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"BPLongRegenBlend", {PERSISTENT | BACKUP, BOOL, "0"}},  // BluePilot: regen-first decel for op long (longitudinal_ext.py)
+    {"BPLaunchBoost", {PERSISTENT | BACKUP, BOOL, "1"}},  // BluePilot: launch from a stop with at least 0.6 m/s^2 until rolling (longitudinal_ext.py)
     {"BPRawRadar", {PERSISTENT | BACKUP, BOOL, "0"}},  // BluePilot: raw Delphi MRR radar for CAN-FD Fords (bluepilot/selfdrive/controls/radar)
     {"FordPrefEnableDebugLogs", {PERSISTENT | BACKUP, BOOL, "0"}},  // BluePilot: bp_logger also forwards to cloudlog
     {"BPPortalCrashCount", {PERSISTENT, INT, "0"}},  // BluePilot: portal restart tracking (backend/core/lifecycle.py)
