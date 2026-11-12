@@ -16,6 +16,9 @@ from openpilot.selfdrive.car.cruise import V_CRUISE_MAX, V_CRUISE_UNSET
 from openpilot.common.swaglog import cloudlog
 
 from openpilot.sunnypilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPlannerSP
+# BluePilot: feature gate
+from openpilot.common.bluepilot import is_bluepilot
+# End BluePilot
 
 J_CRUISE_VALS = [1.6, 1.2, 0.8, 0.6]
 J_CRUISE_BP = [0., 10.0, 25., 40.]
@@ -39,6 +42,13 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     self.fcw = False
     self.dt = dt
     self.accel_boost = AccelBoost()
+
+    # BluePilot: shorter follow gap while changing lanes (BPLaneChangeCloseGap)
+    self.lane_change_gap = None
+    if is_bluepilot():
+      from openpilot.bluepilot.selfdrive.controls.lane_change_gap_bp import LaneChangeGapPlanner
+      self.lane_change_gap = LaneChangeGapPlanner()
+    # End BluePilot
 
     self.v_desired_filter = FirstOrderFilter(init_v, 2.0, self.dt)
     self.a_cruise = init_a
@@ -85,7 +95,10 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
       self.mpc.set_cur_state(self.v_desired_filter.x, self.output_a_target)
     else:
       self.mpc.set_cur_state(v_ego, sm['carState'].aEgo)
-    self.mpc.update(sm['radarState'], personality=sm['selfdriveState'].personality)
+    # BluePilot: follow-time override while changing lanes (None = stock)
+    t_follow = self.lane_change_gap.t_follow(sm, sm['selfdriveState'].personality) if self.lane_change_gap is not None else None
+    self.mpc.update(sm['radarState'], personality=sm['selfdriveState'].personality, t_follow=t_follow)
+    # End BluePilot
 
     self.v_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.v_solution)
     self.a_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.a_solution)
@@ -114,6 +127,14 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     candidates = [(output_a_target_mpc, self.mpc.source, output_should_stop_mpc),
                   (self.a_cruise, LongitudinalPlanSource.cruise, cruise_should_stop),
                   (output_a_target_e2e, LongitudinalPlanSource.e2e, output_should_stop_e2e)]
+
+    # BluePilot: curve speed limit (BPCurveSpeedLimit). The cruise candidate above is floored at A_CRUISE_MIN
+    # (-0.5), too gentle for a curve entered too fast, so its brake request is one more candidate. The min()
+    # below can only lower the accel.
+    curve_accel = self.scc.curve_accel
+    if curve_accel < 0.0:
+      candidates.append((curve_accel, LongitudinalPlanSource.cruise, False))
+    # End BluePilot
 
     output_a_target, self.mpc.source, _ = min(candidates, key=lambda c: c[0])
     self.output_should_stop = any(should_stop for _, _, should_stop in candidates)

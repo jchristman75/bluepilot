@@ -472,3 +472,128 @@ def test_no_launch_boost_toward_a_stopped_car_close_ahead():
   c = Ctrl(lead=SimpleNamespace(present=True, dRel=5.0, vRel=0.0, vLead=0.0))
   _hold_at_stop(c)
   assert _release(c, 0.2, LAUNCH_CONFIRM_FRAMES + 5)[-1] == pytest.approx(0.2)
+
+
+# ---- lane-change close gap (BPLaneChangeCloseGap): BP follow must not cap gas against the lead being left ----
+
+def _lc(c, state='laneChangeStarting', direction='left', radar=True, close_gap=True, lead_accel=0.0):
+  c.sm['modelV2'] = SimpleNamespace(meta=SimpleNamespace(laneChangeState=state, laneChangeDirection=direction))
+  c.sm.valid['modelV2'] = True
+  c.sm['radarState'].leadOne.radar = radar
+  c.sm['radarState'].leadOne.aLeadK = lead_accel
+  c.lane_change_close_gap_UI = close_gap
+
+
+def _gaining_lead(d=33.0, v_rel=-3.0, v_lead=24.0):
+  return SimpleNamespace(present=True, dRel=d, vRel=v_rel, vLead=v_lead)
+
+
+def _cs_bs(v_ego=27.0, left=False, right=False):
+  s = cs(v_ego)
+  s.out.leftBlindspot, s.out.rightBlindspot, s.out.standstill = left, right, False
+  return s
+
+
+def _follow(c, op_gas=0.4, op_accel=0.4, **kw):
+  c.bpSpeedAllow = True
+  return c.update(cc(True), _cs_bs(**kw), op_accel, op_gas, 0.0, 27.0 * 2.23694, False, 0.0)
+
+
+def test_lane_change_close_gap_is_off_by_default_and_caps_gas_as_before():
+  c = Ctrl(regen=False, lead=_gaining_lead())               # 1.2 s behind a car it is gaining on
+  r = _follow(c)
+  assert r.bp_long_used and r.gas == pytest.approx(0.0)      # gaining within 1.5 s: no gas
+
+
+def test_signaling_out_lifts_the_gas_cap_toward_the_lead_being_left():
+  c = Ctrl(regen=False, lead=_gaining_lead())
+  _lc(c)
+  r = _follow(c)
+  assert r.bp_long_used and r.gas == pytest.approx(0.4)      # the planner's request passes (it carries the shorter gap)
+
+
+def test_every_lane_change_state_that_counts_and_not_the_others():
+  for state, lifted in (('preLaneChange', True), ('laneChangeStarting', True), ('laneChangeFinishing', True), ('off', False)):
+    c = Ctrl(regen=False, lead=_gaining_lead())
+    _lc(c, state=state)
+    assert (_follow(c).gas > 0.0) == lifted, state
+
+
+def test_blind_spot_on_the_lane_change_side_keeps_the_cap():
+  c = Ctrl(regen=False, lead=_gaining_lead())
+  _lc(c, direction='left')
+  assert _follow(c, left=True).gas == pytest.approx(0.0)
+  c = Ctrl(regen=False, lead=_gaining_lead())
+  _lc(c, direction='left')
+  assert _follow(c, right=True).gas == pytest.approx(0.4)    # the other side doesn't matter
+  c = Ctrl(regen=False, lead=_gaining_lead())
+  _lc(c, direction='none')
+  assert _follow(c, right=True).gas == pytest.approx(0.0)    # unknown direction: either side blocks
+
+
+def test_a_close_or_fast_closing_lead_keeps_the_cap():
+  for lead in (_gaining_lead(d=20.0), _gaining_lead(d=33.0, v_rel=-9.0, v_lead=18.0)):      # < 1 s ahead, TTC ~3.7 s
+    c = Ctrl(regen=False, lead=lead)
+    _lc(c)
+    assert _follow(c).gas == pytest.approx(0.0)
+
+
+def test_a_vision_only_lead_keeps_the_cap_and_the_missing_modelv2_does_not_crash():
+  c = Ctrl(regen=False, lead=_gaining_lead())
+  _lc(c, radar=False)
+  assert _follow(c).gas == pytest.approx(0.0)
+  c = Ctrl(regen=False, lead=_gaining_lead())
+  c.lane_change_close_gap_UI = True                          # no modelV2 in the SubMaster at all
+  assert _follow(c).gas == pytest.approx(0.0)
+
+
+def test_the_planners_other_gates_apply_here_too():
+  # the planner and the car share lane_change_gate.close_gap_ok, so a braking lead or a low speed cancels both
+  c = Ctrl(regen=False, lead=_gaining_lead())
+  _lc(c, lead_accel=-1.5)
+  assert _follow(c).gas == pytest.approx(0.0)
+  from opendbc.sunnypilot.car.ford.lane_change_gate import MIN_SPEED, close_gap_ok
+  ok = dict(state='laneChangeStarting', direction='left', left_blindspot=False, right_blindspot=False, v_ego=27.0,
+            lead_present=True, lead_radar=True, lead_brake=0.0, standstill=False)
+  assert close_gap_ok(**ok)
+  assert not close_gap_ok(**{**ok, 'v_ego': MIN_SPEED - 0.1})
+  assert not close_gap_ok(**{**ok, 'standstill': True})
+
+
+def test_lane_change_does_not_change_the_slow_lead_hand_back_rule():
+  c = Ctrl(regen=False, lead=_gaining_lead(v_lead=12.0, v_rel=-15.0, d=60.0))   # a 27 mph lead: the planner owns it
+  _lc(c)
+  assert not _follow(c).bp_long_used
+
+
+# ---- a BluePilot param the running params library doesn't know must never crash card (routes 53a/53b) ----
+
+class _StaleParams:
+  """A params library built before the BP keys existed: card keeps the library the manager started with."""
+
+  def __init__(self, unknown, values=None):
+    self.unknown, self.values = set(unknown), values or {}
+
+  def get_bool(self, key, block=False):
+    if key in self.unknown:
+      from openpilot.common.params import UnknownKeyName
+      raise UnknownKeyName(key.encode())
+    return self.values.get(key, False)
+
+
+def test_unknown_bp_keys_keep_their_defaults_and_do_not_raise():
+  c = Ctrl()
+  c.update_long_params(_StaleParams({'BPLaunchBoost', 'BPLaneChangeCloseGap'}, {'BPLongRegenBlend': True}))   # must not raise
+  assert c.launch_boost_UI is True and c.lane_change_close_gap_UI is False      # the declared defaults
+  assert c.regen_blend_UI is True                                                # known keys still read
+
+
+def test_known_bp_keys_follow_the_param():
+  c = Ctrl()
+  c.update_long_params(_StaleParams(set(), {'BPLaunchBoost': False, 'BPLaneChangeCloseGap': True}))
+  assert c.launch_boost_UI is False and c.lane_change_close_gap_UI is True
+
+
+def test_the_real_exception_is_not_a_keyerror():
+  from openpilot.common.params import UnknownKeyName
+  assert not issubclass(UnknownKeyName, KeyError)

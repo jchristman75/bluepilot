@@ -27,6 +27,7 @@ import numpy as np
 from numpy import clip
 
 from opendbc.car.ford.values import CarControllerParams
+from opendbc.sunnypilot.car.ford.lane_change_gate import close_gap_ok
 from opendbc.sunnypilot.car.ford.values_ext import (FORD_REGEN_MASS_DEFAULT_KG, FORD_REGEN_MASS_KG, REGEN_MIN_GAS,
                                                      FordSafetyFlagsBP)
 
@@ -171,6 +172,17 @@ def encode_gas(gas, long_active, brake_actuate, min_gas=MIN_GAS):
   return float(clip(gas, min_gas, CarControllerParams.ACCEL_MAX))
 
 
+def _read_flag(params, key: str, default: bool) -> bool:
+  """A BluePilot param this build's params library may not know yet: the manager (and card, forked from it)
+  keeps the library it started with after an on-device rebuild, so a key added since raises
+  openpilot.common.params.UnknownKeyName (a plain Exception; opendbc can't import it). That crashed card at its
+  first frame on routes 53a/53b. Fall back to the default rather than take the car interface down."""
+  try:
+    return bool(params.get_bool(key))
+  except Exception:
+    return default
+
+
 class LongitudinalExt:
   """
   BluePilot longitudinal follow control extension for Ford vehicles.
@@ -217,13 +229,15 @@ class LongitudinalExt:
     self.disable_BP_long_UI = False
     self.disable_downhill_comp_UI = True
     self.launch_boost_UI = True
+    self.lane_change_close_gap_UI = False
 
   def update_long_params(self, params):
     """Read longitudinal-related Params from the UI. Called each frame."""
     self.disable_BP_long_UI = params.get_bool("disable_BP_long_UI")
     self.disable_downhill_comp_UI = params.get_bool("disable_downhill_comp_UI")
     self.regen_blend_UI = params.get_bool("BPLongRegenBlend")
-    self.launch_boost_UI = params.get_bool("BPLaunchBoost")
+    self.launch_boost_UI = _read_flag(params, "BPLaunchBoost", True)
+    self.lane_change_close_gap_UI = _read_flag(params, "BPLaneChangeCloseGap", False)
 
   def _read_lead(self):
     """leadOne from radarState, or None when it is missing or not present."""
@@ -233,6 +247,23 @@ class LongitudinalExt:
     if not lead.present:
       return None
     return Lead(float(lead.dRel), float(lead.vRel), float(lead.vLead))
+
+  def _lane_change_frees_lead(self, CS, lead, lead_time_sec, ttc_sec) -> bool:
+    """True while the planner's lane-change close gap applies (the shared gate in lane_change_gate.py) and the lead
+    is neither close nor closing fast: BP follow then stops capping gas against the lead being left."""
+    if not self.lane_change_close_gap_UI or lead is None:
+      return False
+    if ttc_sec < self.URGENT_TTC_S or lead_time_sec < self.URGENT_LEAD_TIME_S:
+      return False
+    if not self.sm.valid.get('modelV2', False):
+      return False
+    try:
+      meta, radar_lead = self.sm['modelV2'].meta, self.sm['radarState'].leadOne
+    except KeyError:
+      return False
+    return close_gap_ok(str(meta.laneChangeState), str(meta.laneChangeDirection), bool(CS.out.leftBlindspot),
+                        bool(CS.out.rightBlindspot), CS.out.vEgo, True, bool(radar_lead.radar), max(0.0, -float(radar_lead.aLeadK)),
+                        bool(CS.out.standstill))
 
   def _bp_follow(self, CC, CS, op_accel, op_gas, accel_due_to_pitch):
     """BP long follow control. Returns (accel, gas, applied)."""
@@ -250,7 +281,11 @@ class LongitudinalExt:
     lead_time_sec = float(np.clip(lead_time_sec, 0.0, 999.0))
     ttc_sec = float(np.clip(ttc_sec, 0.2, 120.0))
 
-    gas_lo, gas_hi, accel_lo, accel_hi = follow_limits(lead, lead_time_sec, op_gas, op_accel, accel_due_to_pitch)
+    if self._lane_change_frees_lead(CS, lead, lead_time_sec, ttc_sec):
+      gas_lo = gas_hi = op_gas          # the planner's request already carries the shorter lane-change gap
+      accel_lo = accel_hi = op_accel
+    else:
+      gas_lo, gas_hi, accel_lo, accel_hi = follow_limits(lead, lead_time_sec, op_gas, op_accel, accel_due_to_pitch)
     bp_gas = clip(op_gas, gas_lo, gas_hi)
     bp_accel = clip(op_accel, accel_lo, accel_hi)
 
