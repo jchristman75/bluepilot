@@ -11,10 +11,13 @@ from openpilot.bluepilot.ui.lib.bp_shaders import draw_rainbow_polygon
 from openpilot.selfdrive.ui.bp.onroad.rad_racer_road import RadRacerRoadMixin, RAD_RACER_DASH_LEN_M, RAD_RACER_GAP_LEN_M
 # BluePilot: seasonal theme packs (colors.json overrides for road colors)
 from openpilot.selfdrive.ui.bp.lib import theme_pack
+# BluePilot: hatched blind spot lane (shared with the TICI renderer)
+from openpilot.selfdrive.ui.bp.onroad.blindspot_path import BlindspotPathMixin
 
-class ModelRendererBP(RadRacerRoadMixin, ModelRenderer):
+class ModelRendererBP(BlindspotPathMixin, RadRacerRoadMixin, ModelRenderer):
   def __init__(self):
     super().__init__()
+    self._init_blindspot_path()
     self._bp_params = Params()
     self._rainbow_v = 20
     self._disable_lane_line_status_color = self._bp_params.get_bool("BPDisableLaneLineStatusColor")
@@ -24,6 +27,12 @@ class ModelRendererBP(RadRacerRoadMixin, ModelRenderer):
     self._dash_phase = 0.0
     # BluePilot: seasonal theme pack (None when disabled)
     self._theme_pack = theme_pack.get_active_pack(force=True)
+
+  def _render(self, rect: rl.Rectangle):
+    super()._render(rect)
+    # BluePilot: hatched blind spot lane on top of the road (the Rad Racer theme replaces the road)
+    if not self._rad_racer:
+      self._draw_blindspot_paths()
 
   def prepare_projection(self, rect: rl.Rectangle) -> None:
     """Set clip region so _map_to_screen works before render().

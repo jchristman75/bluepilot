@@ -41,13 +41,16 @@ MINIMAL_VIEW_NEUTRAL_LANE_COLOR = rl.Color(185, 205, 225, 255)
 from openpilot.selfdrive.ui.bp.onroad.rad_racer_road import (  # noqa: E402
   RadRacerRoadMixin, RAD_RACER_ROAD_EDGE_WIDTH, RAD_RACER_DASH_LEN_M, RAD_RACER_GAP_LEN_M,
 )
+# BluePilot: hatched blind spot lane (shared with the MICI renderer)
+from openpilot.selfdrive.ui.bp.onroad.blindspot_path import BlindspotPathMixin
 
 
-class ModelRendererBP(RadRacerRoadMixin, ModelRenderer):
+class ModelRendererBP(BlindspotPathMixin, RadRacerRoadMixin, ModelRenderer):
   """BluePilot ModelRenderer with enhanced lane lines, path smoothing, and radar overlay."""
 
   def __init__(self):
     super().__init__()
+    self._init_blindspot_path()
     self._bp_params = Params()
     self._rainbow_v = 1.0
 
@@ -184,6 +187,9 @@ class ModelRendererBP(RadRacerRoadMixin, ModelRenderer):
 
     self._draw_lane_lines()
     self._draw_path()
+    # BluePilot: hatched blind spot lane on top of the road (the Rad Racer theme replaces the road)
+    if not self._rad_racer:
+      self._draw_blindspot_paths()
 
     # BluePilot: In Rad Racer theme, leads are drawn as sprites by RadRacerTheme
     if render_lead_indicator and radar_state and not self._rad_racer:
