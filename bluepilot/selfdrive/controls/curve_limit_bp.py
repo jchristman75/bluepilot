@@ -35,7 +35,7 @@ DT = DT_MDL
 
 # ---- steering ceiling: lateral acceleration the PSCM reliably delivers (m/s^2) by speed (m/s) ----
 CEILING_BP = (0.0, 13.0, 25.0)
-CEILING_V = (2.1, 2.1, 1.95)
+CEILING_V = (2.1, 2.1, 2.2)   # highway: 2.2 leaves the logged 65-73 mph sweepers (2.0-2.2) alone; tracking falls off above ~2.4
 
 # ---- envelope ----
 V_FLOOR = 20 * 0.44704       # m/s (20 mph): never ask for less than this

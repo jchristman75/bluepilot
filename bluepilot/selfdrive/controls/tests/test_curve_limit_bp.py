@@ -81,11 +81,11 @@ def test_nonfinite_plan_is_rejected():
 
 # ---------------- steering ceiling and far-field ----------------
 
-def test_ceiling_is_the_measured_one_and_lower_at_highway_speed():
+def test_ceiling_is_the_measured_one_and_blends_between_city_and_highway_speed():
   assert cl.ceiling_lat_accel(10.0) == pytest.approx(2.1)
-  assert cl.ceiling_lat_accel(30.0) == pytest.approx(1.95)
-  assert cl.ceiling_lat_accel(19.0) < cl.ceiling_lat_accel(10.0)
-  assert cl.ceiling_lat_accel(19.0) > cl.ceiling_lat_accel(30.0)
+  assert cl.ceiling_lat_accel(30.0) == pytest.approx(2.2)
+  assert 2.1 < cl.ceiling_lat_accel(19.0) < 2.2
+  assert cl.ceiling_lat_accel(30.0) < 2.4            # tracking falls off above ~2.4 m/s^2
 
 
 def test_far_field_gain_only_on_firm_far_curves():
@@ -164,7 +164,7 @@ def test_target_is_never_above_cruise_and_accel_never_positive():
 # ---------------- far-field behaviour on a realistic highway sweeper ----------------
 
 def test_gentle_highway_sweeper_that_the_car_tracks_is_left_alone():
-  # R 500 m at 70 mph: 1.9 m/s^2, below the highway ceiling 1.95 -> no braking
+  # R 500 m at 70 mph: 1.9 m/s^2, below the highway ceiling 2.2 -> no braking
   _, r = run(*arc(500.0, start=60.0), v_ego=70 * MPH)
   assert not r.braking and r.a_req == 0.0
 
