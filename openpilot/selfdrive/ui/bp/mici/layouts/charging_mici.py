@@ -9,6 +9,7 @@ from collections.abc import Callable
 
 import pyray as rl
 
+from openpilot.selfdrive.ui.bp.charging.screen_policy import ChargingScreenHold
 from openpilot.selfdrive.ui.bp.charging.session import charge_session_history, is_in_drive
 from openpilot.selfdrive.ui.bp.widgets.charge_curve_chart import ChargeCurveChart
 from openpilot.selfdrive.ui.ui_state import ui_state, device
@@ -27,9 +28,6 @@ LABEL_LINE = 1.25
 # Row height follows the fonts rather than a guessed constant: the mici screen is only 240px
 # tall, so the whole block gets scaled down and a hard-coded row would clip the hero number.
 READOUT_H = HERO_VALUE_FONT * VALUE_LINE + LABEL_FONT * LABEL_LINE
-# No true "never timeout" sentinel exists in Device; reuse the large-number convention
-# from selfdrive/ui/tests/diff/replay.py to keep the screen on indefinitely while open.
-STAY_AWAKE_TIMEOUT_S = 99999
 
 
 _shared_layout: 'ChargingLayoutMici | None' = None
@@ -57,20 +55,29 @@ class ChargingLayoutMici(NavWidget):
     self._chart = self._child(ChargeCurveChart(full_bleed=True))
     self._prev_charging_active = None
     self._prev_in_drive = None
+    # BluePilot: the screen stays on only while the car is on (see bp/charging/screen_policy.py)
+    self._screen_hold = ChargingScreenHold()
 
   def show_event(self):
     super().show_event()
     self._prev_charging_active = None
     self._prev_in_drive = None
-    device.set_override_interactive_timeout(STAY_AWAKE_TIMEOUT_S)
+    self._screen_hold.reset()
+    self._apply_screen_hold()
 
   def hide_event(self):
     super().hide_event()
     device.set_override_interactive_timeout(None)
 
+  def _apply_screen_hold(self) -> None:
+    timeout = self._screen_hold.update(ui_state.ignition)
+    if timeout is not None:
+      device.set_override_interactive_timeout(timeout)
+
   def _update_state(self):
     super()._update_state()
     charge_session_history.update()
+    self._apply_screen_hold()      # car turned off while watching a charge: let the screen time out instead of burning in
 
     # Auto-dismiss once Drive is seen on two consecutive polls, not a single one:
     # a lone transient/stale gearShifter==drive sample (e.g. while parked and
