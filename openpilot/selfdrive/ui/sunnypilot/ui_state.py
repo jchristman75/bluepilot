@@ -261,11 +261,17 @@ class UIStateSP:
 class DeviceSP:
   def __init__(self):
     self._blocked_by_screensaver: bool = False
+    self._screensaver_suppressed: bool = False  # BluePilot: see suppress_screensaver
+
+  # BluePilot: the charging screen turns the display really off with the car off; the screensaver would keep it lit
+  def suppress_screensaver(self, suppressed: bool) -> None:
+    self._screensaver_suppressed = suppressed
+  # End BluePilot
 
   def _set_awake(self, on: bool, _ui_state=None):
     self._blocked_by_screensaver = False
 
-    if not on and _ui_state.screensaver_enabled:
+    if not on and _ui_state.screensaver_enabled and not self._screensaver_suppressed:  # BluePilot: suppress_screensaver
       if _ui_state.screensaver.was_dismissed:
         self.dismiss_screensaver(_ui_state)
       elif _ui_state.screensaver.is_active:

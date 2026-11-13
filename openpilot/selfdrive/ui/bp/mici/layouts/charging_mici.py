@@ -67,12 +67,14 @@ class ChargingLayoutMici(NavWidget):
 
   def hide_event(self):
     super().hide_event()
+    device.suppress_screensaver(False)
     device.set_override_interactive_timeout(None)
 
   def _apply_screen_hold(self) -> None:
-    timeout = self._screen_hold.update(ui_state.ignition)
-    if timeout is not None:
-      device.set_override_interactive_timeout(timeout)
+    policy = self._screen_hold.update(ui_state.ignition)
+    if policy is not None:
+      device.suppress_screensaver(policy.suppress_screensaver)
+      device.set_override_interactive_timeout(policy.timeout_s)
 
   def _update_state(self):
     super()._update_state()
