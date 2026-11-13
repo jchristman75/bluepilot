@@ -27,6 +27,13 @@ class SmartCruiseControl:
   @property
   def curve_accel(self) -> float:
     return 0.0 if self.bp_vision is None else self.bp_vision.curve_accel
+
+  # BluePilot: what longitudinalPlanSP logs as vision.aTarget. The BP limiter passes the car's own accel through as
+  # its output_a_target (so the MPC start state isn't disturbed), which hides its request from the logs; log the
+  # request itself. Logging only: control reads output_a_target and curve_accel.
+  @property
+  def logged_vision_a_target(self) -> float:
+    return self.vision.output_a_target if self.bp_vision is None else self.bp_vision.curve_accel
   # End BluePilot
 
   def update(self, sm: messaging.SubMaster, long_enabled: bool, long_override: bool, v_ego: float, a_ego: float, v_cruise: float) -> None:

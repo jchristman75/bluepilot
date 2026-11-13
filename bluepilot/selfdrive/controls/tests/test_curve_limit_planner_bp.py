@@ -85,3 +85,12 @@ def test_the_plan_source_stays_a_valid_cereal_enum():
 def test_a_slower_set_speed_than_the_curve_speed_is_left_alone():
   _, data = drive(ON, speed=20 * MPH, v_cruise=20 * MPH)
   assert data[:, 2].min() > 20 * MPH - 0.7
+
+
+def test_the_limiters_request_is_what_gets_logged_as_the_vision_a_target():
+  sim, data = drive(ON)
+  logged = list(sim.log)
+  assert sim.planner.scc.logged_vision_a_target == sim.planner.scc.curve_accel
+  assert min(r['curve_accel'] for r in logged) < -0.3                  # it braked, and that request is observable
+  off_sim, _ = drive(OFF)
+  assert off_sim.planner.scc.logged_vision_a_target == off_sim.planner.scc.vision.output_a_target   # stock path unchanged

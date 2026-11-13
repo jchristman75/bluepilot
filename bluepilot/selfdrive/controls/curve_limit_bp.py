@@ -34,12 +34,15 @@ from openpilot.common.realtime import DT_MDL
 DT = DT_MDL
 
 # ---- steering ceiling: lateral acceleration the PSCM reliably delivers (m/s^2) by speed (m/s) ----
-CEILING_BP = (0.0, 13.0, 25.0)
-CEILING_V = (2.1, 2.1, 2.2)   # highway: 2.2 leaves the logged 65-73 mph sweepers (2.0-2.2) alone; tracking falls off above ~2.4
+# Hands-free turns at 14-26 mph alerted ("turn exceeds limit") from ~1.9-2.3 m/s^2 asked, while 27+ mph held 3.5 m/s^2
+# without one (31 logged turns, routes 52c-549), so the steering gives out earlier at low speed than the single
+# 2.1 first measured. Highway: 2.2 leaves the logged 65-73 mph sweepers (2.0-2.2) alone; tracking falls off above ~2.4.
+CEILING_BP = (0.0, 9.0, 13.0, 25.0)
+CEILING_V = (1.9, 1.9, 2.1, 2.2)
 
 # ---- envelope ----
-V_FLOOR = 20 * 0.44704       # m/s (20 mph): never ask for less than this
-V_ACTIVE_MIN = 8.0           # m/s: below this the car is crawling, turns belong to the driver
+V_FLOOR = 13 * 0.44704       # m/s (13 mph): never ask for less than this (a 15 m radius turn needs ~12; the logged turns ran 14-18 mph)
+V_ACTIVE_MIN = 5.5           # m/s (12 mph): below this the car is crawling, turns belong to the driver; must stay under V_FLOOR
 DECEL_ENVELOPE = 0.45        # m/s^2: comfortable approach decel
 DECEL_CAP = 1.0              # m/s^2: never request more than this
 D_MIN = 8.0                  # m: a curve closer than this is treated as 8 m away (finite decel)

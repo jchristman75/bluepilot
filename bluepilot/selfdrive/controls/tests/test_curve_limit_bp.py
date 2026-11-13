@@ -82,9 +82,11 @@ def test_nonfinite_plan_is_rejected():
 # ---------------- steering ceiling and far-field ----------------
 
 def test_ceiling_is_the_measured_one_and_blends_between_city_and_highway_speed():
-  assert cl.ceiling_lat_accel(10.0) == pytest.approx(2.1)
+  assert cl.ceiling_lat_accel(5.0) == pytest.approx(1.9)       # low speed: the steering gives out earlier
+  assert cl.ceiling_lat_accel(13.0) == pytest.approx(2.1)
   assert cl.ceiling_lat_accel(30.0) == pytest.approx(2.2)
   assert 2.1 < cl.ceiling_lat_accel(19.0) < 2.2
+  assert cl.V_ACTIVE_MIN < cl.V_FLOOR                          # the limiter must stay on down to the speed it asks for
   assert cl.ceiling_lat_accel(30.0) < 2.4            # tracking falls off above ~2.4 m/s^2
 
 

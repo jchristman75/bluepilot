@@ -91,7 +91,9 @@ class LongitudinalPlannerSP:
     sccVision = smartCruiseControl.vision
     sccVision.state = self.scc.vision.state
     sccVision.vTarget = float(self.scc.vision.output_v_target)
-    sccVision.aTarget = float(self.scc.vision.output_a_target)
+    # BluePilot: log the curve limiter's brake request, not the pass-through accel
+    sccVision.aTarget = float(self.scc.logged_vision_a_target)
+    # End BluePilot
     sccVision.currentLateralAccel = float(self.scc.vision.current_lat_acc)
     sccVision.maxPredictedLateralAccel = float(self.scc.vision.max_pred_lat_acc)
     sccVision.enabled = self.scc.vision.is_enabled
