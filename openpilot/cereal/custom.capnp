@@ -617,6 +617,9 @@ struct CarStateBP @0xb057204d7deadf3f {
     socMinPerc @5 :Float32;
     socMaxPerc @6 :Float32;
     socActual @7 :Float32;
+    packTempC @8 :Float32;  # BattTrac_Te_Actl (0x24C)
+    coolantTempC @9 :Float32;  # BattTracClnt_Te_Actl (0x24B): battery coolant; above the pack = heating it, below = cooling it
+    thermalDataAvailable @10 :Bool;  # false on a sensor fault/unknown code or without battery data
   }
 
   struct BrakeLightStatus {

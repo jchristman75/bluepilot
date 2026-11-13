@@ -435,6 +435,14 @@
       "enabled": true
     },
     {
+      "name": "BPShowBatteryTemp",
+      "default": false,
+      "type": "bool",
+      "flags": ["PERSISTENT", "BACKUP"],
+      "create_default": true,
+      "enabled": true
+    },
+    {
       "name": "BPShowEgpuWatts",
       "default": true,
       "type": "bool",

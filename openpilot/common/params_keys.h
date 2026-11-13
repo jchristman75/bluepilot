@@ -381,6 +381,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"BPThemeAutoSeasonal", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"BPRainbowLines", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"BPShowEgpuWatts", {PERSISTENT | BACKUP, BOOL, "1"}},  // BluePilot: MICI eGPU wattage badge
+    {"BPShowBatteryTemp", {PERSISTENT | BACKUP, BOOL, "0"}},  // BluePilot: MICI HV battery temperature icon with coolant heating/cooling arrow (bp/mici/onroad/battery_temp_icon.py)
     {"BPShowConfidenceBall", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"BPAnimateSteeringWheel", {PERSISTENT | BACKUP, BOOL, "1"}},
     // BluePilot: No static defaults; the first active UI persists its matching device styles (C4=0, C3X=1).

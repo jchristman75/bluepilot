@@ -14,6 +14,7 @@ from openpilot.selfdrive.ui.bp.onroad.driver_state_bp import DriverStateRenderer
 from openpilot.selfdrive.ui.bp.lib.dm_icon_style import DMIconStyle
 from openpilot.selfdrive.ui.bp.mici.onroad.complication import MiciComplication
 from openpilot.selfdrive.ui.bp.mici.onroad.egpu_watts_icon import EgpuWattsIcon
+from openpilot.selfdrive.ui.bp.mici.onroad.battery_temp_icon import BatteryTempIcon
 from openpilot.selfdrive.ui.bp.lib.egpu_link import EgpuLinkWatchdog
 from openpilot.selfdrive.ui.mici.widgets.dialog import BigConfirmationDialog
 from openpilot.system.ui.lib.multilang import tr
@@ -101,6 +102,8 @@ class MiciAugmentedRoadViewBP(MiciCameraViewBP, AugmentedRoadView, BlindspotRend
     self._complication = MiciComplication()
     # BluePilot: eGPU badge with live wattage, upper right above the complication
     self._egpu_icon = EgpuWattsIcon()
+    # BluePilot: HV battery temperature icon on the left edge, between the DM ring and the steering wheel
+    self._battery_temp_icon = BatteryTempIcon()
     # BluePilot: offer a reboot (parked) when the eGPU came up missing or below SuperSpeed
     self._egpu_link = EgpuLinkWatchdog()
     # BluePilot: alert text steps around the eGPU badge
@@ -251,6 +254,8 @@ class MiciAugmentedRoadViewBP(MiciCameraViewBP, AugmentedRoadView, BlindspotRend
     # BluePilot: Lead car complication widget
     self._complication.render(self._content_rect)
     self._egpu_icon.render(self._content_rect)
+    self._battery_temp_icon.set_hud_busy(self._hud_renderer.drawing_top_icons())
+    self._battery_temp_icon.render(self._content_rect)
 
     ball_rect = rl.Rectangle(
       self._rect.x + self._rect.width - SIDE_PANEL_WIDTH,

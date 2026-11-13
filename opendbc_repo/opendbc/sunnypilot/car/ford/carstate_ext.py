@@ -15,6 +15,8 @@ from opendbc.car.ford.values import CAR, FordFlags
 from opendbc.sunnypilot.car.ford.values_ext import BUTTONS
 from openpilot.common.swaglog import cloudlog
 
+THERMAL_PACK_MAX_C = 100.0  # BattTrac_Te_Actl above this is the sensor's Unknown/Fault code, not a temperature
+
 
 # BluePilot: HEV power flow mode text lookup (moved from helpers.py)
 def get_hev_power_flow_text(mode_value):
@@ -368,6 +370,9 @@ class CarStateExt:
     hybrid_battery.socMinPerc = 0.0
     hybrid_battery.socMaxPerc = 0.0
     hybrid_battery.socActual = 0.0
+    hybrid_battery.packTempC = 0.0
+    hybrid_battery.coolantTempC = 0.0
+    hybrid_battery.thermalDataAvailable = False
 
     brake_light_status.dataAvailable = False
     brake_light_status.brakeLightsOn = False
@@ -464,6 +469,14 @@ class CarStateExt:
           hybrid_battery.socMinPerc = batt_data3["BattTracSoc_Pc_MnPrtct"]
           hybrid_battery.socMaxPerc = batt_data3["BattTracSoc_Pc_MxPrtct"]
           hybrid_battery.socActual = batt_data4["BattTracSoc2_Pc_Actl"]
+          # BluePilot: pack and battery-coolant temperatures for the battery temperature icon. The pack
+          # sensor's raw 1022/1023 ("Unknown"/"Fault") decode to ~461 degC, far above any real pack.
+          pack_c = batt_data4["BattTrac_Te_Actl"]
+          if pack_c < THERMAL_PACK_MAX_C:
+            hybrid_battery.packTempC = pack_c
+            hybrid_battery.coolantTempC = batt_data3["BattTracClnt_Te_Actl"]
+            hybrid_battery.thermalDataAvailable = True
+          # End BluePilot
     except (KeyError, AttributeError):
       pass
 
