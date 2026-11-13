@@ -15,6 +15,7 @@ from opendbc.car.ford.values import CAR, FordFlags
 from opendbc.sunnypilot.car.ford.values_ext import BUTTONS
 from openpilot.common.swaglog import cloudlog
 
+DC_FAST_CHARGING_D2 = 8      # ChrgStat_D2_Dsply "ChargingDCFastChange" (7 is AC)
 THERMAL_PACK_MAX_C = 100.0  # BattTrac_Te_Actl above this is the sensor's Unknown/Fault code, not a temperature
 
 
@@ -383,6 +384,7 @@ class CarStateExt:
     charging.statusValue = 0
     charging.powerKw = 0.0
     charging.powerLimitKw = 0.0
+    charging.dcFastCharging = False
 
     # Brake light status — try BCM message first, then fallback to BrakeSysFeatures_2
     brake_lights_detected = False
@@ -492,6 +494,12 @@ class CarStateExt:
           charging.statusValue = status_value
           charging.statusText = get_charge_status_text(status_value)
           charging.chargingActive = status_value in (1, 2)  # ChargingInParkingState, ChargingInDrivingState
+          # BluePilot: DC fast charge vs AC, from the display status on 0x440 (8 = DC, 7 = AC); a car that doesn't send it reads as not DC
+          try:
+            charging.dcFastCharging = int(cp.vl["PreCond_Hev_Data1_FD1"]["ChrgStat_D2_Dsply"]) == DC_FAST_CHARGING_D2
+          except (KeyError, TypeError, ValueError):
+            pass
+          # End BluePilot
           # Battery_Traction_5's four signals are charge/discharge power LIMITS, not flow: ChrgInst
           # reads 50-127 kW while driving, and on a DC fast charge (route 00000464) it rose
           # 122 -> 135 kW while the pack actually took 115 -> 89 kW. It is what the pack will accept.

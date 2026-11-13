@@ -13,12 +13,14 @@ Instead this process stays offroad and:
   2. Decodes only the charging/battery messages with the same CarStateExt code card uses and
      publishes carStateBP, so the existing charge session/UI keeps working untouched.
 
-It wakes CAN when:
-  - ignition drops while carStateBP said chargingActive (the "turned the car off" case), or
-  - a periodic probe (every PROBE_INTERVAL_S offroad) sees charging (plugged in with the car
-    already off, or a charge that resumes on a schedule).
+DC fast charging only, for at most one hour (chargemon_policy_bp.py). A Level 1/2 charge runs for hours and
+does not need the comma to stay up.
 
-It releases CAN when charging has read inactive for INACTIVE_RELEASE_S, after MAX_MONITOR_S,
+It wakes CAN when:
+  - ignition drops while carStateBP said dcFastCharging (the "turned the car off" case), or
+  - a periodic probe (every PROBE_INTERVAL_S offroad, currently off) sees DC fast charging.
+
+It releases CAN when DC charging has read inactive for INACTIVE_RELEASE_S, after MAX_MONITOR_S (1 h),
 or the moment the device goes onroad (card owns carStateBP again).
 """
 
@@ -36,17 +38,15 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import Ratekeeper
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.pandad import can_capnp_to_list
+from openpilot.bluepilot.selfdrive.car import chargemon_policy_bp as policy
 
 PUBLISH_HZ = 10
-ONROAD_CHARGING_WINDOW_S = 10.0  # charging this recently when ignition dropped -> keep monitoring
 # Offroad and idle: wake CAN this often to look for a charge (0 = never). Off: waking CAN every 5 min on a
 # parked, locked car is the suspected cause of the Mach-E alarm going off (2026-10-28). The ignition-drop
 # path (car turned off mid-charge) still monitors.
 PROBE_INTERVAL_S = 0.0
 PROBE_WINDOW_S = 15.0            # how long a probe listens before giving up
 STATUS_STALE_S = 2.0             # MtrTrac_Data2_FD1 (charge status) older than this = no data
-INACTIVE_RELEASE_S = 60.0        # charging inactive this long -> release CAN (UI grace is 15 s)
-MAX_MONITOR_S = 18 * 3600.0      # hard cap, longer than a Level 2 charge from empty
 CHARGE_STATUS_ADDR = 0x442       # MtrTrac_Data2_FD1 (ChrgStat_D_ActlMntr)
 
 
@@ -68,7 +68,7 @@ def _load_car_params(params: Params):
 
 def _charge_messages(CP) -> list[tuple[str, float]]:
   """Same charge/battery messages carstate.py registers, all non-critical."""
-  msgs = [("Battery_Traction_5_FD1", float('nan')), ("MtrTrac_Data2_FD1", float('nan'))]
+  msgs = [("Battery_Traction_5_FD1", float('nan')), ("MtrTrac_Data2_FD1", float('nan')), ("PreCond_Hev_Data1_FD1", float('nan'))]
   if CP.flags & FordFlags.HEV_BATTERY_DATA:
     msgs += [(m, float('nan')) for m in ("Battery_Traction_1_FD1", "Battery_Traction_3_FD1",
                                           "Battery_Traction_4_FD1", "MtrTracData_1_FD1")]
@@ -92,7 +92,7 @@ class ChargeMonitor:
     self.cp_cam: CANParser | None = None
 
     self.started = False
-    self.last_onroad_charging_t = -1e9
+    self.last_onroad_dc_t = -1e9
     self.mode = "idle"  # idle | probe | monitor
     self.mode_start_t = 0.0
     self.last_active_t = 0.0
@@ -139,8 +139,8 @@ class ChargeMonitor:
 
     started = self.sm['deviceState'].started if self.sm.seen['deviceState'] else self.started
     if started:
-      if self.sm.updated['carStateBP'] and self.sm['carStateBP'].charging.chargingActive:
-        self.last_onroad_charging_t = now
+      if self.sm.updated['carStateBP'] and self.sm['carStateBP'].charging.dcFastCharging:
+        self.last_onroad_dc_t = now
       if self.mode != "idle":
         self._release("onroad", now)
       self.started = True
@@ -148,7 +148,7 @@ class ChargeMonitor:
 
     if self.started:  # ignition just dropped
       self.started = False
-      if now - self.last_onroad_charging_t < ONROAD_CHARGING_WINDOW_S:
+      if policy.keep_alive_on_ignition_drop(now, self.last_onroad_dc_t):
         self._wake("monitor", now)
       else:
         self.last_probe_t = now
@@ -165,12 +165,13 @@ class ChargeMonitor:
     if now - self.last_status_t > STATUS_STALE_S:
       if self.mode == "probe" and now - self.mode_start_t >= PROBE_WINDOW_S:
         self._release("probe: no CAN", now)
-      elif self.mode == "monitor" and now - self.last_active_t >= INACTIVE_RELEASE_S:
+      elif self.mode == "monitor" and now - self.last_active_t >= policy.INACTIVE_RELEASE_S:
         self._release("no charge status on CAN", now)
       return
 
     dat = CarStateExt.update_car_state_bp(self.shim, self.cp, self.cp_cam)
-    active = dat.carStateBP.charging.chargingActive
+    charging = dat.carStateBP.charging
+    active = policy.session_active(self.mode, charging.chargingActive, charging.dcFastCharging)  # DC fast charging only (decided on entry)
 
     if active:
       self.last_active_t = now
@@ -182,11 +183,9 @@ class ChargeMonitor:
       return  # don't publish an idle car from a probe
 
     if self.mode == "monitor":
-      if now - self.last_active_t >= INACTIVE_RELEASE_S:
-        self._release("charge ended", now)
-        return
-      if now - self.mode_start_t >= MAX_MONITOR_S:
-        self._release("max monitor time", now)
+      reason = policy.release_reason(now, self.mode_start_t, self.last_active_t)
+      if reason is not None:
+        self._release(reason, now)
         return
 
     if self.pm is None:

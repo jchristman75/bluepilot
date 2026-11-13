@@ -634,6 +634,7 @@ struct CarStateBP @0xb057204d7deadf3f {
     statusValue @3 :UInt8;  # Raw numeric value for PlotJuggler compatibility
     powerKw @4 :Float32;  # power into the HV pack while charging (Mach-E, F-150 Lightning: pack V x HV_Battery_Current_BP; else = powerLimitKw)
     powerLimitKw @5 :Float32;  # what the pack will accept right now (BattTrac2_Pw_ChrgInst)
+    dcFastCharging @6 :Bool;  # ChrgStat_D2_Dsply (0x440) == 8 ChargingDCFastChange; AC charging is 7. bp_chargemon keeps the comma awake only for this
   }
 }
 

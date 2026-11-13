@@ -18,6 +18,9 @@ from openpilot.selfdrive.selfdrived.alertmanager import OFFROAD_ALERTS
 
 from openpilot.common.bluepilot import is_bluepilot
 from openpilot.selfdrive.ui.sunnypilot.ui_state import UIStateSP, DeviceSP
+# BluePilot: car-off display rule while the charging screen is open
+from openpilot.selfdrive.ui.bp.charging.screen_policy import CAR_OFF_TIMEOUT_S, CarOffScreenRule
+# End BluePilot
 
 BACKLIGHT_OFFROAD = 65 if HARDWARE.get_device_type() == "mici" else 50
 PARAM_UPDATE_TIME = 1 / 5.0
@@ -297,6 +300,11 @@ class Device(DeviceSP):
     self._interactive_timeout_callbacks: list[Callable] = []
     self._prev_timed_out = False
     self._awake: bool = True
+    # BluePilot: with the car off and the charging screen open, the display really turns off (bp/charging/screen_policy.py)
+    self._charging_screen_open = False
+    self._car_off_rule = CarOffScreenRule()
+    self._car_off_charging_screen_off = False
+    # End BluePilot
 
     self._offroad_brightness: int = BACKLIGHT_OFFROAD
     self._last_brightness: int = 0
@@ -314,8 +322,25 @@ class Device(DeviceSP):
     self._override_interactive_timeout = timeout
     self._reset_interactive_timeout()
 
+  # BluePilot: charging screen open / car-off display rule
+  def set_charging_screen_open(self, is_open: bool) -> None:
+    self._charging_screen_open = is_open
+
+  def set_car_off_charging_screen_off(self, active: bool) -> None:
+    """The rule's effect: a short timeout that beats the charging screen's hold, and no screensaver."""
+    self._car_off_charging_screen_off = active
+    self.suppress_screensaver(active)
+
+  def _update_car_off_charging_rule(self) -> None:
+    if self._car_off_rule.update(ui_state.ignition, self._charging_screen_open):
+      self.set_car_off_charging_screen_off(self._car_off_rule.active)
+      self._reset_interactive_timeout()    # the countdown starts when the rule starts (or ends)
+  # End BluePilot
+
   @property
   def interactive_timeout(self) -> int:
+    if self._car_off_charging_screen_off:   # BluePilot
+      return CAR_OFF_TIMEOUT_S
     if self._override_interactive_timeout is not None:
       return self._override_interactive_timeout
 
@@ -338,6 +363,7 @@ class Device(DeviceSP):
     if self._interaction_time <= 0:
       self._reset_interactive_timeout()
 
+    self._update_car_off_charging_rule()    # BluePilot
     self._update_brightness()
     self._update_wakefulness()
 

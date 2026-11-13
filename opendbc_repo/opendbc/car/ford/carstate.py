@@ -205,6 +205,7 @@ class CarState(CarStateBase, MadsCarState, CarStateExt):
     if CP.flags & FordFlags.CHARGING_DATA:
       pt_messages.append(("Battery_Traction_5_FD1", float('nan')))
       pt_messages.append(("MtrTrac_Data2_FD1", float('nan')))
+      pt_messages.append(("PreCond_Hev_Data1_FD1", float('nan')))  # BluePilot: ChrgStat_D2_Dsply tells DC fast charging from AC
 
     if CP.flags & FordFlags.HV_CURRENT_DATA:
       pt_messages.append(("HV_Battery_Current_BP", float('nan')))

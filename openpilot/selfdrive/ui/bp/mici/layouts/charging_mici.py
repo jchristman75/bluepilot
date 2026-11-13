@@ -9,7 +9,7 @@ from collections.abc import Callable
 
 import pyray as rl
 
-from openpilot.selfdrive.ui.bp.charging.screen_policy import ChargingScreenHold
+from openpilot.selfdrive.ui.bp.charging.screen_policy import STAY_AWAKE_TIMEOUT_S
 from openpilot.selfdrive.ui.bp.charging.session import charge_session_history, is_in_drive
 from openpilot.selfdrive.ui.bp.widgets.charge_curve_chart import ChargeCurveChart
 from openpilot.selfdrive.ui.ui_state import ui_state, device
@@ -55,31 +55,23 @@ class ChargingLayoutMici(NavWidget):
     self._chart = self._child(ChargeCurveChart(full_bleed=True))
     self._prev_charging_active = None
     self._prev_in_drive = None
-    # BluePilot: the screen stays on only while the car is on (see bp/charging/screen_policy.py)
-    self._screen_hold = ChargingScreenHold()
 
   def show_event(self):
     super().show_event()
     self._prev_charging_active = None
     self._prev_in_drive = None
-    self._screen_hold.reset()
-    self._apply_screen_hold()
+    # held awake while the car is on; with the car off the Device turns the display off (bp/charging/screen_policy.py)
+    device.set_override_interactive_timeout(STAY_AWAKE_TIMEOUT_S)
+    device.set_charging_screen_open(True)
 
   def hide_event(self):
     super().hide_event()
-    device.suppress_screensaver(False)
+    device.set_charging_screen_open(False)
     device.set_override_interactive_timeout(None)
-
-  def _apply_screen_hold(self) -> None:
-    policy = self._screen_hold.update(ui_state.ignition)
-    if policy is not None:
-      device.suppress_screensaver(policy.suppress_screensaver)
-      device.set_override_interactive_timeout(policy.timeout_s)
 
   def _update_state(self):
     super()._update_state()
     charge_session_history.update()
-    self._apply_screen_hold()      # car turned off while watching a charge: let the screen time out instead of burning in
 
     # Auto-dismiss once Drive is seen on two consecutive polls, not a single one:
     # a lone transient/stale gearShifter==drive sample (e.g. while parked and

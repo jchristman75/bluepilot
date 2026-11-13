@@ -1,45 +1,34 @@
 """
-BluePilot: how long the MICI charging screen keeps the display on.
+BluePilot: when the display must really be turned off while the charging screen is showing.
 
-The screen stays up for as long as you want to watch a charge, which is why it overrides the device's interactive
-timeout with a huge value. That is right with the car on. With the car off (the comma is kept awake by the charge
-monitor, or woken by plugging in) it left the display lit for hours: burn-in. So the hold applies only while the
-ignition is on; with the car off the screen gets a short timeout, and a touch still wakes it for that long.
+The MICI charging screen holds the display on for as long as you watch a charge. With the car off that left the display
+lit for hours (burn-in), either through the hold itself or through the sunnypilot screensaver, which the device pushes in
+place of turning the display off (ScreenSaverEnabled). So with the car off and the charging screen open, the Device
+uses a short timeout and skips the screensaver. Touching the screen still shows it for that long.
 
-The sunnypilot screensaver has to be skipped too: with ScreenSaverEnabled the device pushes a bouncing-logo screen in
-place of turning the display off, so the screen stays lit for ScreenSaverTimeout seconds. The charging screen asks the
-Device to suppress it while the car is off.
+When the charging screen is not showing, nothing changes: the normal device timeout and screensaver apply, on purpose.
+The comma itself keeps running: this only concerns the display.
 
 Pure logic, no drawing, so it is unit-testable.
 """
-from typing import NamedTuple
 
-STAY_AWAKE_TIMEOUT_S = 99999    # car on: no "never timeout" sentinel exists in Device, so a large number
-CAR_OFF_TIMEOUT_S = 5           # car off: the screen sleeps this long after the car turns off or after a touch
-
-
-class ScreenPolicy(NamedTuple):
-  timeout_s: int
-  suppress_screensaver: bool
+STAY_AWAKE_TIMEOUT_S = 99999    # car on: the charging screen holds the display (no "never timeout" sentinel exists)
+CAR_OFF_TIMEOUT_S = 5           # car off: the display sleeps this long after the car turns off or after a touch
 
 
-def screen_policy(ignition: bool) -> ScreenPolicy:
-  return ScreenPolicy(STAY_AWAKE_TIMEOUT_S, False) if ignition else ScreenPolicy(CAR_OFF_TIMEOUT_S, True)
+def screen_off_with_car_off(ignition: bool, charging_screen_open: bool) -> bool:
+  return not ignition and charging_screen_open
 
 
-class ChargingScreenHold:
-  """Feed it the ignition every frame; it returns a policy to apply only when that changes. Re-applying every frame
-  would reset the device's countdown each time and the screen would never time out."""
+class CarOffScreenRule:
+  """Tracks the rule; update() returns True only on the frame it changes, so the Device resets its countdown once
+  (re-applying every frame would keep resetting it and the screen would never time out)."""
 
   def __init__(self):
-    self._applied: ScreenPolicy | None = None
+    self.active = False
 
-  def reset(self) -> None:
-    self._applied = None
-
-  def update(self, ignition: bool) -> ScreenPolicy | None:
-    policy = screen_policy(ignition)
-    if policy == self._applied:
-      return None
-    self._applied = policy
-    return policy
+  def update(self, ignition: bool, charging_screen_open: bool) -> bool:
+    active = screen_off_with_car_off(ignition, charging_screen_open)
+    changed = active != self.active
+    self.active = active
+    return changed

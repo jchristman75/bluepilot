@@ -1,44 +1,36 @@
-"""The charging screen keeps the display on only while the car is on; with the car off the display really turns off
-(short timeout, and no screensaver in its place) so it cannot burn in."""
+"""With the car off and the charging screen open, the display really turns off: a short timeout and no screensaver in its
+place. With the charging screen not showing, the normal device timeout and screensaver apply (on purpose)."""
+import pytest
+
 from openpilot.selfdrive.ui.bp.charging import screen_policy as sp
 
 
-def test_the_screen_is_held_awake_while_the_car_is_on():
-  policy = sp.screen_policy(ignition=True)
-  assert policy.timeout_s == sp.STAY_AWAKE_TIMEOUT_S
-  assert not policy.suppress_screensaver
+@pytest.mark.parametrize("ignition,screen_open,expected", [
+  (True, True, False),       # car on: the charging screen stays up as long as you want
+  (True, False, False),
+  (False, True, True),       # car off with the charging screen open
+  (False, False, False),     # charging screen not showing: normal timeout and screensaver
+])
+def test_the_display_is_forced_off_only_with_the_car_off_and_the_charging_screen_open(ignition, screen_open, expected):
+  assert sp.screen_off_with_car_off(ignition, screen_open) is expected
 
 
-def test_with_the_car_off_the_screen_gets_a_short_timeout_and_no_screensaver():
-  policy = sp.screen_policy(ignition=False)
-  assert policy.timeout_s == sp.CAR_OFF_TIMEOUT_S
-  assert 0 < sp.CAR_OFF_TIMEOUT_S <= 10                       # near-immediate, but a touch still shows it briefly
-  assert policy.suppress_screensaver                          # the sunnypilot screensaver would keep the display lit instead
+def test_the_car_off_timeout_is_short_but_a_touch_still_shows_the_screen_briefly():
+  assert 0 < sp.CAR_OFF_TIMEOUT_S <= 10
 
 
-def test_the_hold_reports_a_policy_only_when_it_changes():
-  hold = sp.ChargingScreenHold()
-  assert hold.update(ignition=True) == sp.screen_policy(True)      # first frame applies it
-  assert hold.update(ignition=True) is None
-  assert hold.update(ignition=True) is None
-  assert hold.update(ignition=False) == sp.screen_policy(False)    # the car turned off: start the short timeout once
-  assert hold.update(ignition=False) is None                       # not re-applied every frame (that would keep resetting the timer)
-  assert hold.update(ignition=True) == sp.screen_policy(True)      # car back on: hold again
+def test_the_rule_reports_a_change_once_so_the_countdown_is_not_reset_every_frame():
+  rule = sp.CarOffScreenRule()
+  assert rule.update(True, False) is False                   # nothing changed
+  assert rule.update(False, True) is True                    # car turned off with the charging screen open
+  assert rule.active
+  assert rule.update(False, True) is False                   # not reported again
+  assert rule.update(True, True) is True                     # car back on: released
+  assert not rule.active
+  assert rule.update(False, False) is False                  # car off without the charging screen: never active
 
 
-def test_opening_the_screen_with_the_car_already_off_applies_the_short_policy():
-  hold = sp.ChargingScreenHold()
-  assert hold.update(ignition=False) == sp.screen_policy(False)
-
-
-def test_a_new_show_starts_from_scratch():
-  hold = sp.ChargingScreenHold()
-  hold.update(ignition=False)
-  hold.reset()
-  assert hold.update(ignition=False) == sp.screen_policy(False)
-
-
-# ---- the Device side: the screensaver is skipped only while suppressed ----
+# ---- the Device side ----
 
 class _Screensaver:
   was_dismissed = False
@@ -86,3 +78,14 @@ def test_a_suppressed_screensaver_lets_the_display_turn_off(monkeypatch):
   device.suppress_screensaver(False)
   fake, pushed = _sleep(device, monkeypatch)
   assert fake.screensaver.initialized and device._blocked_by_screensaver
+
+
+def test_the_device_uses_the_short_timeout_while_the_rule_is_active():
+  from openpilot.selfdrive.ui.ui_state import Device
+  device = Device()
+  device.set_override_interactive_timeout(99999)               # the charging screen's hold
+  assert device.interactive_timeout == 99999
+  device.set_car_off_charging_screen_off(True)
+  assert device.interactive_timeout == sp.CAR_OFF_TIMEOUT_S    # takes precedence over the hold
+  device.set_car_off_charging_screen_off(False)
+  assert device.interactive_timeout == 99999

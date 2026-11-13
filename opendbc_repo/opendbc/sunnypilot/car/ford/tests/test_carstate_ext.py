@@ -168,3 +168,35 @@ class TestBatteryThermalTelemetry(unittest.TestCase):
     hb = self._bp(pack_c=30.0, coolant_c=25.0, flags=0)
     self.assertFalse(hb.thermalDataAvailable)
     self.assertEqual(hb.packTempC, 0.0)
+
+
+class TestDcFastChargingFlag(unittest.TestCase):
+  """carStateBP.charging.dcFastCharging = ChrgStat_D2_Dsply (0x440) == 8 (ChargingDCFastChange). AC is 7."""
+
+  def _charging(self, d2, with_message=True):
+    from opendbc.car.ford.values import FordFlags
+    cp_params = structs.CarParams()
+    cp_params.flags = int(FordFlags.CHARGING_DATA)
+    ext = CarStateExt(cp_params, structs.CarParamsSP())
+    vl = {
+      "Battery_Traction_5_FD1": {"BattTrac2_Pw_ChrgInst": 50000.0},
+      "MtrTrac_Data2_FD1": {"ChrgStat_D_ActlMntr": 1},
+    }
+    if with_message:
+      vl["PreCond_Hev_Data1_FD1"] = {"ChrgStat_D2_Dsply": d2}
+    return ext.update_car_state_bp(_FakeCANParser(vl), _FakeCANParser({})).carStateBP.charging
+
+  def test_dc_fast_charge_sets_the_flag(self):
+    c = self._charging(8)
+    self.assertTrue(c.chargingActive)
+    self.assertTrue(c.dcFastCharging)
+
+  def test_ac_charging_does_not(self):
+    c = self._charging(7)
+    self.assertTrue(c.chargingActive)
+    self.assertFalse(c.dcFastCharging)
+
+  def test_a_car_that_does_not_send_the_status_reads_as_not_dc(self):
+    c = self._charging(0, with_message=False)
+    self.assertTrue(c.chargingActive)
+    self.assertFalse(c.dcFastCharging)
