@@ -122,12 +122,13 @@ def test_silent_regen_shortfall_hands_off_to_friction(current):
     d = H.decode(current[name][0])
     gas, brake = d['AccPrpl_A_Rq'], d['AccBrkDecel_B_Rq'] > 0.5
     regen = (gas < -0.15) & (gas > -4.9)
-    # longest unbroken run of regen-only frames (no friction) must stay short: 0.8 s hold + response lag
+    # longest unbroken run of regen-only frames (no friction) must stay short: 0.16 s delay + the 2 s calm hold + the
+    # request's own ramp-up (friction brakes are for emergencies and for regen that really is failing, so not instantly)
     longest, run = 0, 0
     for r in regen & ~brake:
       run = run + 1 if r else 0
       longest = max(longest, run)
-    assert longest <= 50, f'{name}: regen requested without effect for {longest / 50:.1f} s'
+    assert longest <= 135, f'{name}: regen requested without effect for {longest / 50:.1f} s'
     engaged += int(brake.any())
   assert engaged > 0  # the monitor did put the friction brakes on somewhere
 

@@ -43,11 +43,14 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     self.dt = dt
     self.accel_boost = AccelBoost()
 
-    # BluePilot: shorter follow gap while changing lanes (BPLaneChangeCloseGap)
+    # BluePilot: shorter follow gap while changing lanes (BPLaneChangeCloseGap), soft approach to a far lead (BPSoftApproach)
     self.lane_change_gap = None
+    self.soft_approach = None
     if is_bluepilot():
       from openpilot.bluepilot.selfdrive.controls.lane_change_gap_bp import LaneChangeGapPlanner
+      from openpilot.bluepilot.selfdrive.controls.approach_decel_bp import SoftApproachPlanner
       self.lane_change_gap = LaneChangeGapPlanner()
+      self.soft_approach = SoftApproachPlanner()
     # End BluePilot
 
     self.v_desired_filter = FirstOrderFilter(init_v, 2.0, self.dt)
@@ -115,6 +118,12 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     action_t =  self.CP.longitudinalActuatorDelay + DT_MDL
     output_a_target_mpc = get_accel_from_plan(self.v_desired_trajectory, self.a_desired_trajectory, CONTROL_N_T_IDX,
                                               action_t=action_t)
+    # BluePilot: on the highway a far lead closing slowly gets the decel time-to-impact needs (plus a margin), not the
+    # follow-gap panic that ended on the friction brakes. Emergencies are untouched (approach_decel_bp.py).
+    if self.soft_approach is not None:
+      output_a_target_mpc = self.soft_approach.cap_mpc_request(
+        sm, output_a_target_mpc, self.mpc.source, (LongitudinalPlanSource.lead0, LongitudinalPlanSource.lead1))
+    # End BluePilot
     output_should_stop_mpc = should_stop(v_ego, output_a_target_mpc)
     output_a_target_e2e = sm['modelV2'].action.desiredAcceleration
     output_should_stop_e2e = sm['modelV2'].action.shouldStop

@@ -57,9 +57,10 @@ BRAKE_STOCK = BrakeThresholds(on=-0.14, off=-0.06)
 # the flag off and mirrors gas into AccPrpl_A_Pred; panda (ford.h) limits gas to MIN_GAS.
 BRAKE_REGEN = BrakeThresholds(on=-0.55, off=-0.40)
 # With the panda's deeper regen floor (FordSafetyFlagsBP.REGEN_BLEND at init), regen covers down
-# to REGEN_MIN_GAS (-0.9) and the friction brakes only come in below -0.95.
-BRAKE_REGEN_DEEP = BrakeThresholds(on=-0.95, off=-0.80)
+# to REGEN_MIN_GAS (-1.5) and the friction brakes only come in below -1.55.
+BRAKE_REGEN_DEEP = BrakeThresholds(on=-1.55, off=-1.40)
 REGEN_MIN_SPEED = 3.0  # m/s; below this (and when stopping) the stock thresholds apply
+FRICTION_BACKUP_MIN_REQUEST = 0.3  # m/s^2: the failing-regen backup needs at least this much brake request to act on
 
 # Launch from a stop (BPLaunchBoost). At a green light with no lead the e2e model pulls away with
 # +0.15..+0.35 m/s^2; a held Mach-E doesn't move on that (route 537 t=373/501: +0.2..+0.34 for 1-1.5 s,
@@ -75,9 +76,10 @@ LAUNCH_HELD_SPEED = 0.1       # m/s: "stopped" for arming
 LAUNCH_LEAD_MIN_GAP = 8.0     # m: no boost toward a stopped/slow car this close
 LAUNCH_LEAD_SLOW = 1.0        # m/s
 
-# How much of the pack's reported charge-power limit regen is assumed to use. Drivetrain efficiency
-# and drag would each add braking, so ignoring them already errs toward less regen.
-REGEN_LIMIT_MARGIN = 0.8
+# How much of the pack's reported charge-power limit regen is assumed to use. Measured on manual lift-offs
+# (routes 568-56e): braking power incl. drag is 93-100% of the limit at 45-78 mph, so 0.95 with the 2300 kg mass in
+# values_ext.py. (It was 0.8 with 2500 kg, which put the highway regen cap at ~0.9 m/s^2 when the car delivers ~1.3.)
+REGEN_LIMIT_MARGIN = 0.95
 
 
 def regen_floor(panda_floor, limit_kw, v_ego, mass_kg):
@@ -110,7 +112,8 @@ class RegenShortfallMonitor:
   K = DT / (0.3 + DT)
   MIN_DECEL = 0.25       # only judge a meaningful regen request
   SHORTFALL = 0.35       # m/s^2 less decel than expected...
-  HOLD_FRAMES = 40       # ...for 0.8 s
+  HOLD_FRAMES = 40       # ...for 0.8 s when it is urgent (a collision is close)
+  CALM_HOLD_FRAMES = 100  # ...but 2 s otherwise: friction brakes are for emergencies and for regen that really is failing
 
   def __init__(self):
     self.reset(0.0)
@@ -120,12 +123,12 @@ class RegenShortfallMonitor:
     self.expected = a_ego
     self.count = 0
 
-  def update(self, regen_cmd, a_ego):
+  def update(self, regen_cmd, a_ego, urgent=False):
     self.expected += self.K * (self.history[0] - self.expected)
     self.history.append(regen_cmd)
     short = self.expected < -self.MIN_DECEL and (a_ego - self.expected) > self.SHORTFALL
     self.count = self.count + 1 if short else 0
-    return self.count >= self.HOLD_FRAMES
+    return self.count >= (self.HOLD_FRAMES if urgent else self.CALM_HOLD_FRAMES)
 
 
 class BrakeHysteresis:
@@ -397,8 +400,11 @@ class LongitudinalExt:
       if decel_req < 0.0:
         gas = max(decel_req, floor)
         regen_only = gas < 0.0
-    # Backup: regen clearly under-delivering -> friction brakes (released by the usual hysteresis)
-    if regen_only and self.regen_monitor.update(gas, CS.out.aEgo):
+    # Backup: regen clearly under-delivering -> friction brakes (released by the usual hysteresis). Only when there is a
+    # real brake request for them to deliver: BP long holds it at 0 with no lead (decel is regen only there), and a
+    # brake flag with a zero request brakes nothing while switching regen off. Quick when urgent, 2 s otherwise.
+    shortfall = self.regen_monitor.update(gas, CS.out.aEgo, self.urgent) if regen_only else False
+    if shortfall and accel + accel_due_to_pitch < -FRICTION_BACKUP_MIN_REQUEST:
       self.brake.on = brake_actuate = True
     if not regen_only:
       self.regen_monitor.reset(CS.out.aEgo)

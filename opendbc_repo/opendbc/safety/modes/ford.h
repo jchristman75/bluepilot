@@ -257,8 +257,9 @@ static const AngleSteeringParams *ford_bp_pinion_params = &ford_pinion_geometry[
 // BluePilot: regen coasting (FordSafetyFlagsBP.REGEN_BLEND, bit 14 of current_safety_param_sp;
 // BluePilot allocates SP bits from 14 downward, sunnypilot from 0 upward; bit 15 is the sign
 // bit of the Int16 CarParamsSP.safetyParam it comes from),
-// set once in ford_init. When set, propulsion requests may go down to -0.9 m/s^2 instead of
-// -0.5: stock Ford ACC itself sends AccPrpl_A_Rq to ~-0.88 (regen) with the brake flag off.
+// set once in ford_init. When set, propulsion requests may go down to -1.5 m/s^2 instead of
+// -0.5: stock Ford ACC itself sends AccPrpl_A_Rq to ~-0.88 (regen) with the brake flag off, and the car's own
+// regen delivers 1.3-2.4 m/s^2 on manual lift-offs (routes 568-56e).
 static bool ford_bp_regen_blend = false;
 
 
@@ -505,13 +506,13 @@ static bool ford_tx_hook(const CANPacket_t *msg) {
     .inactive_gas = 0,       // -5.0 m/s^2
   };
 
-  // BluePilot: with regen coasting enabled at init, the gas floor is -0.9 (regen); all else equal
+  // BluePilot: with regen coasting enabled at init, the gas floor is -1.5 (regen); all else equal
   const LongitudinalLimits FORD_LONG_LIMITS_REGEN = {
     .max_accel = 5641,
     .min_accel = 4231,
     .inactive_accel = 5128,
     .max_gas = 700,
-    .min_gas = 410,          // -0.9 m/s^2
+    .min_gas = 350,          // -1.5 m/s^2
     .inactive_gas = 0,
   };
   const LongitudinalLimits *ford_long_limits = ford_bp_regen_blend ? &FORD_LONG_LIMITS_REGEN : &FORD_LONG_LIMITS;
@@ -978,7 +979,7 @@ static safety_config ford_init(uint16_t param) {
   ford_bp_pinion_curvature = pinion_enabled;
   ford_bp_pinion_params = pinion_enabled ? &ford_pinion_geometry[pinion_geometry_index] : &ford_pinion_geometry[0];
 
-  // BluePilot: regen coasting (bit 14): allow propulsion requests down to -0.9 m/s^2 (see ford_tx_hook)
+  // BluePilot: regen coasting (bit 14): allow propulsion requests down to -1.5 m/s^2 (see ford_tx_hook)
   const uint16_t FORD_PARAM_BP_REGEN_BLEND = 0x4000U;
   ford_bp_regen_blend = GET_FLAG(current_safety_param_sp, FORD_PARAM_BP_REGEN_BLEND);
 

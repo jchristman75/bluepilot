@@ -70,9 +70,13 @@ class FordSafetyFlagsBP:
 
 
 # Deepest propulsion (regen) request with FordSafetyFlagsBP.REGEN_BLEND set, m/s^2. Stock Ford ACC (Mach-E,
-# routes 4e6/4f8) sends AccPrpl_A_Rq down to ~-0.88 with the brake flag off, and the car
-# delivers it; -0.9 stays inside that observed envelope. Must match ford.h (raw 410).
-REGEN_MIN_GAS = -0.9
+# routes 4e6/4f8) sends AccPrpl_A_Rq down to ~-0.88 with the brake flag off, which is where -0.9 came from.
+# Driving it manually (routes 568-56e, no pedals) the Mach-E regens at 1.7-2.4 m/s^2 up to ~58 mph and a median of
+# 1.26 (max 1.48) at 58-78 mph, with braking power at 93-100% of the pack's charge limit. So the car can do far more
+# than -0.9, and with the friction brakes holding everything below it, a gentle approach to a lead on the highway
+# (asked -1.0..-1.6, needed < 0.55) went to the friction brakes. -1.5 covers highway regen; the live pack limit
+# (regen_floor in longitudinal_ext.py) still cuts it when the pack can't absorb that. Must match ford.h (raw 350).
+REGEN_MIN_GAS = -1.5
 
 
 # Geometry-table index for the steering-angle curvature measurement, packed into
@@ -152,10 +156,11 @@ def apply_bp_device_mount(car_docs, CP):
 
 
 # Loaded mass (kg) for estimating how much regen the pack can absorb: max regen decel ~= charge
-# power limit / (mass x speed). Deliberately heavy (curb + people/cargo): overestimating mass
-# underestimates regen, which only hands braking to the friction brakes sooner.
+# power limit / (mass x speed). Fit on manual lift-offs (routes 568-56e): at 45-78 mph the braking power
+# (2300 kg x decel x speed, which includes drag) equals 93-100% of the charge limit, so 2300 kg with
+# REGEN_LIMIT_MARGIN 0.95 reproduces the delivered regen; the old 2500 kg with 0.8 undershot it by ~35%.
 FORD_REGEN_MASS_KG = {
-  'FORD_MUSTANG_MACH_E_MK1': 2500.,
+  'FORD_MUSTANG_MACH_E_MK1': 2300.,
   'FORD_F_150_LIGHTNING_MK1': 3500.,
 }
 FORD_REGEN_MASS_DEFAULT_KG = 3000.

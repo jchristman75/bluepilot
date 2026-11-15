@@ -246,3 +246,41 @@ def test_distance_shift_moves_the_curve_farther_away():
   _, near = run(x, y, v_ego=35 * MPH)
   _, shifted = run(x, y, v_ego=35 * MPH, s_shift=25.0)
   assert shifted.a_req >= near.a_req
+
+
+# ---------------- the learned comfort level is for city/back-road speeds, not the highway ----------------
+
+def test_a_gentle_learned_comfort_does_not_slow_the_car_for_a_highway_curve():
+  """Route 56e/56c: the comma's learned table said ~1.6-1.8 m/s^2 for R 250-550 m curves (what you pulled on back
+  roads), so every gentle highway curve at 72 mph (R 500 m = 2.0 m/s^2, tracked fine) got braked for."""
+  gentle = lambda k: np.full_like(np.asarray(k, dtype=float), 1.5)      # noqa: E731
+  x, y = arc(500.0, start=60.0)
+  v = 72 * MPH
+  plain, with_comfort = cl.CurveLimiter(), cl.CurveLimiter()
+  a = plain.update(x, y, v, 80 * MPH)
+  b = with_comfort.update(x, y, v, 80 * MPH, comfort=gentle)
+  assert not a.braking and not b.braking and b.v_raw == a.v_raw          # identical: the comfort level is ignored here
+
+
+def test_the_learned_comfort_still_applies_at_city_speeds():
+  gentle = lambda k: np.full_like(np.asarray(k, dtype=float), 1.5)      # noqa: E731
+  x, y = arc(60.0, start=45.0)
+  v = 12.0                                                              # 27 mph on a 60 m radius: 2.4 m/s^2
+  plain, with_comfort = cl.CurveLimiter(), cl.CurveLimiter()
+  a = plain.update(x, y, v, 20.0)
+  b = with_comfort.update(x, y, v, 20.0, comfort=gentle)
+  assert b.v_raw < a.v_raw - 0.5                                        # the learned level is gentler than the car ceiling
+
+
+def test_a_sharp_curve_at_highway_speed_is_still_braked_for():
+  x, y = arc(220.0, start=100.0)                                        # R 220 m at 70 mph = 4.4 m/s^2
+  lim = cl.CurveLimiter()
+  r = None
+  for _ in range(40):
+    r = lim.update(x, y, 31.0, 31.0)
+  assert r.braking or r.active
+  assert r.v_raw < 29.0
+
+
+def test_the_comfort_speed_limit_is_the_highway_boundary():
+  assert 18.0 <= cl.COMFORT_MAX_SPEED <= 25.0

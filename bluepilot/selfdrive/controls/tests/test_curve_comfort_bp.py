@@ -146,3 +146,15 @@ def test_learner_nudges_once_per_override_episode_and_saves_when_dirty():
   p = P()
   L.maybe_save(p, cc.SAVE_PERIOD_S)
   assert p.saved[0] == "BPCurveComfortData" and not L.comfort.dirty
+
+
+def test_learner_does_not_learn_from_highway_driving():
+  """The comfort level is applied at city speeds only (curve_limit_bp.COMFORT_MAX_SPEED), so highway samples must not
+  pollute the table (a steady 70 mph shows v^2*k, which is not how much lateral acceleration the driver is happy with)."""
+  L = cc.ComfortLearner(cc.CurveComfort())
+  for _ in range(int(cc.LEARN_SETTLE_S / 0.05) + 40):
+    _learner_step(L, v_ego=cl.COMFORT_MAX_SPEED + 3.0, kappa=0.003)
+  assert not L.comfort.dirty
+  for _ in range(40):
+    _learner_step(L, v_ego=cl.COMFORT_MAX_SPEED - 3.0, kappa=0.004)
+  assert L.comfort.dirty

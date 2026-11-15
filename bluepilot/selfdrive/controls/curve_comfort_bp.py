@@ -155,7 +155,7 @@ class ComfortLearner:
       self.nudged = True
 
     lat_acc = v_ego ** 2 * kappa
-    if (manual and self.manual_t >= LEARN_SETTLE_S and v_ego >= cl.V_ACTIVE_MIN and not blinker and not lead_near
+    if (manual and self.manual_t >= LEARN_SETTLE_S and cl.V_ACTIVE_MIN <= v_ego < cl.COMFORT_MAX_SPEED and not blinker and not lead_near
         and self.active_age >= LEARN_QUIET_S and lat_acc >= LEARN_MIN_LAT_ACC):
       self.comfort.observe(kappa, lat_acc)
 

@@ -352,6 +352,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"BPCurveSpeedLimit", {PERSISTENT | BACKUP, BOOL, "0"}},  // BluePilot: slow for curves the steering can't hold (curve_limit_bp.py, SCC-V slot)
     {"BPCurveLearnComfort", {PERSISTENT | BACKUP, BOOL, "0"}},  // BluePilot: also learn the driver's comfortable lateral accel (curve_comfort_bp.py)
     {"BPCurveComfortData", {PERSISTENT, JSON}},  // BluePilot: the learned curvature -> lateral accel table
+    {"BPSoftApproach", {PERSISTENT | BACKUP, BOOL, "1"}},  // BluePilot: highway approach to a far lead uses the time-to-impact decel, not the follow-gap panic (approach_decel_bp.py)
     {"BPLaneChangeCloseGap", {PERSISTENT | BACKUP, BOOL, "0"}},  // BluePilot: shorter follow gap while signaling out of the lane (lane_change_gap_bp.py)
     {"BPRawRadar", {PERSISTENT | BACKUP, BOOL, "0"}},  // BluePilot: raw Delphi MRR radar for CAN-FD Fords (bluepilot/selfdrive/controls/radar)
     {"FordPrefEnableDebugLogs", {PERSISTENT | BACKUP, BOOL, "0"}},  // BluePilot: bp_logger also forwards to cloudlog

@@ -101,6 +101,7 @@ class BluePilotLayout(Widget):
       ("disable_BP_long_UI", self._disable_BP_long),
       ("disable_downhill_comp_UI", self._disable_dowhill_comp),
       ("BPLongRegenBlend", self._regen_blend),
+      ("BPSoftApproach", self._soft_approach),
       ("disable_ford_radar_UI", self._disable_ford_radar),
       ("BPRawRadar", self._raw_radar),
       ("BpShowLateralControl", self._show_lateral_control),
@@ -618,6 +619,14 @@ class BluePilotLayout(Widget):
       icon="chffr_wheel.png"
     )
 
+    self._soft_approach = toggle_item(
+      lambda: tr("Soft Highway Approach"),
+      lambda: tr("On the highway, ease toward a far slower car with the decel the time to impact needs plus a margin, instead of braking hard for the following gap. Emergencies are unchanged."),
+      initial_state=self._safe_get_bool(self._params, "BPSoftApproach"),
+      callback=lambda state: self._toggle_callback(state, "BPSoftApproach"),
+      icon="chffr_wheel.png"
+    )
+
     # Disable downhill compensation toggle
     self._disable_dowhill_comp = toggle_item(
       lambda: tr("Disable Downhill Compensation"),
@@ -776,6 +785,7 @@ class BluePilotLayout(Widget):
       _section(tr("Longitudinal Tuning"), [
         self._disable_BP_long,
         self._regen_blend,
+        self._soft_approach,
         self._disable_dowhill_comp,
         self._disable_ford_radar,
         self._raw_radar,

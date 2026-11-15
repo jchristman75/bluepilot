@@ -51,6 +51,11 @@ S_MAX = 100.0                # m: farthest plan point considered
 K_EPS = 1e-4
 K_MAX = 0.05
 A_COMFORT_MIN = 1.2          # m/s^2: a learned comfort level can never push a_max below this
+# The learned comfort level (A3) is how much lateral acceleration the driver pulls on the roads they drive by hand, so it
+# is right for city and back-road curves and wrong for the highway: routes 56e/56c had it at 1.6-1.8 m/s^2 for R 250-550 m
+# curves, and every gentle highway curve at 70 mph (2.0 m/s^2, tracked fine) got braked for (27 events in 60 s on 56e).
+# Above this speed only the car's steering ceiling applies, which still catches a sharp curve at speed.
+COMFORT_MAX_SPEED = 22.0     # m/s (49 mph)
 
 # ---- far-field under-read correction (CT v3: predicted/driven 0.82 at 35-60 m) ----
 FAR_BP = (20.0, 35.0)
@@ -147,7 +152,7 @@ class CurveLimiter:
   def _envelope(self, s, k, v_ego, comfort):
     k = np.clip(k, K_EPS, K_MAX)
     a_lim = ceiling_lat_accel(np.clip(np.sqrt(ceiling_lat_accel(v_ego) / k), 0.0, 60.0))
-    if comfort is not None:
+    if comfort is not None and v_ego < COMFORT_MAX_SPEED:
       learned = np.clip(np.asarray(comfort(k), dtype=float), A_COMFORT_MIN, None)
       a_lim = np.minimum(a_lim, learned)
     v_pt = np.maximum(np.sqrt(a_lim / k), V_FLOOR)

@@ -176,7 +176,7 @@ class DeepCtrl(Ctrl):
 
 def test_deep_regen_covers_medium_slowing_without_friction():
   c = DeepCtrl()
-  for a in (-0.3, -0.6, -0.85, -0.9):
+  for a in (-0.3, -0.6, -0.85, -0.9, -1.2, -1.45, REGEN_MIN_GAS):
     r = step(c, a)
     assert not r.brake_actuate, a
     assert r.gas == a and r.accel_pred_send == a
@@ -184,12 +184,12 @@ def test_deep_regen_covers_medium_slowing_without_friction():
 
 def test_deep_regen_brake_flag_thresholds():
   c = DeepCtrl()
-  r = step(c, -0.93)                       # between the floor and the flag: regen at the floor
+  r = step(c, -1.53)                       # between the floor and the flag: regen at the floor
   assert not r.brake_actuate and r.gas == REGEN_MIN_GAS
-  assert step(c, -1.0).brake_actuate       # below -0.95: friction
-  assert step(c, -0.85).brake_actuate      # band -0.95..-0.80 holds
-  r = step(c, -0.75)
-  assert not r.brake_actuate and r.gas == -0.75
+  assert step(c, -1.6).brake_actuate       # below -1.55: friction
+  assert step(c, -1.45).brake_actuate      # band -1.55..-1.40 holds
+  r = step(c, -1.3)
+  assert not r.brake_actuate and r.gas == -1.3
 
 
 def test_deep_regen_needs_the_init_flag():
@@ -242,8 +242,8 @@ def test_regen_floor_from_pack_limit():
   # unknown limit or plenty of regen: the panda floor, unchanged
   assert regen_floor(REGEN_MIN_GAS, None, 25.0, 2500.0) == REGEN_MIN_GAS
   assert regen_floor(REGEN_MIN_GAS, 100.0, 25.0, 2500.0) == REGEN_MIN_GAS
-  # 20 kW at 25 m/s, 2500 kg, 0.8 margin -> regen can do ~0.256 m/s^2
-  assert regen_floor(REGEN_MIN_GAS, 20.0, 25.0, 2500.0) == pytest.approx(-0.256)
+  # 20 kW at 25 m/s, 2500 kg, 0.95 margin -> regen can do ~0.304 m/s^2
+  assert regen_floor(REGEN_MIN_GAS, 20.0, 25.0, 2500.0) == pytest.approx(-0.304)
   # full battery: no regen at all
   assert regen_floor(REGEN_MIN_GAS, 0.0, 25.0, 2500.0) == 0.0
 
@@ -251,8 +251,8 @@ def test_regen_floor_from_pack_limit():
 def test_thresholds_follow_the_floor():
   assert regen_thresholds(REGEN_MIN_GAS, REGEN_MIN_GAS) == BRAKE_REGEN_DEEP     # not limited: exact constants
   assert regen_thresholds(CarControllerParams.MIN_GAS, CarControllerParams.MIN_GAS) == BRAKE_REGEN
-  t = regen_thresholds(-0.256, REGEN_MIN_GAS)
-  assert t.on == pytest.approx(-0.306) and t.off == pytest.approx(-0.156)
+  t = regen_thresholds(-0.304, REGEN_MIN_GAS)
+  assert t.on == pytest.approx(-0.354) and t.off == pytest.approx(-0.204)
   assert regen_thresholds(0.0, REGEN_MIN_GAS) == BRAKE_STOCK                   # no regen: stock thresholds
 
 
@@ -266,9 +266,9 @@ def test_high_limit_changes_nothing():
 
 def test_limited_regen_hands_off_to_friction_early():
   c = DeepCtrl()
-  r = step_lim(c, -0.2, limit_kw=20.0)      # within what regen can do (20 kW, 18 m/s, 3000 kg: -0.296)
+  r = step_lim(c, -0.2, limit_kw=20.0)      # within what regen can do (20 kW, 18 m/s, 3000 kg default, 0.95: -0.352)
   assert not r.brake_actuate and r.gas == -0.2
-  r = step_lim(c, -0.4, limit_kw=20.0)      # beyond it: friction now, not after the PID winds up
+  r = step_lim(c, -0.5, limit_kw=20.0)      # beyond it: friction now, not after the PID winds up
   assert r.brake_actuate and r.gas == CarControllerParams.INACTIVE_GAS
 
 
@@ -279,16 +279,40 @@ def test_no_regen_at_all_behaves_like_stock():
   assert step_lim(c, -0.2, limit_kw=0.0).brake_actuate
 
 
-def test_shortfall_monitor_forces_friction():
+def test_shortfall_monitor_forces_friction_after_seconds_not_instantly():
+  """Regen asked, the car keeps coasting: friction only after ~2 s of clear shortfall (it can take a moment to build,
+  and friction brakes are for emergencies and for regen that really is failing)."""
   c = DeepCtrl()
-  # asked for -0.6 of regen, the car keeps coasting (aEgo 0): friction after ~0.8 s of clear shortfall
   forced_at = None
-  for i in range(100):  # 2 s at 50 Hz
+  for i in range(200):  # 4 s at 50 Hz
+    r = step_lim(c, -0.6, a_ego=0.0)
+    if r.brake_actuate:
+      forced_at = i
+      break
+  assert forced_at is not None and 90 <= forced_at <= 130
+
+
+def test_shortfall_monitor_is_quick_when_it_is_urgent():
+  c = DeepCtrl(disable_bp_long=True)        # urgent is whatever the follow logic last said; pin it
+  c.urgent = True
+  forced_at = None
+  for i in range(100):
     r = step_lim(c, -0.6, a_ego=0.0)
     if r.brake_actuate:
       forced_at = i
       break
   assert forced_at is not None and 40 <= forced_at <= 80
+
+
+def test_no_friction_brake_flag_when_there_is_no_brake_request_to_deliver():
+  """No lead on the highway: BP long holds the brake request at 0 and decel goes through regen only. Regen that is slow
+  to deliver must not turn the brake flag on with a zero request: it brakes nothing and switches regen off for tens
+  of seconds (route 56e: 58 s of flag with a zero request, controller wound up to -3.5)."""
+  c = DeepCtrl()
+  for i in range(400):                       # 8 s of regen asked and not delivered
+    r = step_lim(c, -0.6, v_ego=30.0, a_ego=0.0)
+    assert not r.brake_actuate, i
+    assert r.gas == pytest.approx(-0.6)      # and regen stays requested the whole time
 
 
 def test_shortfall_monitor_quiet_when_regen_delivers():
