@@ -64,15 +64,23 @@ class CarStateBPFromCan:
     msgs = [(m, float("nan")) for m in ("Battery_Traction_1_FD1", "Battery_Traction_3_FD1", "Battery_Traction_4_FD1", "HV_Battery_Current_BP")]
     self.parser = CANParser("ford_lincoln_base_pt", msgs, 0)
     self.ext = CarStateExt(cp, structs.CarParamsSP())
+    self.acc = CANParser("ford_lincoln_base_pt", [("ACCDATA", float("nan"))], 0)  # what openpilot sent (sendcan)
 
   def feed(self, can_msg) -> None:
     frames = [(c.address, bytes(c.dat), c.src) for c in can_msg.can]
     self.parser.update([(can_msg.logMonoTime, frames)])
 
+  def feed_sendcan(self, msg) -> None:
+    self.acc.update([(msg.logMonoTime, [(c.address, bytes(c.dat), c.src) for c in msg.sendcan])])
+
   def build(self, log_mono_time: int):
     class _Empty:
       vl: dict = {}
     event = self.ext.update_car_state_bp(self.parser, _Empty())
+    from openpilot.bluepilot.selfdrive.car.bp_card_publisher import longitudinal_indicator
+    acc = self.acc.vl["ACCDATA"]
+    friction, regen = longitudinal_indicator(bool(acc["AccBrkDecel_B_Rq"]), float(acc["AccPrpl_A_Rq"]) if acc["AccPrpl_A_Rq"] else 0.0)
+    event.carStateBP.longitudinal.frictionBrake, event.carStateBP.longitudinal.regenDecel = friction, regen
     return _Msg(event, log_mono_time)
 
 
@@ -92,6 +100,8 @@ def load_chunks(rlog_paths: list[str | None], first_seg: int, fps: int = FPS) ->
     for msg in messages:
       if msg.which() == "can":
         cs.feed(msg)
+      elif msg.which() == "sendcan":
+        cs.feed_sendcan(msg)
       if msg.logMonoTime >= next_time:
         current["carStateBP"] = cs.build(msg.logMonoTime)
         chunks.append(current)

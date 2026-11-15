@@ -19,6 +19,7 @@ from openpilot.selfdrive.ui.bp.lib import theme_pack
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.bluepilot.ui.lib.bp_shaders import draw_shader_circle_gradient
+from openpilot.selfdrive.ui.bp.lib.brake_indicator import BrakeKind, brake_color, brake_kind_from_car_state_bp
 # BluePilot: Override upstream Mici torque bar with BP shared state math.
 from openpilot.selfdrive.ui.bp.mici.onroad.torque_bar_bp import TorqueBarBP as TorqueBar
 
@@ -33,6 +34,7 @@ class MiciHudRendererBP(HudRenderer):
     self._torque_bar = TorqueBar()
     self._bp_params = Params()
     self._brakes_on = False
+    self._brake_kind = BrakeKind.NONE
     self._power_flow = MiciPowerflowGauge()
     self._txt_wheel_comma_3x = gui_app.texture("icons/chffr_wheel.png", self._txt_wheel.width, self._txt_wheel.height)
     self._animate_steering_wheel = self._bp_params.get_bool("BPAnimateSteeringWheel")
@@ -62,12 +64,12 @@ class MiciHudRendererBP(HudRenderer):
       sm = ui_state.sm
       try:
         car_state_bp = sm['carStateBP']
-        brake_light_status = car_state_bp.brakeLightStatus
-        self._brakes_on = brake_light_status.dataAvailable and brake_light_status.brakeLightsOn
+        self._brake_kind = brake_kind_from_car_state_bp(car_state_bp)
       except (KeyError, AttributeError):
-        self._brakes_on = False
+        self._brake_kind = BrakeKind.NONE
     else:
-      self._brakes_on = False
+      self._brake_kind = BrakeKind.NONE
+    self._brakes_on = self._brake_kind != BrakeKind.NONE
 
     self.show_lateral_control = self._bp_params.get_bool("BpShowLateralControl")
     if self.show_lateral_control:
@@ -128,11 +130,9 @@ class MiciHudRendererBP(HudRenderer):
     dest_rect = rl.Rectangle(pos_x, pos_y, wheel_txt.width, wheel_txt.height)
     origin = (wheel_txt.width / 2, wheel_txt.height / 2)
 
-    # BluePilot: Red color when braking
-    if self._brakes_on:
-      color = rl.Color(255, 60, 60, int(self._wheel_alpha_filter.x))
-    else:
-      color = rl.Color(255, 255, 255, int(self._wheel_alpha_filter.x))
+    # BluePilot: red = friction brakes / driver pedal, orange = regen only
+    r, g, b = brake_color(self._brake_kind)
+    color = rl.Color(r, g, b, int(self._wheel_alpha_filter.x))
     rl.draw_texture_pro(wheel_txt, src_rect, dest_rect, origin, rotation, color)
 
     if self._show_wheel_critical:

@@ -596,6 +596,7 @@ struct CarStateBP @0xb057204d7deadf3f {
   hybridDrive @0 :HybridDrive;
   hybridBattery @1 :HybridBattery;
   brakeLightStatus @2 :BrakeLightStatus;
+  longitudinal @3 :Longitudinal;
 
   struct HybridDrive {
     dataAvailable @0 :Bool;
@@ -624,6 +625,11 @@ struct CarStateBP @0xb057204d7deadf3f {
   struct BrakeLightStatus {
     dataAvailable @0 :Bool;
     brakeLightsOn @1 :Bool;
+  }
+
+  struct Longitudinal {
+    frictionBrake @0 :Bool;  # openpilot is requesting the friction brakes
+    regenDecel @1 :Float32;  # m/s^2 of regen deceleration being requested (0 when not regen braking)
   }
 }
 

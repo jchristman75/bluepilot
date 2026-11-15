@@ -16,7 +16,7 @@ import pyray as rl
 
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.params import Params
-from openpilot.selfdrive.ui.bp.lib.egpu_badge import badge_mode
+from openpilot.selfdrive.ui.bp.lib.egpu_badge import badge_mode, failure_reason
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.text_measure import measure_text_cached
@@ -29,6 +29,9 @@ ICON_W = 80
 ICON_H = round(ICON_W * 107 / 144)
 FAILED_H = round(ICON_W * 40 / 68)           # icons_mici/chestnut_orange.png is 68x40 (the home screen's failed icon)
 FAILED_OPACITY = 0.95
+REASON_FONT_SIZE = 20
+REASON_COLOR = rl.Color(255, 176, 60, 255)
+REASON_GAP = 2
 # Screen-body area of the logo (where "GPU" sits), as fractions of the icon.
 BODY_CENTER_Y = 0.385
 TEXT_MAX_W = 0.80
@@ -64,6 +67,7 @@ class EgpuWattsIcon(Widget):
     self._font: rl.Font = gui_app.font(FontWeight.BOLD)
     self._alpha_filter = FirstOrderFilter(0.0, 0.15, 1 / gui_app.target_fps)
     self._watts: float | None = None
+    self._reason = "FAILED"
 
   def _update_state(self) -> None:
     self._param_counter += 1
@@ -76,6 +80,13 @@ class EgpuWattsIcon(Widget):
       self._watts = sm["chestnutState"].powerDrawW
     elif not sm.alive["chestnutState"]:
       self._watts = None
+
+    # why the big model failed, from what the eGPU board reports (shown under the failure icon)
+    alive = bool(sm.alive["chestnutState"] and sm.valid["chestnutState"])
+    cs = sm["chestnutState"]
+    self._reason = failure_reason(present=bool(sm["deviceState"].chestnutPresent), supply_mv=int(cs.supplyVoltage) if alive else 0,
+                                  supply_fault=bool(cs.supplyFault) if alive else False, ltssm=int(cs.pcieLtssm) if alive else 0,
+                                  state_alive=alive)
 
   def reserved_right(self) -> float:
     """Width from the content rect's right edge that other top-of-screen text should avoid while the badge shows."""
@@ -100,6 +111,10 @@ class EgpuWattsIcon(Widget):
     if mode == "failed":
       rl.draw_texture_ex(self._failed_texture, rl.Vector2(x, y), 0.0, 1.0,
                          rl.Color(255, 255, 255, int(255 * FAILED_OPACITY * alpha)))
+      size = measure_text_cached(self._font, self._reason, REASON_FONT_SIZE)
+      pos = rl.Vector2(column_center_x - size.x / 2, y + FAILED_H + REASON_GAP)
+      rl.draw_text_ex(self._font, self._reason, rl.Vector2(pos.x + 1, pos.y + 1), REASON_FONT_SIZE, 0, rl.Color(0, 0, 0, int(160 * alpha)))
+      rl.draw_text_ex(self._font, self._reason, pos, REASON_FONT_SIZE, 0, rl.Color(REASON_COLOR.r, REASON_COLOR.g, REASON_COLOR.b, int(255 * alpha)))
       return
 
     if loading:

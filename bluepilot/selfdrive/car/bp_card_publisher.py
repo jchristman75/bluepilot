@@ -169,9 +169,25 @@ def publish_controller_state_bp(CI, pm):
     pm.send('controllerStateBP', cs_bp_send)
 
 
+_PROPULSION_INACTIVE_GAS = -4.9  # at or below this the gas request means "propulsion off", not regen
+
+
+def longitudinal_indicator(brake_actuate: bool, gas: float) -> tuple[bool, float]:
+  """(friction brake requested, regen decel m/s^2) from what the controller sent in ACCDATA."""
+  if brake_actuate:
+    return True, 0.0
+  if _PROPULSION_INACTIVE_GAS < gas < 0.0:
+    return False, -gas
+  return False, 0.0
+
+
 def publish_car_state_bp(CI, pm, can_valid):
   """Publish carStateBP (hybrid drive gauge data) if available from car state."""
   if hasattr(CI.CS, 'car_state_bp_msg') and CI.CS.car_state_bp_msg is not None:
     cs_bp_send = CI.CS.car_state_bp_msg
+    cc = getattr(CI, 'CC', None)
+    friction, regen = longitudinal_indicator(bool(getattr(cc, 'bp_brake_actuate', False)), float(getattr(cc, 'gas', 0.0)))
+    cs_bp_send.carStateBP.longitudinal.frictionBrake = friction
+    cs_bp_send.carStateBP.longitudinal.regenDecel = regen
     cs_bp_send.valid = can_valid
     pm.send('carStateBP', cs_bp_send)

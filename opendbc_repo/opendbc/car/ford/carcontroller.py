@@ -96,6 +96,7 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     self.disable_BP_lat_UI = False
     self.accel = 0.0
     self.gas = 0.0
+    self.bp_brake_actuate = False  # BluePilot: for carStateBP.longitudinal
     self.last_button_frame = 0  # BluePilot: ICBM button press tracking
     # Note: main_on_last, lkas_enabled_last, steer_alert_last, lead_distance_bars_last,
     # distance_bar_frame are initialized by HudExt.__init__() above
@@ -282,6 +283,9 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
 
       self.accel = lng.accel
       self.gas = lng.gas
+      # BluePilot: remembered for the onroad braking indicator (carStateBP.longitudinal)
+      self.bp_brake_actuate = bool(lng.brake_actuate)
+      # End BluePilot
 
     ### ui ###
     # BluePilot: HUD message generation via HudExt

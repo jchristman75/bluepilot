@@ -8,6 +8,7 @@ from openpilot.selfdrive.ui.bp.onroad.exp_button_bp import ExpButtonBP
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.selfdrive.ui.bp.lib.ui_debug_logger import bp_ui_log
+from openpilot.selfdrive.ui.bp.lib.brake_indicator import BrakeKind, brake_color, brake_kind_from_car_state_bp
 
 LateralMode = ControllerStateBP.LateralMode
 
@@ -34,6 +35,7 @@ class HudRendererBP(HudRendererSP):
     self._exp_button = ExpButtonBP(BUTTON_SIZE, WHEEL_ICON_SIZE)
     self._bp_params = Params()
     self._brakes_on = False
+    self._brake_kind = BrakeKind.NONE
     self.speed_right = 0
     self._gradient_rect = None  # BluePilot: Full-width rect for header gradient
 
@@ -73,14 +75,14 @@ class HudRendererBP(HudRendererSP):
       if sm.valid['carStateBP']:
         try:
           car_state_bp = sm['carStateBP']
-          brake_light_status = car_state_bp.brakeLightStatus
-          self._brakes_on = brake_light_status.dataAvailable and brake_light_status.brakeLightsOn
+          self._brake_kind = brake_kind_from_car_state_bp(car_state_bp)
         except (KeyError, AttributeError):
-          self._brakes_on = False
+          self._brake_kind = BrakeKind.NONE
       else:
-        self._brakes_on = False
+        self._brake_kind = BrakeKind.NONE
     else:
-      self._brakes_on = False
+      self._brake_kind = BrakeKind.NONE
+    self._brakes_on = self._brake_kind != BrakeKind.NONE
 
     bp_ui_log.state("HudRendererBP", "brakes_on", self._brakes_on)
 
@@ -152,7 +154,7 @@ class HudRendererBP(HudRendererSP):
     self.speed_right = speed_pos.x + speed_text_size.x
 
     # BluePilot: Show red when braking if brake status is enabled
-    speed_color = rl.Color(255, 60, 60, 255) if self._brakes_on else COLORS.WHITE
+    speed_color = rl.Color(*brake_color(self._brake_kind), 255) if self._brakes_on else COLORS.WHITE
     rl.draw_text_ex(self._font_bold, speed_text, speed_pos, FONT_SIZES.current_speed, 0, speed_color)
 
     unit_text = "km/h" if ui_state.is_metric else "mph"
