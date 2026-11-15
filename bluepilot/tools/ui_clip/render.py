@@ -118,7 +118,8 @@ def seed_params(rlog_path: str, overrides: list[str]) -> None:
     params.put(key, params.cpp2python(key, val.encode()) if val else True, block=True)
 
 
-def render(route: str, start: int, end: int, out: Path, overrides: list[str], caption: str | None, windowed: bool = False):
+def render(route: str, start: int, end: int, out: Path, overrides: list[str], caption: str | None, windowed: bool = False,
+           chestnut: str | None = None):
   os.environ.update({"RECORD": "1", "RECORD_OUTPUT": str(out.with_suffix(".mp4"))})
   if not windowed:
     os.environ["OFFSCREEN"] = "1"
@@ -128,7 +129,7 @@ def render(route: str, start: int, end: int, out: Path, overrides: list[str], ca
   from openpilot.cereal.visionipc import VisionStreamType
   from msgq.visionipc import VisionIpcServer
   from openpilot.tools.clip.run import FrameQueue, patch_submaster, draw_text_box
-  from openpilot.selfdrive.ui.ui_state import ui_state
+  from openpilot.selfdrive.ui.ui_state import ui_state, ChestnutState
   from openpilot.system.ui.lib.application import gui_app, FontWeight
 
   segs = route_segments(route)
@@ -170,6 +171,8 @@ def render(route: str, start: int, end: int, out: Path, overrides: list[str], ca
         _, wb = wide.get()
         vipc.send(VisionStreamType.VISION_STREAM_WIDE_ROAD, wb, i, int(i * 5e7), int(i * 5e7))
       ui_state.update()
+      if chestnut:                       # the replay machine can't reproduce the eGPU state: force it for the picture
+        ui_state.chestnut_state = ChestnutState(chestnut)
       if should_render:
         view.render()
         t = start + i / FPS
@@ -206,11 +209,13 @@ def main():
   ap.add_argument("--param", action="append", default=[], help="KEY=VALUE param override (repeatable)")
   ap.add_argument("--caption", choices=["battery"], default=None)
   ap.add_argument("--shots", default="", help="comma-separated route times (s) to cut PNG screenshots at")
+  ap.add_argument("--chestnut", choices=["failed", "loading", "active", "ready", "disconnected", "uncompiled"], default=None,
+                  help="force the eGPU state shown (replays cannot reproduce it)")
   ap.add_argument("--windowed", action="store_true")
   a = ap.parse_args()
   out = Path(a.out).expanduser()
   out.parent.mkdir(parents=True, exist_ok=True)
-  render(a.route, a.start, a.end, out, a.param, a.caption, a.windowed)
+  render(a.route, a.start, a.end, out, a.param, a.caption, a.windowed, a.chestnut)
   video = out.with_suffix(".mp4")
   logger.info("video: %s", video)
   times = [float(x) for x in a.shots.split(",") if x]

@@ -3,7 +3,8 @@
 The eGPU logo with the GPU's current power draw printed where the "GPU" lettering normally is.
 Shown while the big model is running on the eGPU (ChestnutState.ACTIVE), behind BPShowEgpuWatts.
 While it loads (ChestnutState.LOADING) the plain white GPU logo pulses instead, the same way the
-home screen's GPU icon does.
+home screen's GPU icon does. When the big model tried to load and failed (ChestnutState.FAILED, so the small model
+is driving) the orange GPU logo from the home screen shows, whatever the wattage toggle says.
 
 Power comes from chestnutState.powerDrawW (hardwared, 10 Hz), which carries the SMU's
 AverageSocketPower that modeld samples. modeld only re-reads the SMU every 100 sends (~10 s),
@@ -15,7 +16,8 @@ import pyray as rl
 
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.params import Params
-from openpilot.selfdrive.ui.ui_state import ui_state, ChestnutState
+from openpilot.selfdrive.ui.bp.lib.egpu_badge import badge_mode
+from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.widgets import Widget
@@ -25,6 +27,8 @@ PARAM = "BPShowEgpuWatts"
 # Source art is 144x107 (icons_mici/chestnut_green.png with the letters filled in).
 ICON_W = 80
 ICON_H = round(ICON_W * 107 / 144)
+FAILED_H = round(ICON_W * 40 / 68)           # icons_mici/chestnut_orange.png is 68x40 (the home screen's failed icon)
+FAILED_OPACITY = 0.95
 # Screen-body area of the logo (where "GPU" sits), as fractions of the icon.
 BODY_CENTER_Y = 0.385
 TEXT_MAX_W = 0.80
@@ -56,6 +60,7 @@ class EgpuWattsIcon(Widget):
     self._param_counter = 0
     self._texture: rl.Texture = gui_app.texture("icons_mici/bp_egpu_blank.png", ICON_W, ICON_H)
     self._loading_texture: rl.Texture = gui_app.texture("icons_mici/chestnut.png", ICON_W, ICON_H)
+    self._failed_texture: rl.Texture = gui_app.texture("icons_mici/chestnut_orange.png", ICON_W, FAILED_H)
     self._font: rl.Font = gui_app.font(FontWeight.BOLD)
     self._alpha_filter = FirstOrderFilter(0.0, 0.15, 1 / gui_app.target_fps)
     self._watts: float | None = None
@@ -82,15 +87,20 @@ class EgpuWattsIcon(Widget):
     return f"{round(self._watts)}W" if self._watts is not None else "--W"
 
   def _render(self, rect: rl.Rectangle) -> None:
-    loading = ui_state.chestnut_state == ChestnutState.LOADING
-    visible = self._enabled and (loading or ui_state.chestnut_state == ChestnutState.ACTIVE)
-    alpha = self._alpha_filter.update(1.0 if visible else 0.0)
+    mode = badge_mode(ui_state.chestnut_state.value, self._enabled)
+    loading = mode == "loading"
+    alpha = self._alpha_filter.update(1.0 if mode is not None else 0.0)
     if alpha < 1e-2:
       return
 
     column_center_x = rect.x + rect.width - RIGHT_MARGIN - COMPLICATION_W / 2
     x = column_center_x - ICON_W / 2
     y = rect.y + TOP_MARGIN
+
+    if mode == "failed":
+      rl.draw_texture_ex(self._failed_texture, rl.Vector2(x, y), 0.0, 1.0,
+                         rl.Color(255, 255, 255, int(255 * FAILED_OPACITY * alpha)))
+      return
 
     if loading:
       pulse = PULSE_MIN + (1.0 - PULSE_MIN) * (0.5 - 0.5 * math.cos(rl.get_time() * PULSE_RATE))
