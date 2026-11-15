@@ -177,7 +177,7 @@ void fill_panda_can_state(cereal::PandaState::PandaCanState::Builder &cs, const 
   cs.setCanCoreResetCnt(can_health.can_core_reset_cnt);
 }
 
-std::optional<bool> send_panda_states(PubMaster *pm, Panda *panda, bool is_onroad, bool spoofing_started, bool always_offroad, bool charge_can_awake) {
+std::optional<bool> send_panda_states(PubMaster *pm, Panda *panda, bool is_onroad, bool spoofing_started, bool always_offroad) {
   // build msg
   MessageBuilder msg;
   auto evt = msg.initEvent();
@@ -205,32 +205,21 @@ std::optional<bool> send_panda_states(PubMaster *pm, Panda *panda, bool is_onroa
 
   bool ignition_local = ((health.flags_pkt & (HEALTH_FLAG_IGNITION_LINE | HEALTH_FLAG_IGNITION_CAN)) != 0U) && !always_offroad;
 
-  // BluePilot: while bp_chargemon holds CAN awake with the car off, keep the panda listen-only (SILENT: no
-  // ACKs, no error frames). NO_OUTPUT leaves the CAN controllers active, so the comma acted as a live node
-  // on a sleeping/locked car's network -- suspected of setting off the Mach-E alarm.
-  bool charge_listen_only = !ignition_local && charge_can_awake;
-  // End BluePilot
-
   // Make sure CAN buses are live: safety_setter_thread does not work if Panda CAN are silent and there is only one other CAN node
-  if (health.safety_mode_pkt == (uint8_t)(cereal::CarParams::SafetyModel::SILENT) && !charge_listen_only) {  // BluePilot: && !charge_listen_only
+  if (health.safety_mode_pkt == (uint8_t)(cereal::CarParams::SafetyModel::SILENT)) {
     panda->set_safety_model(cereal::CarParams::SafetyModel::NO_OUTPUT);
   }
 
-  // BluePilot: keep the CAN transceivers on while offroad when bp_chargemon asks (car off, charging)
-  bool power_save_desired = !ignition_local && !charge_can_awake;
-  // End BluePilot
+  bool power_save_desired = !ignition_local;
   if (((health.flags_pkt & HEALTH_FLAG_POWER_SAVE_ENABLED) != 0U) != power_save_desired) {
     panda->set_power_saving(power_save_desired);
   }
 
   // set safety mode to NO_OUTPUT when car is off or we're not onroad. ELM327 is an alternative if we want to leverage athenad/connect
   bool should_close_relay = !ignition_local || !is_onroad;
-  // BluePilot: listen-only instead of NO_OUTPUT while the charge monitor holds CAN awake (see above)
-  const auto offroad_safety = charge_listen_only ? cereal::CarParams::SafetyModel::SILENT : cereal::CarParams::SafetyModel::NO_OUTPUT;
-  if (should_close_relay && (health.safety_mode_pkt != (uint8_t)(offroad_safety))) {
-    panda->set_safety_model(offroad_safety);
+  if (should_close_relay && (health.safety_mode_pkt != (uint8_t)(cereal::CarParams::SafetyModel::NO_OUTPUT))) {
+    panda->set_safety_model(cereal::CarParams::SafetyModel::NO_OUTPUT);
   }
-  // End BluePilot
 
   if (!panda->comms_healthy()) {
     evt.setValid(false);
@@ -285,8 +274,8 @@ void send_peripheral_state(Panda *panda, PubMaster *pm) {
   pm->send("peripheralState", msg);
 }
 
-void process_panda_state(Panda *panda, PubMaster *pm, bool engaged, bool engaged_mads, bool is_onroad, bool spoofing_started, bool always_offroad, bool charge_can_awake) {
-  auto ignition_opt = send_panda_states(pm, panda, is_onroad, spoofing_started, always_offroad, charge_can_awake);
+void process_panda_state(Panda *panda, PubMaster *pm, bool engaged, bool engaged_mads, bool is_onroad, bool spoofing_started, bool always_offroad) {
+  auto ignition_opt = send_panda_states(pm, panda, is_onroad, spoofing_started, always_offroad);
   if (!ignition_opt) {
     LOGE("Failed to get ignition_opt");
     return;
@@ -400,10 +389,6 @@ void pandad_run(Panda *panda) {
   bool engaged_mads = false;
   bool is_onroad = false;
   bool always_offroad = false;
-  // BluePilot: offroad charge monitor CAN wake request
-  Params bp_params;
-  bool charge_can_awake = false;
-  // End BluePilot
 
   // Main loop: receive CAN first, then process lower priority panda and peripheral state.
   while (!do_exit && check_connected(panda)) {
@@ -423,10 +408,7 @@ void pandad_run(Panda *panda) {
       }
       engaged_mads = process_mads_heartbeat(&sm);
       always_offroad = panda_safety.getOffroadMode();
-      // BluePilot: offroad charge monitor CAN wake request
-      charge_can_awake = !is_onroad && bp_params.getBool("BPChargeCanAwake");
-      // End BluePilot
-      process_panda_state(panda, &pm, engaged, engaged_mads, is_onroad, spoofing_started, always_offroad, charge_can_awake);
+      process_panda_state(panda, &pm, engaged, engaged_mads, is_onroad, spoofing_started, always_offroad);
       panda_safety.configureSafetyMode(is_onroad);
     }
 

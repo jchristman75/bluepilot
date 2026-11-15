@@ -596,7 +596,6 @@ struct CarStateBP @0xb057204d7deadf3f {
   hybridDrive @0 :HybridDrive;
   hybridBattery @1 :HybridBattery;
   brakeLightStatus @2 :BrakeLightStatus;
-  charging @3 :Charging;
 
   struct HybridDrive {
     dataAvailable @0 :Bool;
@@ -625,16 +624,6 @@ struct CarStateBP @0xb057204d7deadf3f {
   struct BrakeLightStatus {
     dataAvailable @0 :Bool;
     brakeLightsOn @1 :Bool;
-  }
-
-  struct Charging {
-    dataAvailable @0 :Bool;
-    chargingActive @1 :Bool;  # true when ChrgStat_D_ActlMntr indicates an active charge (parked or driving)
-    statusText @2 :Text;
-    statusValue @3 :UInt8;  # Raw numeric value for PlotJuggler compatibility
-    powerKw @4 :Float32;  # power into the HV pack while charging (Mach-E, F-150 Lightning: pack V x HV_Battery_Current_BP; else = powerLimitKw)
-    powerLimitKw @5 :Float32;  # what the pack will accept right now (BattTrac2_Pw_ChrgInst)
-    dcFastCharging @6 :Bool;  # ChrgStat_D2_Dsply (0x440) == 8 ChargingDCFastChange; AC charging is 7. bp_chargemon keeps the comma awake only for this
   }
 }
 

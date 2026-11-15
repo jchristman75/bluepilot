@@ -15,7 +15,6 @@ from opendbc.car.ford.values import CAR, FordFlags
 from opendbc.sunnypilot.car.ford.values_ext import BUTTONS
 from openpilot.common.swaglog import cloudlog
 
-DC_FAST_CHARGING_D2 = 8      # ChrgStat_D2_Dsply "ChargingDCFastChange" (7 is AC)
 THERMAL_PACK_MAX_C = 100.0  # BattTrac_Te_Actl above this is the sensor's Unknown/Fault code, not a temperature
 
 
@@ -69,25 +68,6 @@ def get_hev_engine_on_reason_text(reason_value):
     13: "Drive Mode",
   }
   return engine_on_reasons.get(int(reason_value), "Unknown")
-
-
-# BluePilot: charge status text lookup
-def get_charge_status_text(status_value):
-  """Convert ChrgStat_D_ActlMntr value to human-readable text.
-
-  These values come from the MtrTrac_Data2_FD1 CAN message (ChrgStat_D_ActlMntr signal).
-  """
-  charge_statuses = {
-    0: "",
-    1: "Charging (Parked)",
-    2: "Charging (Driving)",
-    3: "Not Charging",
-    4: "Charge Complete",
-    5: "Not Used",
-    6: "No Data",
-    7: "Faulty",
-  }
-  return charge_statuses.get(int(status_value), "Unknown")
 
 
 class CarStateExt:
@@ -352,7 +332,6 @@ class CarStateExt:
     hybrid_drive = dat.carStateBP.hybridDrive
     hybrid_battery = dat.carStateBP.hybridBattery
     brake_light_status = dat.carStateBP.brakeLightStatus
-    charging = dat.carStateBP.charging
 
     # Initialize with defaults
     hybrid_drive.dataAvailable = False
@@ -377,14 +356,6 @@ class CarStateExt:
 
     brake_light_status.dataAvailable = False
     brake_light_status.brakeLightsOn = False
-
-    charging.dataAvailable = False
-    charging.chargingActive = False
-    charging.statusText = ""
-    charging.statusValue = 0
-    charging.powerKw = 0.0
-    charging.powerLimitKw = 0.0
-    charging.dcFastCharging = False
 
     # Brake light status — try BCM message first, then fallback to BrakeSysFeatures_2
     brake_lights_detected = False
@@ -482,38 +453,12 @@ class CarStateExt:
     except (KeyError, AttributeError):
       pass
 
-    # Charging telemetry (Battery_Traction_5_FD1, MtrTrac_Data2_FD1)
+    # Pack charge-power limit (Battery_Traction_5_FD1 BattTrac2_Pw_ChrgInst): what the pack will accept right now.
+    # longitudinal_ext sizes regen from it. It is a LIMIT, not flow: it reads 50-127 kW while driving, and on a DC fast
+    # charge (route 00000464) it rose 122 -> 135 kW while the pack actually took 115 -> 89 kW.
     try:
       if self.CP.flags & FordFlags.CHARGING_DATA:
-        batt_data5 = cp.vl["Battery_Traction_5_FD1"]
-        mtr_trac_data2 = cp.vl["MtrTrac_Data2_FD1"]
-
-        if all(x is not None for x in [batt_data5, mtr_trac_data2]):
-          charging.dataAvailable = True
-          status_value = int(mtr_trac_data2["ChrgStat_D_ActlMntr"])
-          charging.statusValue = status_value
-          charging.statusText = get_charge_status_text(status_value)
-          charging.chargingActive = status_value in (1, 2)  # ChargingInParkingState, ChargingInDrivingState
-          # BluePilot: DC fast charge vs AC, from the display status on 0x440 (8 = DC, 7 = AC); a car that doesn't send it reads as not DC
-          try:
-            charging.dcFastCharging = int(cp.vl["PreCond_Hev_Data1_FD1"]["ChrgStat_D2_Dsply"]) == DC_FAST_CHARGING_D2
-          except (KeyError, TypeError, ValueError):
-            pass
-          # End BluePilot
-          # Battery_Traction_5's four signals are charge/discharge power LIMITS, not flow: ChrgInst
-          # reads 50-127 kW while driving, and on a DC fast charge (route 00000464) it rose
-          # 122 -> 135 kW while the pack actually took 115 -> 89 kW. It is what the pack will accept.
-          charging.powerLimitKw = batt_data5["BattTrac2_Pw_ChrgInst"] / 1000.0
-          self.regen_power_limit_kw = charging.powerLimitKw
-          if self.CP.flags & FordFlags.HV_CURRENT_DATA:
-            # Real pack power = pack voltage x pack current (HV_Battery_Current_BP, + = discharge); report
-            # charging as positive. Route 00000464: 83 -> 67 kW, while ChrgInst read 122 -> 135.
-            pack_a = cp.vl["HV_Battery_Current_BP"]["BattTracI_Actl_BP"]
-            pack_v = cp.vl["Battery_Traction_1_FD1"]["BattTrac_U_Actl"]
-            charging.powerKw = max(0.0, -pack_a * pack_v / 1000.0)
-          else:
-            # No verified pack-power signal on this platform: the limit is the best there is.
-            charging.powerKw = charging.powerLimitKw
+        self.regen_power_limit_kw = cp.vl["Battery_Traction_5_FD1"]["BattTrac2_Pw_ChrgInst"] / 1000.0
     except (KeyError, AttributeError):
       pass
 

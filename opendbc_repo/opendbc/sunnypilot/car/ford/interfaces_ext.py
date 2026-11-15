@@ -76,9 +76,8 @@ def apply_ford_ext_params(ret: structs.CarParams, CP, car_fw, fingerprint, alpha
   if candidate in HV_CURRENT_VERIFIED_CARS and 0x7B in fingerprint[CAN.main]:
     ret.flags |= int(FordFlags.HV_CURRENT_DATA)
 
-  # BluePilot: BEV/PHEV charging telemetry. MtrTrac_Data2 (0x442) has charge status; the power comes from
-  # Battery_Traction_5 (0x24D, the pack's charge power limits) or from 0x7B above. The F-150 Lightning
-  # sends 0x442 and 0x7B but no 0x24D.
+  # BluePilot: pack charge-power limit for regen sizing (Battery_Traction_5, 0x24D). Gated as it always was: a BEV
+  # that sends 0x442 and either 0x24D or 0x7B above (the F-150 Lightning sends 0x442 and 0x7B but no 0x24D).
   if 0x442 in fingerprint[CAN.main] and (0x24D in fingerprint[CAN.main] or ret.flags & FordFlags.HV_CURRENT_DATA):
     ret.flags |= int(FordFlags.CHARGING_DATA)
 
