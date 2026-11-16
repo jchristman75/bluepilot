@@ -24,3 +24,17 @@ def test_from_message_and_missing_fields():
   m = NS(brakeLightStatus=NS(dataAvailable=True, brakeLightsOn=True), longitudinal=NS(frictionBrake=False, regenDecel=0.5))
   assert brake_kind_from_car_state_bp(m) == BrakeKind.REGEN
   assert brake_kind_from_car_state_bp(NS()) == BrakeKind.NONE
+
+
+def test_lift_off_regen_is_orange_until_the_pedal_is_pressed():
+  assert brake_kind(True, False, 0.0, pedal=False, decel=1.5) == BrakeKind.REGEN      # lifted off: regen only
+  assert brake_kind(True, False, 0.0, pedal=True, decel=1.5) == BrakeKind.BRAKE       # pedal: red
+  assert brake_kind(True, True, 0.0, pedal=False, decel=1.5) == BrakeKind.BRAKE       # op friction: red
+  assert brake_kind(False, False, 0.0, pedal=False, decel=1.5) == BrakeKind.NONE      # no lights (e.g. a hill): nothing
+  assert brake_kind(True, False, 0.0, pedal=False, decel=0.1) == BrakeKind.BRAKE      # lights without a real decel
+
+
+def test_from_message_uses_carstate_for_the_pedal_and_decel():
+  m = NS(brakeLightStatus=NS(dataAvailable=True, brakeLightsOn=True), longitudinal=NS(frictionBrake=False, regenDecel=0.0))
+  assert brake_kind_from_car_state_bp(m, NS(brakePressed=False, aEgo=-1.6)) == BrakeKind.REGEN
+  assert brake_kind_from_car_state_bp(m, NS(brakePressed=True, aEgo=-1.6)) == BrakeKind.BRAKE

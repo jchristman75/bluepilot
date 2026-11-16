@@ -75,7 +75,7 @@ class HudRendererBP(HudRendererSP):
       if sm.valid['carStateBP']:
         try:
           car_state_bp = sm['carStateBP']
-          self._brake_kind = brake_kind_from_car_state_bp(car_state_bp)
+          self._brake_kind = brake_kind_from_car_state_bp(car_state_bp, sm['carState'])
         except (KeyError, AttributeError):
           self._brake_kind = BrakeKind.NONE
       else:
