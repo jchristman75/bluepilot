@@ -57,8 +57,8 @@ BRAKE_STOCK = BrakeThresholds(on=-0.14, off=-0.06)
 # the flag off and mirrors gas into AccPrpl_A_Pred; panda (ford.h) limits gas to MIN_GAS.
 BRAKE_REGEN = BrakeThresholds(on=-0.55, off=-0.40)
 # With the panda's deeper regen floor (FordSafetyFlagsBP.REGEN_BLEND at init), regen covers down
-# to REGEN_MIN_GAS (-1.5) and the friction brakes only come in below -1.55.
-BRAKE_REGEN_DEEP = BrakeThresholds(on=-1.55, off=-1.40)
+# to REGEN_MIN_GAS (-2.2) and the friction brakes only come in below -2.25.
+BRAKE_REGEN_DEEP = BrakeThresholds(on=-2.25, off=-2.10)
 REGEN_MIN_SPEED = 3.0  # m/s; below this (and when stopping) the stock thresholds apply
 FRICTION_BACKUP_MIN_REQUEST = 0.3  # m/s^2: the failing-regen backup needs at least this much brake request to act on
 

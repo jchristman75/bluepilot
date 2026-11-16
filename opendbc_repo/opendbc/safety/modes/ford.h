@@ -506,13 +506,13 @@ static bool ford_tx_hook(const CANPacket_t *msg) {
     .inactive_gas = 0,       // -5.0 m/s^2
   };
 
-  // BluePilot: with regen coasting enabled at init, the gas floor is -1.5 (regen); all else equal
+  // BluePilot: with regen coasting enabled at init, the gas floor is -2.2 (regen); all else equal
   const LongitudinalLimits FORD_LONG_LIMITS_REGEN = {
     .max_accel = 5641,
     .min_accel = 4231,
     .inactive_accel = 5128,
     .max_gas = 700,
-    .min_gas = 350,          // -1.5 m/s^2
+    .min_gas = 280,          // -2.2 m/s^2
     .inactive_gas = 0,
   };
   const LongitudinalLimits *ford_long_limits = ford_bp_regen_blend ? &FORD_LONG_LIMITS_REGEN : &FORD_LONG_LIMITS;

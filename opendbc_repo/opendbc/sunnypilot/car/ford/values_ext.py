@@ -75,8 +75,12 @@ class FordSafetyFlagsBP:
 # 1.26 (max 1.48) at 58-78 mph, with braking power at 93-100% of the pack's charge limit. So the car can do far more
 # than -0.9, and with the friction brakes holding everything below it, a gentle approach to a lead on the highway
 # (asked -1.0..-1.6, needed < 0.55) went to the friction brakes. -1.5 covers highway regen; the live pack limit
-# (regen_floor in longitudinal_ext.py) still cuts it when the pack can't absorb that. Must match ford.h (raw 350).
-REGEN_MIN_GAS = -1.5
+# (regen_floor in longitudinal_ext.py) still cuts it when the pack can't absorb that.
+# Routes 582/585-588 (first drives at -1.5): the car delivers ~0.7-0.95 of the request (-1.5 -> ~-1.2) and 90% of the
+# friction braking began where the request crossed -1.5 (stops from 15-36 mph ramping to -1.5..-1.9); manual lift-offs
+# give 1.7-2.0 m/s^2 at every speed from 3 to 60 mph. -2.2 would have kept 92% of that friction time on regen.
+# Must match ford.h (raw 280).
+REGEN_MIN_GAS = -2.2
 
 
 # Geometry-table index for the steering-angle curvature measurement, packed into

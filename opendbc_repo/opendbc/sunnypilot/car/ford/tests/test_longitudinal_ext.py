@@ -184,12 +184,14 @@ def test_deep_regen_covers_medium_slowing_without_friction():
 
 def test_deep_regen_brake_flag_thresholds():
   c = DeepCtrl()
-  r = step(c, -1.53)                       # between the floor and the flag: regen at the floor
+  r = step(c, -2.23)                       # between the floor and the flag: regen at the floor
   assert not r.brake_actuate and r.gas == REGEN_MIN_GAS
-  assert step(c, -1.6).brake_actuate       # below -1.55: friction
-  assert step(c, -1.45).brake_actuate      # band -1.55..-1.40 holds
-  r = step(c, -1.3)
-  assert not r.brake_actuate and r.gas == -1.3
+  assert step(c, -2.3).brake_actuate       # below -2.25: friction
+  assert step(c, -2.15).brake_actuate      # band -2.25..-2.10 holds
+  r = step(c, -2.0)
+  assert not r.brake_actuate and r.gas == -2.0
+  r = step(c, -1.6)                        # the old floor region is regen now (it was friction at -1.5)
+  assert not r.brake_actuate and r.gas == -1.6
 
 
 def test_deep_regen_needs_the_init_flag():
@@ -241,7 +243,7 @@ def step_lim(c, accel, v_ego=18.0, limit_kw=None, a_ego=None):  # 40 mph: below 
 def test_regen_floor_from_pack_limit():
   # unknown limit or plenty of regen: the panda floor, unchanged
   assert regen_floor(REGEN_MIN_GAS, None, 25.0, 2500.0) == REGEN_MIN_GAS
-  assert regen_floor(REGEN_MIN_GAS, 100.0, 25.0, 2500.0) == REGEN_MIN_GAS
+  assert regen_floor(REGEN_MIN_GAS, 200.0, 25.0, 2500.0) == REGEN_MIN_GAS
   # 20 kW at 25 m/s, 2500 kg, 0.95 margin -> regen can do ~0.304 m/s^2
   assert regen_floor(REGEN_MIN_GAS, 20.0, 25.0, 2500.0) == pytest.approx(-0.304)
   # full battery: no regen at all
