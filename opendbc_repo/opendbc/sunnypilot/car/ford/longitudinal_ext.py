@@ -56,9 +56,33 @@ BRAKE_STOCK = BrakeThresholds(on=-0.14, off=-0.06)
 # Stock Ford ACC (Mach-E, routes 4e6/4f8) sends AccPrpl_A_Rq ~= AccBrkTot_A_Rq down to ~-0.9 with
 # the flag off and mirrors gas into AccPrpl_A_Pred; panda (ford.h) limits gas to MIN_GAS.
 BRAKE_REGEN = BrakeThresholds(on=-0.55, off=-0.40)
-# With the panda's deeper regen floor (FordSafetyFlagsBP.REGEN_BLEND at init), regen covers down
-# to REGEN_MIN_GAS (-2.2) and the friction brakes only come in below -2.25.
-BRAKE_REGEN_DEEP = BrakeThresholds(on=-2.25, off=-2.10)
+# Regen request calibration. In ACC mode the Mach-E delivers ~0.63-0.66x of an AccPrpl request (+ drag): measured
+# delivered = 0.63 * request + 0.17 (steady state, 689 s, routes 582-58e), while a manual lift-off decelerates at
+# 1.6-2.0 m/s^2. So a planned decel above REGEN_CAL_KNEE is sent as a request REGEN_CAL_SLOPE (~1/0.65) times deeper
+# (planned 1.0 -> request 1.35, 1.5 -> 2.1, 2.0 -> 2.85), and everything downstream (floor, brake thresholds, the
+# shortfall monitor) works in planned-decel units.
+REGEN_CAL_KNEE = 0.3
+REGEN_CAL_SLOPE = 1.5
+
+
+def regen_request(decel):
+  """AccPrpl request (m/s^2, negative) that makes the car decelerate by the planned `decel` (negative)."""
+  if decel >= -REGEN_CAL_KNEE:
+    return decel
+  return -(REGEN_CAL_KNEE + (-decel - REGEN_CAL_KNEE) * REGEN_CAL_SLOPE)
+
+
+def regen_decel(request):
+  """Inverse of regen_request: the planned decel (negative) a request delivers."""
+  if request >= -REGEN_CAL_KNEE:
+    return request
+  return -(REGEN_CAL_KNEE + (-request - REGEN_CAL_KNEE) / REGEN_CAL_SLOPE)
+
+
+REGEN_PLAN_FLOOR = regen_decel(REGEN_MIN_GAS)  # deepest planned decel regen can deliver at the panda's floor: -2.1
+# With the panda's deeper regen floor (FordSafetyFlagsBP.REGEN_BLEND at init), regen covers planned decels down to
+# REGEN_PLAN_FLOOR and the friction brakes only come in just below it.
+BRAKE_REGEN_DEEP = BrakeThresholds(on=REGEN_PLAN_FLOOR - 0.05, off=REGEN_PLAN_FLOOR + 0.1)
 REGEN_MIN_SPEED = 3.0  # m/s; below this (and when stopping) the stock thresholds apply
 FRICTION_BACKUP_MIN_REQUEST = 0.3  # m/s^2: the failing-regen backup needs at least this much brake request to act on
 
@@ -94,7 +118,7 @@ def regen_floor(panda_floor, limit_kw, v_ego, mass_kg):
 def regen_thresholds(floor, panda_floor):
   """Brake flag thresholds for a regen floor: the friction brakes take over just past what regen can
   do. Unlimited regen -> exactly BRAKE_REGEN(_DEEP); no regen at all -> BRAKE_STOCK."""
-  base = BRAKE_REGEN_DEEP if panda_floor == REGEN_MIN_GAS else BRAKE_REGEN
+  base = BRAKE_REGEN_DEEP if panda_floor == REGEN_PLAN_FLOOR else BRAKE_REGEN
   if floor <= panda_floor:
     return base
   on = float(clip(floor - 0.05, base.on, BRAKE_STOCK.on))
@@ -385,11 +409,13 @@ class LongitudinalExt:
     # How to deliver it: one brake flag decision on the final request
     regen_active = (self.regen_blend_UI and CC.longActive and not stopping and
                     CS.out.vEgo > REGEN_MIN_SPEED)
-    gas_floor = REGEN_MIN_GAS if (regen_active and self.deep_regen_allowed) else MIN_GAS  # what the panda allows
+    deep = regen_active and self.deep_regen_allowed
+    gas_floor = REGEN_MIN_GAS if deep else MIN_GAS  # what the panda allows (request units)
+    plan_floor = REGEN_PLAN_FLOOR if deep else MIN_GAS  # the same limit in planned-decel units
     if regen_active:
       # how much regen the pack can take right now (full battery / cold pack -> less)
-      floor = regen_floor(gas_floor, CS.regen_power_limit_kw, CS.out.vEgo, self.regen_mass_kg)
-      thresholds = regen_thresholds(floor, gas_floor)
+      floor = regen_floor(plan_floor, CS.regen_power_limit_kw, CS.out.vEgo, self.regen_mass_kg)
+      thresholds = regen_thresholds(floor, plan_floor)
     else:
       thresholds = BRAKE_STOCK
     brake_actuate = self.brake.update(accel + accel_due_to_pitch, thresholds, CC.longActive)
@@ -409,6 +435,8 @@ class LongitudinalExt:
     if not regen_only:
       self.regen_monitor.reset(CS.out.aEgo)
 
+    if deep and regen_only:
+      gas = max(regen_request(gas), gas_floor)  # what to ask the car for to get the planned decel (rounding stays inside ford.h)
     accel = float(clip(accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
     gas = encode_gas(gas, CC.longActive, brake_actuate, gas_floor)
     # Stock Ford mirrors the propulsion request into AccPrpl_A_Pred (op sends INACTIVE)

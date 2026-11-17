@@ -93,8 +93,8 @@ def _scenario_speeds(name):
 
 
 def test_limited_regen_never_asks_for_more_than_the_pack_takes(current):
-  """With the pack limit falling to 0, regen requests stay within limit x 0.8 / (mass x speed)."""
-  from opendbc.sunnypilot.car.ford.longitudinal_ext import REGEN_LIMIT_MARGIN, REGEN_MIN_SPEED
+  """With the pack limit falling to 0, the decel the regen requests deliver stays within limit x margin / (mass x speed)."""
+  from opendbc.sunnypilot.car.ford.longitudinal_ext import REGEN_LIMIT_MARGIN, REGEN_MIN_SPEED, regen_decel
   from opendbc.sunnypilot.car.ford.values_ext import FORD_REGEN_MASS_KG
   mass = FORD_REGEN_MASS_KG['FORD_MUSTANG_MACH_E_MK1']
   names = [n for n in current if n.endswith('-lim')]
@@ -110,7 +110,8 @@ def test_limited_regen_never_asks_for_more_than_the_pack_takes(current):
     sc = next(x for x in H.build_scenarios() if x.name == name)
     stopping = np.array([f.stopping for f in sc.frames])[1::2][:len(acc)]
     regen = (gas < 0) & (gas > -4.9) & (v > REGEN_MIN_SPEED) & ~stopping
-    assert np.all(-gas[regen] <= allowed[regen] + 0.011), name   # 0.01 CAN resolution
+    planned = -np.array([regen_decel(g) for g in gas[regen]])   # the request is calibrated: compare the decel it delivers
+    assert np.all(planned <= allowed[regen] + 0.011), name   # 0.01 CAN resolution
     assert regen.any()  # and regen is still used while the pack can take it
 
 

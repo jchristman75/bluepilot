@@ -176,22 +176,36 @@ class DeepCtrl(Ctrl):
 
 def test_deep_regen_covers_medium_slowing_without_friction():
   c = DeepCtrl()
-  for a in (-0.3, -0.6, -0.85, -0.9, -1.2, -1.45, REGEN_MIN_GAS):
+  for a in (-0.3, -0.6, -0.85, -0.9, -1.2, -1.45, -1.8, REGEN_PLAN_FLOOR):
     r = step(c, a)
     assert not r.brake_actuate, a
-    assert r.gas == a and r.accel_pred_send == a
+    assert r.gas == pytest.approx(regen_request(a)) and r.accel_pred_send == r.gas
 
 
 def test_deep_regen_brake_flag_thresholds():
   c = DeepCtrl()
-  r = step(c, -2.23)                       # between the floor and the flag: regen at the floor
-  assert not r.brake_actuate and r.gas == REGEN_MIN_GAS
-  assert step(c, -2.3).brake_actuate       # below -2.25: friction
-  assert step(c, -2.15).brake_actuate      # band -2.25..-2.10 holds
-  r = step(c, -2.0)
-  assert not r.brake_actuate and r.gas == -2.0
-  r = step(c, -1.6)                        # the old floor region is regen now (it was friction at -1.5)
-  assert not r.brake_actuate and r.gas == -1.6
+  r = step(c, -2.12)                       # between the planned floor (-2.1) and the flag: regen at the panda floor
+  assert not r.brake_actuate and r.gas == pytest.approx(REGEN_MIN_GAS)
+  assert step(c, -2.2).brake_actuate       # below -2.15: friction
+  assert step(c, -2.05).brake_actuate      # band -2.15..-2.0 holds
+  r = step(c, -1.9)
+  assert not r.brake_actuate and r.gas == pytest.approx(regen_request(-1.9))
+  r = step(c, -1.6)                        # regen all the way: the old floors (-0.9, -1.5, -2.2) were friction here
+  assert not r.brake_actuate and r.gas == pytest.approx(regen_request(-1.6))
+
+
+def test_regen_request_calibration():
+  """The car delivers ~0.63-0.66x of a regen request (+ drag): planned decels above the knee are asked for 1.5x deeper."""
+  assert regen_request(-0.2) == -0.2 and regen_request(0.0) == 0.0 and regen_request(0.5) == 0.5   # light regen and gas: 1:1
+  assert regen_request(-0.3) == pytest.approx(-0.3)                                               # continuous at the knee
+  assert regen_request(-1.0) == pytest.approx(-1.35) and regen_request(-1.5) == pytest.approx(-2.1)
+  assert regen_request(-2.0) == pytest.approx(-2.85)
+  assert regen_request(REGEN_PLAN_FLOOR) == pytest.approx(REGEN_MIN_GAS)                          # the planned floor is the panda floor
+  assert REGEN_PLAN_FLOOR == pytest.approx(-2.1) and REGEN_MIN_GAS == -3.0
+  for d in (-0.1, -0.3, -0.7, -1.2, -1.9, -2.1):
+    assert regen_decel(regen_request(d)) == pytest.approx(d)                                      # exact inverse
+  steady = [0.63 * -regen_request(d) + 0.17 for d in (-1.0, -1.5, -2.0)]                          # measured delivered = 0.63 req + 0.17
+  assert steady == pytest.approx([1.02, 1.5, 1.97], abs=0.12)                                     # so the plan is met within ~0.1
 
 
 def test_deep_regen_needs_the_init_flag():
@@ -226,8 +240,8 @@ def test_gas_never_below_what_the_panda_allows():
 
 # ---- regen limited by the pack (full battery / cold): live floor + shortfall monitor ----
 
-from opendbc.sunnypilot.car.ford.longitudinal_ext import (BRAKE_REGEN, BRAKE_REGEN_DEEP, BRAKE_STOCK,
-                                                           regen_floor, regen_thresholds)
+from opendbc.sunnypilot.car.ford.longitudinal_ext import (BRAKE_REGEN, BRAKE_REGEN_DEEP, BRAKE_STOCK, REGEN_PLAN_FLOOR,
+                                                           regen_decel, regen_floor, regen_request, regen_thresholds)
 
 
 def cs_full(v_ego=25.0, limit_kw=None, a_ego=0.0):
@@ -242,20 +256,20 @@ def step_lim(c, accel, v_ego=18.0, limit_kw=None, a_ego=None):  # 40 mph: below 
 
 def test_regen_floor_from_pack_limit():
   # unknown limit or plenty of regen: the panda floor, unchanged
-  assert regen_floor(REGEN_MIN_GAS, None, 25.0, 2500.0) == REGEN_MIN_GAS
-  assert regen_floor(REGEN_MIN_GAS, 200.0, 25.0, 2500.0) == REGEN_MIN_GAS
+  assert regen_floor(REGEN_PLAN_FLOOR, None, 25.0, 2500.0) == REGEN_PLAN_FLOOR
+  assert regen_floor(REGEN_PLAN_FLOOR, 200.0, 25.0, 2500.0) == REGEN_PLAN_FLOOR
   # 20 kW at 25 m/s, 2500 kg, 0.95 margin -> regen can do ~0.304 m/s^2
-  assert regen_floor(REGEN_MIN_GAS, 20.0, 25.0, 2500.0) == pytest.approx(-0.304)
+  assert regen_floor(REGEN_PLAN_FLOOR, 20.0, 25.0, 2500.0) == pytest.approx(-0.304)
   # full battery: no regen at all
-  assert regen_floor(REGEN_MIN_GAS, 0.0, 25.0, 2500.0) == 0.0
+  assert regen_floor(REGEN_PLAN_FLOOR, 0.0, 25.0, 2500.0) == 0.0
 
 
 def test_thresholds_follow_the_floor():
-  assert regen_thresholds(REGEN_MIN_GAS, REGEN_MIN_GAS) == BRAKE_REGEN_DEEP     # not limited: exact constants
+  assert regen_thresholds(REGEN_PLAN_FLOOR, REGEN_PLAN_FLOOR) == BRAKE_REGEN_DEEP     # not limited: exact constants
   assert regen_thresholds(CarControllerParams.MIN_GAS, CarControllerParams.MIN_GAS) == BRAKE_REGEN
-  t = regen_thresholds(-0.304, REGEN_MIN_GAS)
+  t = regen_thresholds(-0.304, REGEN_PLAN_FLOOR)
   assert t.on == pytest.approx(-0.354) and t.off == pytest.approx(-0.204)
-  assert regen_thresholds(0.0, REGEN_MIN_GAS) == BRAKE_STOCK                   # no regen: stock thresholds
+  assert regen_thresholds(0.0, REGEN_PLAN_FLOOR) == BRAKE_STOCK                   # no regen: stock thresholds
 
 
 def test_high_limit_changes_nothing():
@@ -314,7 +328,7 @@ def test_no_friction_brake_flag_when_there_is_no_brake_request_to_deliver():
   for i in range(400):                       # 8 s of regen asked and not delivered
     r = step_lim(c, -0.6, v_ego=30.0, a_ego=0.0)
     assert not r.brake_actuate, i
-    assert r.gas == pytest.approx(-0.6)      # and regen stays requested the whole time
+    assert r.gas == pytest.approx(regen_request(-0.6))      # and regen stays requested the whole time
 
 
 def test_shortfall_monitor_quiet_when_regen_delivers():

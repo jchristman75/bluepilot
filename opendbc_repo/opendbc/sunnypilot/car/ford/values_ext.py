@@ -69,18 +69,14 @@ class FordSafetyFlagsBP:
   REGEN_BLEND = 1 << 14
 
 
-# Deepest propulsion (regen) request with FordSafetyFlagsBP.REGEN_BLEND set, m/s^2. Stock Ford ACC (Mach-E,
-# routes 4e6/4f8) sends AccPrpl_A_Rq down to ~-0.88 with the brake flag off, which is where -0.9 came from.
-# Driving it manually (routes 568-56e, no pedals) the Mach-E regens at 1.7-2.4 m/s^2 up to ~58 mph and a median of
-# 1.26 (max 1.48) at 58-78 mph, with braking power at 93-100% of the pack's charge limit. So the car can do far more
-# than -0.9, and with the friction brakes holding everything below it, a gentle approach to a lead on the highway
-# (asked -1.0..-1.6, needed < 0.55) went to the friction brakes. -1.5 covers highway regen; the live pack limit
-# (regen_floor in longitudinal_ext.py) still cuts it when the pack can't absorb that.
-# Routes 582/585-588 (first drives at -1.5): the car delivers ~0.7-0.95 of the request (-1.5 -> ~-1.2) and 90% of the
-# friction braking began where the request crossed -1.5 (stops from 15-36 mph ramping to -1.5..-1.9); manual lift-offs
-# give 1.7-2.0 m/s^2 at every speed from 3 to 60 mph. -2.2 would have kept 92% of that friction time on regen.
-# Must match ford.h (raw 280).
-REGEN_MIN_GAS = -2.2
+# Deepest propulsion (regen) request with FordSafetyFlagsBP.REGEN_BLEND set, m/s^2 (AccPrpl_A_Rq / AccPrpl_A_Pred). Must
+# match ford.h (raw 200). Stock Ford ACC (Mach-E, routes 4e6/4f8) only sends down to ~-0.88; driving it manually
+# (routes 568-58e, no pedals) the Mach-E regens at 1.6-2.0 m/s^2 (p90 ~2.1) at 3-45 mph with 42-63 kW into the pack.
+# But in ACC mode the car delivers only ~0.63-0.66x of the request plus ~0.1-0.17 of drag (steady-state fit on 689 s of
+# 582/585/588/58a/58e: delivered = 0.63 * request + 0.17; request -2.0 -> 1.4, never more than ~1.5 at the old -2.2 floor).
+# So the request is calibrated (REGEN_CAL_* in longitudinal_ext.py) and the floor is -3.0, which delivers ~2.1 m/s^2.
+# The live pack limit (regen_floor in longitudinal_ext.py) still cuts it when the pack can't absorb that.
+REGEN_MIN_GAS = -3.0
 
 
 # Geometry-table index for the steering-angle curvature measurement, packed into
