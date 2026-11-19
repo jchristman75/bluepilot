@@ -9,7 +9,7 @@ from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.selfdrive.controls.lib.accel_boost import AccelBoost
 from openpilot.selfdrive.controls.lib.longcontrol import LongCtrlState
-from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import LongitudinalMpc, LongitudinalPlanSource
+from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import LongitudinalMpc, LongitudinalPlanSource, get_T_FOLLOW  # BluePilot: get_T_FOLLOW
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import T_IDXS as T_IDXS_MPC
 from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N, get_accel_from_plan, should_stop
 from openpilot.selfdrive.car.cruise import V_CRUISE_MAX, V_CRUISE_UNSET
@@ -46,11 +46,14 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     # BluePilot: shorter follow gap while changing lanes (BPLaneChangeCloseGap), soft approach to a far lead (BPSoftApproach)
     self.lane_change_gap = None
     self.soft_approach = None
+    self.follow_smooth = None
     if is_bluepilot():
       from openpilot.bluepilot.selfdrive.controls.lane_change_gap_bp import LaneChangeGapPlanner
       from openpilot.bluepilot.selfdrive.controls.approach_decel_bp import SoftApproachPlanner
       self.lane_change_gap = LaneChangeGapPlanner()
       self.soft_approach = SoftApproachPlanner()
+      from openpilot.bluepilot.selfdrive.controls.follow_smooth_bp import FollowSmoothPlanner
+      self.follow_smooth = FollowSmoothPlanner()
     # End BluePilot
 
     self.v_desired_filter = FirstOrderFilter(init_v, 2.0, self.dt)
@@ -100,7 +103,11 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
       self.mpc.set_cur_state(v_ego, sm['carState'].aEgo)
     # BluePilot: follow-time override while changing lanes (None = stock)
     t_follow = self.lane_change_gap.t_follow(sm, sm['selfdriveState'].personality) if self.lane_change_gap is not None else None
-    self.mpc.update(sm['radarState'], personality=sm['selfdriveState'].personality, t_follow=t_follow)
+    # BluePilot: smoother, slightly closer following (BPSmoothFollow): averaged lead speed/accel, scaled follow time
+    radar_state = sm['radarState']
+    if self.follow_smooth is not None:
+      radar_state, t_follow = self.follow_smooth.update(sm, get_T_FOLLOW(sm['selfdriveState'].personality), t_follow)
+    self.mpc.update(radar_state, personality=sm['selfdriveState'].personality, t_follow=t_follow)
     # End BluePilot
 
     self.v_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.v_solution)

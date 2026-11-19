@@ -16,6 +16,7 @@ class LongitudinalLayoutMici(NavScroller):
     self.disable_BP_long = BigParamControlBP("Bypass BP Longitudinal Control", "disable_BP_long_UI")
     self.regen_blend = BigParamControlBP("Regen Coasting (Stock-Like Decel)", "BPLongRegenBlend")
     self.soft_approach = BigParamControlBP("Soft Highway Approach", "BPSoftApproach")
+    self.smooth_follow = BigParamControlBP("Smooth Following (Closer Gap)", "BPSmoothFollow")
     self.disable_downhill_comp = BigParamControlBP("Disable Downhill Compensation", "disable_downhill_comp_UI")
     self.disable_ford_radar = BigParamControlBP("Disable Ford Radar (Vision-Only Leads)", "disable_ford_radar_UI")
     self.raw_radar = BigParamControlBP("Full Radar Tracking (CAN-FD Fords)", "BPRawRadar")
@@ -24,6 +25,7 @@ class LongitudinalLayoutMici(NavScroller):
       self.disable_BP_long,
       self.regen_blend,
       self.soft_approach,
+      self.smooth_follow,
       self.disable_downhill_comp,
       self.disable_ford_radar,
       self.raw_radar,
@@ -33,6 +35,7 @@ class LongitudinalLayoutMici(NavScroller):
       ("disable_BP_long_UI", self.disable_BP_long),
       ("BPLongRegenBlend", self.regen_blend),
       ("BPSoftApproach", self.soft_approach),
+      ("BPSmoothFollow", self.smooth_follow),
       ("disable_downhill_comp_UI", self.disable_downhill_comp),
       ("disable_ford_radar_UI", self.disable_ford_radar),
       ("BPRawRadar", self.raw_radar),

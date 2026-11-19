@@ -102,6 +102,7 @@ class BluePilotLayout(Widget):
       ("disable_downhill_comp_UI", self._disable_dowhill_comp),
       ("BPLongRegenBlend", self._regen_blend),
       ("BPSoftApproach", self._soft_approach),
+      ("BPSmoothFollow", self._smooth_follow),
       ("disable_ford_radar_UI", self._disable_ford_radar),
       ("BPRawRadar", self._raw_radar),
       ("BpShowLateralControl", self._show_lateral_control),
@@ -627,6 +628,14 @@ class BluePilotLayout(Widget):
       icon="chffr_wheel.png"
     )
 
+    self._smooth_follow = toggle_item(
+      lambda: tr("Smooth Following (Closer Gap)"),
+      lambda: tr("Behind a car that speeds up and slows down (a bus), follow its average speed instead of every wobble, and keep a slightly closer follow time. Hard braking and cut-ins are unchanged."),
+      initial_state=self._safe_get_bool(self._params, "BPSmoothFollow"),
+      callback=lambda state: self._toggle_callback(state, "BPSmoothFollow"),
+      icon="chffr_wheel.png"
+    )
+
     # Disable downhill compensation toggle
     self._disable_dowhill_comp = toggle_item(
       lambda: tr("Disable Downhill Compensation"),
@@ -786,6 +795,7 @@ class BluePilotLayout(Widget):
         self._disable_BP_long,
         self._regen_blend,
         self._soft_approach,
+        self._smooth_follow,
         self._disable_dowhill_comp,
         self._disable_ford_radar,
         self._raw_radar,

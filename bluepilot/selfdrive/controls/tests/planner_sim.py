@@ -95,6 +95,9 @@ class PlannerSim:
     if getattr(self.planner, 'lane_change_gap', None) is not None:
       self.planner.lane_change_gap.params = self.params
       self.planner.lane_change_gap.frame = 0
+    if getattr(self.planner, 'follow_smooth', None) is not None:
+      self.planner.follow_smooth.params = self.params
+      self.planner.follow_smooth.frame = 0
     if getattr(self.planner, 'soft_approach', None) is not None:
       self.planner.soft_approach.params = self.params
       self.planner.soft_approach.frame = 0
