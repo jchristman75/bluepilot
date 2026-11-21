@@ -7,6 +7,7 @@ from opendbc.car.ford.values import DBC, CarControllerParams, FordFlags
 from opendbc.car.interfaces import CarStateBase
 from opendbc.sunnypilot.car.ford.mads import MadsCarState
 from opendbc.sunnypilot.car.ford.carstate_ext import CarStateExt
+from opendbc.sunnypilot.car.ford.gps_ext import NAV_MESSAGES as GPS_NAV_MESSAGES  # BluePilot: car GPS
 
 ButtonType = structs.CarState.ButtonEvent.Type
 GearShifter = structs.CarState.GearShifter
@@ -230,6 +231,10 @@ class CarState(CarStateBase, MadsCarState, CarStateExt):
         ("Lane_Assist_Data3_FD1", 33),
         ("Cluster_Info_3_FD1", 10),
       ]
+      # BluePilot: the car's own GPS (SYNC APIM, 1 Hz) for carStateBP.gps, the comma's fallback position and clock.
+      # Non-critical (nan): a trim without the APIM never sends it and must not invalidate carState.
+      pt_messages += [(name, float('nan')) for name in GPS_NAV_MESSAGES]
+      # End BluePilot
     else:
       pt_messages += [
         ("INSTRUMENT_PANEL", 1),

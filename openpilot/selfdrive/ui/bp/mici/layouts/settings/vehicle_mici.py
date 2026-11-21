@@ -17,6 +17,7 @@ class VehicleLayoutMici(NavScroller):
     self._params = Params()
 
     self.show_hands_free_ui = BigParamControlBP("Show BlueCruise UI on Cluster", "send_hands_free_cluster_msg")
+    self.car_gps = BigParamControlBP("Use the Car's GPS", "BPCarGps")  # fallback for the comma's GPS (car_gps_bp.py)
     # Init-time param (read once at car init, mirrored into panda safety); takes effect after restart.
     # FORD_EDGE_MK2's pinion sensor only reports a relative angle -- the safety/control
     # layers already no-op this toggle there, so grey it out too (see values_ext.py
@@ -27,12 +28,14 @@ class VehicleLayoutMici(NavScroller):
 
     self._scroller.add_widgets([
       self.show_hands_free_ui,
+      self.car_gps,
       self.steer_angle_curvature,
       self.vbatt_pause_charging,
     ])
 
     self._refresh_toggles = (
       ("send_hands_free_cluster_msg", self.show_hands_free_ui),
+      ("BPCarGps", self.car_gps),
       ("FordPrefSteerAngleCurvature", self.steer_angle_curvature),
     )
 

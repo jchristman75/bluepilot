@@ -1415,6 +1415,12 @@
        "type": "toggle"
       },
       {
+       "desc": "When the comma's GPS has no fix, use the position and clock from the car's own GPS (SYNC). Sets the clock, map speed limits and route locations. CAN-FD Fords with SYNC.",
+       "param": "BPCarGps",
+       "title": "Use the Car's GPS",
+       "type": "toggle"
+      },
+      {
        "desc": "Set the 12V battery charging pause limit (11.0-14.0V).",
        "increment": 0.1,
        "max": 14.0,
@@ -1775,6 +1781,13 @@
        "param": "disable_ford_radar_UI",
        "requiresReboot": true,
        "title": "Disable Ford Radar (Vision-Only Leads)",
+       "type": "toggle"
+      },
+      {
+       "desc": "Track every radar return, not just the one object Ford's collision system picks, so stopped cars ahead are seen sooner and braking starts earlier and gentler. Mach-E, F-150, Lightning and Ranger. Ignored when Ford radar is disabled.",
+       "param": "BPRawRadar",
+       "requiresReboot": true,
+       "title": "Full Radar Tracking (CAN-FD Fords)",
        "type": "toggle"
       }
      ],

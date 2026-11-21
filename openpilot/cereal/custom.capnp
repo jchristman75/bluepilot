@@ -597,6 +597,26 @@ struct CarStateBP @0xb057204d7deadf3f {
   hybridBattery @1 :HybridBattery;
   brakeLightStatus @2 :BrakeLightStatus;
   longitudinal @3 :Longitudinal;
+  gps @4 :Gps;
+
+  # The car's own GPS (Ford SYNC APIM, APIMGPS_Data_Nav_1/2/3_FD1, 1 Hz). opendbc/sunnypilot/car/ford/gps_ext.py
+  # decodes it; ubloxd publishes it as gpsLocationExternal (source car) while the u-blox has no fix.
+  struct Gps {
+    hasFix @0 :Bool;                  # a real, non-inferred fix with valid position and clock
+    frameMonoTime @1 :UInt64;         # CAN receive time of the newest Nav_1 frame (logMonoTime clock, ns); 0 = never
+    latitude @2 :Float64;             # deg
+    longitude @3 :Float64;            # deg
+    altitude @4 :Float32;             # m above mean sea level (0 on a 2D fix)
+    speed @5 :Float32;                # m/s
+    bearingDeg @6 :Float32;
+    vNED @7 :List(Float32);           # m/s
+    horizontalAccuracy @8 :Float32;   # m
+    verticalAccuracy @9 :Float32;     # m
+    speedAccuracy @10 :Float32;       # m/s
+    bearingAccuracyDeg @11 :Float32;
+    unixTimestampMillis @12 :Int64;   # the car's GPS clock at the fix (whole seconds)
+    satelliteCount @13 :UInt8;        # 0 = unknown
+  }
 
   struct HybridDrive {
     dataAvailable @0 :Bool;

@@ -515,8 +515,35 @@ def main():
   params = Params()
   last_position_save = float('-inf')
 
+  # BluePilot: the car's own GPS stands in while the u-blox has no fix (bluepilot/system/car_gps_bp.py)
+  from openpilot.bluepilot.system.car_gps_bp import CarGpsFallback, read_enabled, now_ns
+  car_gps = CarGpsFallback()
+  car_gps_sock = messaging.sub_sock('carStateBP', conflate=True)
+  car_gps_param_read = float('-inf')
+
+  def send_gps(dat):
+    nonlocal last_position_save
+    pm.send('gpsLocationExternal', dat)
+    if dat.gpsLocationExternal.hasFix and time.monotonic() - last_position_save > 60:
+      params.put("LastGPSPosition", dat.to_bytes())
+      last_position_save = time.monotonic()
+  # End BluePilot
+
   while True:
     msg = messaging.recv_one(sock)
+
+    # BluePilot: car GPS fallback
+    if time.monotonic() - car_gps_param_read > 5.0:
+      car_gps.enabled = read_enabled(params)
+      car_gps_param_read = time.monotonic()
+    car_msg = messaging.recv_one_or_none(car_gps_sock)
+    if car_msg is not None:
+      car_gps.update_car(car_msg.carStateBP.gps)
+    idle = car_gps.on_idle(now_ns())
+    if idle is not None:
+      send_gps(idle)
+    # End BluePilot
+
     if msg is None:
       continue
 
@@ -531,11 +558,12 @@ def main():
       if not res:
         continue
       service, dat = res
+      # BluePilot: car GPS fallback replaces a no-fix u-blox position (send_gps also saves LastGPSPosition)
+      if service == 'gpsLocationExternal':
+        send_gps(car_gps.on_ublox(dat, now_ns()))
+        continue
+      # End BluePilot
       pm.send(service, dat)
-
-      if service == 'gpsLocationExternal' and dat.gpsLocationExternal.hasFix and time.monotonic() - last_position_save > 60:
-        params.put("LastGPSPosition", dat.to_bytes())
-        last_position_save = time.monotonic()
 
 
 if __name__ == '__main__':

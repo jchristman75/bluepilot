@@ -2231,6 +2231,12 @@
           "description": "Display BlueCruise UI on the cluster for supported vehicles."
         },
         {
+          "key": "BPCarGps",
+          "widget": "toggle",
+          "title": "[Vehicle] Use the Car's GPS",
+          "description": "When the comma's GPS has no fix, use the position and clock from the car's own GPS (SYNC). Sets the clock, map speed limits and route locations. CAN-FD Fords with SYNC."
+        },
+        {
           "key": "vbatt_pause_charging",
           "widget": "option",
           "title": "[Vehicle] 12V Battery Limit",

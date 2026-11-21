@@ -30,7 +30,7 @@ def test_panels_match_snapshot():
 
 def test_bluepilot_params_are_the_ford_settings():
   keys = params_manager._load_bluepilot_params()
-  assert len(keys) == 53
+  assert len(keys) == 55
   assert {'BPLongRegenBlend', 'disable_ford_radar_UI', 'vbatt_pause_charging', 'mici_hide_onroad_fade'} <= keys
   assert params_manager.categorize_param('BPLongRegenBlend') == 'BluePilot'
   assert params_manager.categorize_param('IsOffroad') == 'System'

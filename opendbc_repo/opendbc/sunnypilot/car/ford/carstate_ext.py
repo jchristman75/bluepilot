@@ -13,6 +13,7 @@ from opendbc.car.common.conversions import Conversions as CV
 from opendbc.can.parser import CANParser
 from opendbc.car.ford.values import CAR, FordFlags
 from opendbc.sunnypilot.car.ford.values_ext import BUTTONS
+from opendbc.sunnypilot.car.ford.gps_ext import NAV_MESSAGES as GPS_NAV_MESSAGES, nav_frame_nanos, parse_apim_gps
 from openpilot.common.swaglog import cloudlog
 
 THERMAL_PACK_MAX_C = 100.0  # BattTrac_Te_Actl above this is the sensor's Unknown/Fault code, not a temperature
@@ -462,7 +463,35 @@ class CarStateExt:
     except (KeyError, AttributeError):
       pass
 
+    # BluePilot: the car's own GPS (SYNC APIM), the comma's fallback position and clock (gps_ext.py)
+    self.fill_car_gps(dat.carStateBP.gps, cp)
+    # End BluePilot
+
     return dat
+
+  @staticmethod
+  def fill_car_gps(gps, cp):
+    """carStateBP.gps from the APIM Nav messages, if this car's parser has them. Membership is checked on the plain
+    dict first: CANParser.vl adds any message it is asked for (with alive checks), which on a car that never
+    registered these would invalidate CAN."""
+    gps.hasFix = False
+    try:
+      if not all(name in cp.vl for name in GPS_NAV_MESSAGES):
+        return
+    except TypeError:
+      return
+    gps.frameMonoTime = nav_frame_nanos(cp)
+    if gps.frameMonoTime == 0:
+      return
+    fix = parse_apim_gps(*(cp.vl[name] for name in GPS_NAV_MESSAGES))
+    if fix is None:
+      return
+    gps.hasFix = True
+    gps.latitude, gps.longitude, gps.altitude = fix.latitude, fix.longitude, fix.altitude
+    gps.speed, gps.bearingDeg, gps.vNED = fix.speed, fix.bearing_deg, list(fix.v_ned)
+    gps.horizontalAccuracy, gps.verticalAccuracy = fix.horizontal_accuracy, fix.vertical_accuracy
+    gps.speedAccuracy, gps.bearingAccuracyDeg = fix.speed_accuracy, fix.bearing_accuracy_deg
+    gps.unixTimestampMillis, gps.satelliteCount = fix.unix_timestamp_millis, fix.satellite_count
 
   def update_traffic_signals(self, cp_cam):
     """Parse traffic sign recognition data for speed limit.

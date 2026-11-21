@@ -357,6 +357,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"BPFollowGapScale", {PERSISTENT | BACKUP, FLOAT, "0.75"}},  // BluePilot: follow time as a fraction of the personality's, 0.6-1.0 (floored at 1.0 s) (follow_smooth_bp.py)
     {"BPLaneChangeCloseGap", {PERSISTENT | BACKUP, BOOL, "0"}},  // BluePilot: shorter follow gap while signaling out of the lane (lane_change_gap_bp.py)
     {"BPRawRadar", {PERSISTENT | BACKUP, BOOL, "0"}},  // BluePilot: raw Delphi MRR radar for CAN-FD Fords (bluepilot/selfdrive/controls/radar)
+    {"BPCarGps", {PERSISTENT | BACKUP, BOOL, "1"}},  // BluePilot: the car's own GPS stands in for a u-blox without a fix (bluepilot/system/car_gps_bp.py)
     {"FordPrefEnableDebugLogs", {PERSISTENT | BACKUP, BOOL, "0"}},  // BluePilot: bp_logger also forwards to cloudlog
     {"BPPortalCrashCount", {PERSISTENT, INT, "0"}},  // BluePilot: portal restart tracking (backend/core/lifecycle.py)
     {"BPPortalLastCrash", {PERSISTENT, INT, "0"}},

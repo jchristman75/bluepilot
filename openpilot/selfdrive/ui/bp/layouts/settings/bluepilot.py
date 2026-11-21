@@ -78,6 +78,7 @@ class BluePilotLayout(Widget):
     # Toggle refresh list
     self._refresh_toggles = (
       ("send_hands_free_cluster_msg", self._show_hands_free_ui),
+      ("BPCarGps", self._car_gps),
       ("FordPrefSteerAngleCurvature", self._steer_angle_curvature),
       ("BPDisableLaneLineStatusColor", self._disable_lane_line_status_color),
       ("BPHideCameraView", self._hide_camera_view),
@@ -120,6 +121,16 @@ class BluePilotLayout(Widget):
       lambda: tr("Display BlueCruise UI on the cluster for supported vehicles."),
       initial_state=self._safe_get_bool(self._params, "send_hands_free_cluster_msg"),
       callback=lambda state: self._toggle_callback(state, "send_hands_free_cluster_msg"),
+      icon="monitoring.png"
+    )
+
+    # The car's own GPS as a fallback for the comma's (bluepilot/system/car_gps_bp.py)
+    self._car_gps = toggle_item(
+      lambda: tr("Use the Car's GPS"),
+      lambda: tr("When the comma's GPS has no fix, use the position and clock from the car's own GPS (SYNC). " +
+                 "Sets the clock, map speed limits and route locations. CAN-FD Fords with SYNC."),
+      initial_state=self._safe_get_bool(self._params, "BPCarGps"),
+      callback=lambda state: self._toggle_callback(state, "BPCarGps"),
       icon="monitoring.png"
     )
 
@@ -764,6 +775,7 @@ class BluePilotLayout(Widget):
       ]) +
       _section(tr("Vehicle"), [
         self._show_hands_free_ui,
+        self._car_gps,
         self._steer_angle_curvature,
         self._vbatt_pause_charging,
       ]) +
