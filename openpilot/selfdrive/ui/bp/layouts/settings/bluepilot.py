@@ -98,6 +98,7 @@ class BluePilotLayout(Widget):
       ("enable_lane_full_mode_curv", self._enable_lane_full_mode),
       ("custom_profile_curv", self._custom_profile),
       ("enable_lane_positioning_ang", self._enable_lane_positioning_ang),
+      ("BPHighwaySmoothing", self._highway_smoothing),
       ("disable_BP_lat_UI", self._disable_BP_lat),
       ("disable_BP_long_UI", self._disable_BP_long),
       ("disable_downhill_comp_UI", self._disable_dowhill_comp),
@@ -573,6 +574,26 @@ class BluePilotLayout(Widget):
       icon="chffr_wheel.png"
     )
 
+    # Highway smoothing (opendbc/sunnypilot/car/ford/highway_smoothing_bp.py)
+    self._highway_smoothing = toggle_item(
+      lambda: tr("Highway Smoothing"),
+      lambda: tr("Above 40 mph, damp the small, quick steering corrections that make the car weave on a straight road. " +
+                 "Real curves, lane changes, blinkers and your own steering are not smoothed. Adds a little lag to small corrections."),
+      initial_state=self._safe_get_bool(self._params, "BPHighwaySmoothing"),
+      callback=lambda state: self._toggle_callback(state, "BPHighwaySmoothing"),
+      icon="chffr_wheel.png"
+    )
+    self._highway_smoothing_gain = float_control_item(
+      lambda: tr("Highway Smoothing Strength"),
+      lambda: tr("0.1 = strongest smoothing, 1.0 = none. Start at 0.7 and lower it if the weave remains."),
+      param="BPHighwaySmoothingGain",
+      min_value=0.1,
+      max_value=1.0,
+      step=0.05,
+      enabled=lambda: self._safe_get_bool(self._params, "BPHighwaySmoothing"),
+      icon="chffr_wheel.png"
+    )
+
     # Lane centering trim — angle mode's "advanced lane positioning" (curvature-domain trim,
     # see lane_center_trim.py). Mirrors the curv-mode items below, one-to-one, but scoped to
     # its own _ang params.
@@ -723,6 +744,8 @@ class BluePilotLayout(Widget):
       self._low_speed_curv_factor,
       self._high_speed_curv_factor,
       self._high_speed_dampening,
+      self._highway_smoothing,
+      self._highway_smoothing_gain,
       self._lane_change_factor_high_ang,
       self._enable_lane_positioning_ang,
       self._custom_path_offset_ang,
@@ -972,6 +995,7 @@ class BluePilotLayout(Widget):
     custom_prof = fresh.get("custom_profile_curv") if "custom_profile_curv" in fresh else self._safe_get_bool(ui_state.params, "custom_profile_curv")
     lane_pos = fresh.get("enable_lane_positioning_curv") if "enable_lane_positioning_curv" in fresh else self._safe_get_bool(ui_state.params, "enable_lane_positioning_curv")
     lane_pos_ang = fresh.get("enable_lane_positioning_ang") if "enable_lane_positioning_ang" in fresh else self._safe_get_bool(ui_state.params, "enable_lane_positioning_ang")
+    hw_smooth = fresh.get("BPHighwaySmoothing") if "BPHighwaySmoothing" in fresh else self._safe_get_bool(ui_state.params, "BPHighwaySmoothing")
     pause_lc = fresh.get("BlinkerPauseLaneChange") if "BlinkerPauseLaneChange" in fresh else self._safe_get_bool(ui_state.params, "BlinkerPauseLaneChange")
     is_angle = (plat_idx == PrimaryLateralControl.angle)
     is_curv = not is_angle
@@ -981,6 +1005,8 @@ class BluePilotLayout(Widget):
     self._low_speed_curv_factor.action_item.set_enabled(is_angle)
     self._high_speed_curv_factor.action_item.set_enabled(is_angle)
     self._high_speed_dampening.action_item.set_enabled(is_angle)
+    self._highway_smoothing.action_item.set_enabled(is_angle)
+    self._highway_smoothing_gain.action_item.set_enabled(is_angle and hw_smooth)
     self._lane_change_factor_high_ang.action_item.set_enabled(is_angle)
     self._enable_lane_positioning_ang.action_item.set_enabled(is_angle)
     self._custom_path_offset_ang.action_item.set_enabled(is_angle and lane_pos_ang)

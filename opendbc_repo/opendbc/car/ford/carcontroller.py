@@ -14,6 +14,7 @@ from opendbc.sunnypilot.car.ford.lateral_curv_ext import LateralCurvExt, Primary
 from opendbc.sunnypilot.car.ford.lateral_angle_ext import LateralAngleExt
 from opendbc.sunnypilot.car.ford.longitudinal_ext import LongitudinalExt
 from opendbc.sunnypilot.car.ford.hud_ext import HudExt
+from opendbc.sunnypilot.car.ford.param_poll_bp import ParamPoll  # BluePilot
 from opendbc.sunnypilot.car.ford import fordcan_ext
 from opendbc.sunnypilot.car.ford.icbm import IntelligentCruiseButtonManagementInterface
 
@@ -94,6 +95,7 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     self.apply_curvature_last = 0
     self.anti_overshoot_curvature_last = 0
     self.disable_BP_lat_UI = False
+    self.param_poll = ParamPoll()  # BluePilot: throttle for the runtime param reads in update()
     self.accel = 0.0
     self.gas = 0.0
     self.bp_brake_actuate = False  # BluePilot: for carStateBP.longitudinal
@@ -107,12 +109,14 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     # BluePilot: update SubMaster (modelV2, vehicleParameters, selfdriveState, radarState) and vehicle model
     LateralCurvExt.update_sm(self)
 
-    # BluePilot: read runtime params from UI
-    LateralCurvExt.update_lateral_params(self, self.params)
-    LateralAngleExt.update_angle_params(self, self.params)
-    self.disable_BP_lat_UI = self.params.get_bool("disable_BP_lat_UI")
-    LongitudinalExt.update_long_params(self, self.params)
-    HudExt.update_hud_params(self, self.params, self.CP)
+    # BluePilot: read runtime params from UI, at 2 Hz rather than every frame (param_poll_bp.py)
+    if self.param_poll.due(self.frame):
+      LateralCurvExt.update_lateral_params(self, self.params)
+      LateralAngleExt.update_angle_params(self, self.params)
+      self.disable_BP_lat_UI = self.params.get_bool("disable_BP_lat_UI")
+      LongitudinalExt.update_long_params(self, self.params)
+      HudExt.update_hud_params(self, self.params, self.CP)
+    # End BluePilot
 
     actuators = CC.actuators
     hud_control = CC.hudControl

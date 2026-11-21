@@ -25,6 +25,10 @@ class LateralLayoutMici(NavScroller):
     self.high_speed_dampening = BigParamFloatControl(
       "High Speed Low Curve Adjustment Factor", "FordHighSpeedDampening_ang", min=0.25, max=1.25, step=0.01,
     )
+    self.highway_smoothing = BigParamControlBP("Highway Smoothing", "BPHighwaySmoothing")
+    self.highway_smoothing_gain = BigParamFloatControl(
+      "Highway Smoothing Strength", "BPHighwaySmoothingGain", min=0.1, max=1.0, step=0.05,
+    )
     self.lane_change_factor_high_ang = BigParamFloatControl(
       "Lane Change Factor High", "lane_change_factor_high_ang", min=0.85, max=1.50,
     )
@@ -84,6 +88,8 @@ class LateralLayoutMici(NavScroller):
       self.low_speed_factor,
       self.high_speed_factor,
       self.high_speed_dampening,
+      self.highway_smoothing,
+      self.highway_smoothing_gain,
       self.lane_change_factor_high_ang,
       self.enable_lane_positioning_ang,
       self.custom_path_offset_ang,
@@ -111,6 +117,7 @@ class LateralLayoutMici(NavScroller):
       ("enable_lane_full_mode_curv", self.enable_lane_full_mode),
       ("custom_profile_curv", self.custom_profile),
       ("enable_lane_positioning_ang", self.enable_lane_positioning_ang),
+      ("BPHighwaySmoothing", self.highway_smoothing),
       ("BpShowLateralControl", self.show_lateral_control),
     )
 
@@ -130,6 +137,9 @@ class LateralLayoutMici(NavScroller):
     self.low_speed_factor.set_visible(is_angle)
     self.high_speed_factor.set_visible(is_angle)
     self.high_speed_dampening.set_visible(is_angle)
+    self.highway_smoothing.set_visible(is_angle)
+    self.highway_smoothing_gain.set_visible(is_angle)
+    self.highway_smoothing_gain.set_enabled(ui_state.params.get_bool("BPHighwaySmoothing"))
     self.lane_change_factor_high_ang.set_visible(is_angle)
     self.enable_lane_positioning_ang.set_visible(is_angle)
     lane_pos_ang = ui_state.params.get_bool("enable_lane_positioning_ang")

@@ -336,6 +336,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"FordLowSpeedFactor_ang", {PERSISTENT | BACKUP, FLOAT, "1.0"}},
     {"FordHighSpeedFactor_ang", {PERSISTENT | BACKUP, FLOAT, "1.0"}},
     {"FordHighSpeedDampening_ang", {PERSISTENT | BACKUP, FLOAT, "1.0"}},
+    {"BPHighwaySmoothing", {PERSISTENT | BACKUP, BOOL, "0"}},  // BluePilot: damp small, fast changes of the angle-mode curvature command above 40 mph (highway_smoothing_bp.py)
+    {"BPHighwaySmoothingGain", {PERSISTENT | BACKUP, FLOAT, "0.7"}},  // BluePilot: highway smoothing strength, 0.1 (strongest) - 1.0 (off)
     {"BPLateralSchemeParamsMigratedV1", {PERSISTENT | BACKUP, STRING, "0"}},
 
     // BluePilot: angle-mode lane centering trim (advanced lane positioning) -- see

@@ -984,5 +984,101 @@ class TestReactiveStallRealCurveGate(unittest.TestCase):
     self.assertEqual(self.ext.stall_blip_hold_s, 0.0)
 
 
+class TestHighwaySmoothingWiring(unittest.TestCase):
+  """BPHighwaySmoothing (highway_smoothing_bp.py) in the angle path: off by default, in front of the lane trim,
+  reset with it, and never active for a driver who is steering."""
+  V = 30.0
+
+  def setUp(self):
+    self.CP = _explorer_cp()
+    self.ext = _Harness(self.CP)
+    self.ext.human_turn_detector = _ForcedDetector(False)
+    self.ext.model = _Model()
+
+  def _cs(self, **kw):
+    return _CS(vEgoRaw=self.V, vEgo=self.V, **kw)
+
+  def _drive(self, kappas, enabled, gain=0.4, cs=None, lat_active=True):
+    self.ext.highway_smoothing_enabled = enabled
+    self.ext.highway_smoothing_gain = gain
+    cs = cs or self._cs()
+    out = []
+    for k in kappas:
+      self.ext.update_angle_strategy(_CC(latActive=lat_active), cs, _Actuators(curvature=float(k)), self.CP)
+      out.append(self.ext.bp_kappa_cmd)
+    return np.array(out)
+
+  @staticmethod
+  def _weave(seconds=40.0, amp=0.0002, hz=1.0):
+    t = np.arange(0.0, seconds, 0.05)
+    return amp * np.sin(2 * math.pi * hz * t)
+
+  def test_it_is_off_by_default(self):
+    ext = _Harness(self.CP)
+    self.assertFalse(ext.highway_smoothing_enabled)
+
+  def test_a_weave_is_smaller_when_it_is_on(self):
+    kappas = self._weave()
+    off = self._drive(kappas, enabled=False)
+    ext_state = self.ext.highway_smoothing
+    self.setUp()
+    on = self._drive(kappas, enabled=True)
+    self.assertIsNotNone(ext_state)
+    tail = slice(int(15 / 0.05), None)
+    self.assertLess(np.ptp(on[tail]), 0.7 * np.ptp(off[tail]))
+    self.assertGreater(self.ext.highway_smoothing.weight, 0.5)
+
+  def test_off_never_runs_the_filter_and_changes_nothing(self):
+    kappas = self._weave(seconds=10.0)
+    a = self._drive(kappas, enabled=False)
+    self.setUp()
+    self.ext.highway_smoothing.update = mock.Mock(side_effect=AssertionError("filter ran while disabled"))
+    b = self._drive(kappas, enabled=False)
+    np.testing.assert_array_equal(a, b)
+    self.ext.highway_smoothing.update.assert_not_called()
+
+  def test_steering_pressed_is_a_bypass(self):
+    self._drive(self._weave(seconds=30.0), enabled=True)
+    self.assertGreater(self.ext.highway_smoothing.weight, 0.5)
+    self._drive(self._weave(seconds=3.0), enabled=True, cs=self._cs(steeringPressed=True))
+    self.assertEqual(self.ext.highway_smoothing.weight, 0.0)
+
+  def test_a_blinker_is_a_bypass(self):
+    self._drive(self._weave(seconds=30.0), enabled=True)
+    cs = self._cs()
+    cs.out.leftBlinker = True
+    self._drive(self._weave(seconds=3.0), enabled=True, cs=cs)
+    self.assertEqual(self.ext.highway_smoothing.weight, 0.0)
+
+  def test_going_inactive_resets_the_filter(self):
+    self._drive(self._weave(seconds=30.0), enabled=True)
+    self._drive([0.0] * 5, enabled=True, lat_active=False)
+    self.assertEqual(self.ext.highway_smoothing.weight, 0.0)
+    self.assertEqual(self.ext.highway_smoothing.bypass_weight, 0.0)
+
+  def test_the_params_are_read_and_clamped(self):
+    self.ext.update_angle_params(_FakeParams({"BPHighwaySmoothing": True, "BPHighwaySmoothingGain": b"0.55"}))
+    self.assertTrue(self.ext.highway_smoothing_enabled)
+    self.assertAlmostEqual(self.ext.highway_smoothing_gain, 0.55)
+    for raw, expect in ((b"0.01", 0.1), (b"9", 1.0), (b"junk", 1.0)):   # junk keeps the previous value
+      self.ext.update_angle_params(_FakeParams({"BPHighwaySmoothing": True, "BPHighwaySmoothingGain": raw}))
+      self.assertAlmostEqual(self.ext.highway_smoothing_gain, expect, msg=raw)
+
+  def test_a_params_library_without_the_keys_leaves_it_off(self):
+    class _Stale(_FakeParams):
+      def get_bool(self, key):
+        if key.startswith("BPHighwaySmoothing"):
+          raise KeyError(key)
+        return super().get_bool(key)
+
+      def get(self, key, return_default=False):
+        if key.startswith("BPHighwaySmoothing"):
+          raise KeyError(key)
+        return super().get(key, return_default)
+
+    self.ext.update_angle_params(_Stale({}))   # must not raise
+    self.assertFalse(self.ext.highway_smoothing_enabled)
+
+
 if __name__ == '__main__':
   unittest.main()

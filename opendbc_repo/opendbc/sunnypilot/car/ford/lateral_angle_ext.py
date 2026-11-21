@@ -65,6 +65,8 @@ from opendbc.car.ford.values import CAR, CarControllerParams
 from opendbc.sunnypilot.car.ford.lateral_curv_ext import LateralResult
 from opendbc.sunnypilot.car.ford.human_turn import HumanTurnDetector
 from opendbc.sunnypilot.car.ford.lane_center_trim import LaneCenterTrim
+from opendbc.sunnypilot.car.ford.highway_smoothing_bp import (GAIN_MAX, GAIN_MIN, PREDICTION_HORIZONS_S,
+                                                              HighwaySmoothing)
 from opendbc.sunnypilot.car.ford.values_ext import BP_ANGLE_LIMITS
 from openpilot.selfdrive.modeld.constants import ModelConstants
 
@@ -368,6 +370,11 @@ class LateralAngleExt:
     # lane_center_trim.py and the module docstring above.
     self.lane_center_trim = LaneCenterTrim()
     self.lane_trim_applied = 0.0  # telemetry: trim actually added to kappa_cmd, after _TRIM_OPPOSE_AY
+    # BluePilot: highway smoothing (highway_smoothing_bp.py): damps small, fast changes of kappa_cmd above 40 mph.
+    # Off by default; BPHighwaySmoothing / BPHighwaySmoothingGain.
+    self.highway_smoothing = HighwaySmoothing()
+    self.highway_smoothing_enabled = False
+    self.highway_smoothing_gain = 0.7
     self.enable_lane_positioning_ang = False
     self.custom_path_offset_ang = 0.0
     self.lane_centering_strength_ang = 0.25
@@ -455,6 +462,18 @@ class LateralAngleExt:
       # BluePilot: angle-mode lane centering trim (advanced lane positioning) params.
       try:
         self.enable_lane_positioning_ang = bool(params.get_bool("enable_lane_positioning_ang"))
+      except Exception:
+        pass
+      # BluePilot: highway smoothing. A params library built before these keys existed raises: stay off.
+      try:
+        self.highway_smoothing_enabled = bool(params.get_bool("BPHighwaySmoothing"))
+      except Exception:
+        self.highway_smoothing_enabled = False
+      try:
+        raw = params.get("BPHighwaySmoothingGain", return_default=True)
+        if raw is not None and raw != b"":
+          self.highway_smoothing_gain = float(clip(
+            float(raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw), GAIN_MIN, GAIN_MAX))
       except Exception:
         pass
       for attr, key, min_value, max_value in (
@@ -547,6 +566,7 @@ class LateralAngleExt:
       self.human_turn_detector.reset()
       self.angle_human_turn_active = False
       self.lane_center_trim.reset()
+      self.highway_smoothing.reset()
       self._wire_slow = None
       self._gain_kappa_slow = None
       self.stall_blip_hold_s = 0.0
@@ -598,6 +618,7 @@ class LateralAngleExt:
       # Keep exit detection current so resume doesn't compare against a stale pre-turn value.
       self._desired_curvature_last = float(actuators.curvature)
       self.lane_center_trim.reset()
+      self.highway_smoothing.reset()
       self._wire_slow = None
       self._gain_kappa_slow = None
       # A human turn ends any stall episode -- its own mode 0 does the PSCM reset job. That also
@@ -685,6 +706,7 @@ class LateralAngleExt:
       self.bp_kappa_cmd = self.get_current_curvature(CS)
       self._desired_curvature_last = float(actuators.curvature)
       self.lane_center_trim.reset()
+      self.highway_smoothing.reset()
       self._wire_slow = None
       self._gain_kappa_slow = None
       self.precision_type = 1
@@ -792,6 +814,22 @@ class LateralAngleExt:
     # changes (see lane_center_trim.py). Applied here, before the deviation clip below, so the
     # trimmed value inherits every limiter this file already applies to kappa_cmd instead of
     # bypassing them.
+    # BluePilot: highway smoothing, in front of the trim so the trim's guard below measures only its own correction
+    # against the smoothed command. Bypassed for blinkers, hands on the wheel and lane changes.
+    if self.highway_smoothing_enabled:
+      _predicted = None
+      if self.model is not None and len(self.model.orientationRate.z) >= 17:
+        _predicted = tuple(v_ego * float(interp(h, ModelConstants.T_IDXS, self.model.orientationRate.z))
+                           for h in PREDICTION_HORIZONS_S)
+      kappa_cmd = self.highway_smoothing.update(
+        kappa_cmd, v_ego, CC.latActive, self.highway_smoothing_gain,
+        bool(CS.out.steeringPressed or getattr(CS.out, "leftBlinker", False) or getattr(CS.out, "rightBlinker", False)
+             or self.lane_change),
+        _STEER_DT, _predicted)
+    else:
+      self.highway_smoothing.reset(kappa_cmd)
+    # End BluePilot
+
     current_curvature = self.get_current_curvature(CS)
     _kappa_planner = kappa_cmd
     kappa_cmd = self.lane_center_trim.update(

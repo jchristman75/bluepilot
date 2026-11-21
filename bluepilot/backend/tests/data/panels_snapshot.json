@@ -1881,6 +1881,31 @@
        }
       },
       {
+       "desc": "Above 40 mph, damp the small, quick steering corrections that make the car weave on a straight road. Real curves, lane changes, blinkers and your own steering are not smoothed. Adds a little lag to small corrections.",
+       "param": "BPHighwaySmoothing",
+       "title": "Highway Smoothing (Angle)",
+       "type": "toggle",
+       "visibleConditions": {
+        "paramValueEquals": {
+         "FordPrefLateralControl": "1"
+        }
+       }
+      },
+      {
+       "desc": "0.1 = strongest smoothing, 1.0 = none. Start at 0.7 and lower it if the weave remains.",
+       "increment": 0.05,
+       "max": 1.0,
+       "min": 0.1,
+       "param": "BPHighwaySmoothingGain",
+       "title": "Highway Smoothing Strength (Angle)",
+       "type": "float",
+       "visibleConditions": {
+        "paramValueEquals": {
+         "FordPrefLateralControl": "1"
+        }
+       }
+      },
+      {
        "desc": "Scales steering during a lane change in angle mode. Values >1.0 boost it.",
        "increment": 0.05,
        "max": 1.5,
