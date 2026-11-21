@@ -59,7 +59,7 @@ BRAKE_REGEN = BrakeThresholds(on=-0.55, off=-0.40)
 # Regen request calibration. In ACC mode the Mach-E delivers ~0.63-0.66x of an AccPrpl request (+ drag): measured
 # delivered = 0.63 * request + 0.17 (steady state, 689 s, routes 582-58e), while a manual lift-off decelerates at
 # 1.6-2.0 m/s^2. So a planned decel above REGEN_CAL_KNEE is sent as a request REGEN_CAL_SLOPE (~1/0.65) times deeper
-# (planned 1.0 -> request 1.35, 1.5 -> 2.1, 2.0 -> 2.85), and everything downstream (floor, brake thresholds, the
+# (planned 0.5 -> request 0.6, 1.0 -> 1.35, 1.15 -> 1.58), and everything downstream (floor, brake thresholds, the
 # shortfall monitor) works in planned-decel units.
 REGEN_CAL_KNEE = 0.3
 REGEN_CAL_SLOPE = 1.5
@@ -79,7 +79,7 @@ def regen_decel(request):
   return -(REGEN_CAL_KNEE + (-request - REGEN_CAL_KNEE) / REGEN_CAL_SLOPE)
 
 
-REGEN_PLAN_FLOOR = regen_decel(REGEN_MIN_GAS)  # deepest planned decel regen can deliver at the panda's floor: -2.1
+REGEN_PLAN_FLOOR = regen_decel(REGEN_MIN_GAS)  # deepest planned decel propulsion regen is used for (the panda's floor): -1.167
 # With the panda's deeper regen floor (FordSafetyFlagsBP.REGEN_BLEND at init), regen covers planned decels down to
 # REGEN_PLAN_FLOOR and the friction brakes only come in just below it.
 BRAKE_REGEN_DEEP = BrakeThresholds(on=REGEN_PLAN_FLOOR - 0.05, off=REGEN_PLAN_FLOOR + 0.1)

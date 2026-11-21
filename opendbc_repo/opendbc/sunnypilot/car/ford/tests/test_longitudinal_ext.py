@@ -176,36 +176,37 @@ class DeepCtrl(Ctrl):
 
 def test_deep_regen_covers_medium_slowing_without_friction():
   c = DeepCtrl()
-  for a in (-0.3, -0.6, -0.85, -0.9, -1.2, -1.45, -1.8, REGEN_PLAN_FLOOR):
+  for a in (-0.3, -0.6, -0.85, -0.9, -1.0, REGEN_PLAN_FLOOR):
     r = step(c, a)
     assert not r.brake_actuate, a
     assert r.gas == pytest.approx(regen_request(a)) and r.accel_pred_send == r.gas
 
 
 def test_deep_regen_brake_flag_thresholds():
+  """Propulsion regen is used down to a planned decel of ~1.17 (request -1.6); harder goes through the brake path, which
+  the car blends regen-first (propulsion regen saturates around 1.0-1.4 whatever is asked)."""
   c = DeepCtrl()
-  r = step(c, -2.12)                       # between the planned floor (-2.1) and the flag: regen at the panda floor
-  assert not r.brake_actuate and r.gas == pytest.approx(REGEN_MIN_GAS)
-  assert step(c, -2.2).brake_actuate       # below -2.15: friction
-  assert step(c, -2.05).brake_actuate      # band -2.15..-2.0 holds
-  r = step(c, -1.9)
-  assert not r.brake_actuate and r.gas == pytest.approx(regen_request(-1.9))
-  r = step(c, -1.6)                        # regen all the way: the old floors (-0.9, -1.5, -2.2) were friction here
-  assert not r.brake_actuate and r.gas == pytest.approx(regen_request(-1.6))
+  r = step(c, -1.15)                       # between the planned floor (-1.167) and the flag: regen at the panda floor
+  assert not r.brake_actuate and r.gas == pytest.approx(regen_request(-1.15))
+  assert step(c, -1.3).brake_actuate       # below -1.217: the brake path
+  assert step(c, -1.15).brake_actuate      # band -1.217..-1.067 holds
+  r = step(c, -1.0)
+  assert not r.brake_actuate and r.gas == pytest.approx(regen_request(-1.0))
+  r = step(c, -0.5)
+  assert not r.brake_actuate and r.gas == pytest.approx(regen_request(-0.5))
 
 
 def test_regen_request_calibration():
   """The car delivers ~0.63-0.66x of a regen request (+ drag): planned decels above the knee are asked for 1.5x deeper."""
   assert regen_request(-0.2) == -0.2 and regen_request(0.0) == 0.0 and regen_request(0.5) == 0.5   # light regen and gas: 1:1
   assert regen_request(-0.3) == pytest.approx(-0.3)                                               # continuous at the knee
-  assert regen_request(-1.0) == pytest.approx(-1.35) and regen_request(-1.5) == pytest.approx(-2.1)
-  assert regen_request(-2.0) == pytest.approx(-2.85)
+  assert regen_request(-1.0) == pytest.approx(-1.35) and regen_request(-0.5) == pytest.approx(-0.6)
   assert regen_request(REGEN_PLAN_FLOOR) == pytest.approx(REGEN_MIN_GAS)                          # the planned floor is the panda floor
-  assert REGEN_PLAN_FLOOR == pytest.approx(-2.1) and REGEN_MIN_GAS == -3.0
+  assert REGEN_PLAN_FLOOR == pytest.approx(-1.1667, abs=1e-3) and REGEN_MIN_GAS == -1.6
   for d in (-0.1, -0.3, -0.7, -1.2, -1.9, -2.1):
     assert regen_decel(regen_request(d)) == pytest.approx(d)                                      # exact inverse
-  steady = [0.63 * -regen_request(d) + 0.17 for d in (-1.0, -1.5, -2.0)]                          # measured delivered = 0.63 req + 0.17
-  assert steady == pytest.approx([1.02, 1.5, 1.97], abs=0.12)                                     # so the plan is met within ~0.1
+  steady = [0.63 * -regen_request(d) + 0.17 for d in (-0.5, -1.0, -1.15)]                         # measured delivered = 0.63 req + 0.17
+  assert steady == pytest.approx([0.55, 1.02, 1.16], abs=0.12)                                    # so the plan is met within ~0.1
 
 
 def test_deep_regen_needs_the_init_flag():

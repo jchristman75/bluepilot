@@ -845,7 +845,7 @@ class TestFordPinionF150Safety(FordF150PinionGeometry, TestFordPinionCurvatureSa
 
 # =============================================================================
 # BluePilot: regen coasting (FordSafetyFlagsBP.REGEN_BLEND, bit 14). With the flag the propulsion
-# request may go down to REGEN_MIN_GAS (-3.0); without it the stock -0.5 floor holds (every
+# request may go down to REGEN_MIN_GAS (-1.6); without it the stock -0.5 floor holds (every
 # class above re-checks that). The inherited test_gas_safety_check sweeps both signals.
 
 class TestFordRegenCANFDLongitudinalSafety(TestFordCANFDLongitudinalSafety):
@@ -862,18 +862,18 @@ class TestFordRegenCANFDLongitudinalSafety(TestFordCANFDLongitudinalSafety):
     self.assertFalse(self._tx(self._acc_command_msg(-0.9, self.INACTIVE_ACCEL, False)))
     self.assertTrue(self._tx(self._acc_command_msg(-0.5, self.INACTIVE_ACCEL, False)))
 
-  def test_the_regen_floor_is_exactly_minus_3_0(self):
-    """-3.0 is accepted (the stock -0.5 and the old -0.9/-1.5/-2.2 floors are well inside it), anything deeper is not."""
+  def test_the_regen_floor_is_exactly_minus_1_6(self):
+    """-1.6 is accepted (the stock -0.5 and the old -0.9/-1.5 floors are well inside it), anything deeper is not."""
     self.safety.set_controls_allowed(True)
-    self.assertEqual(REGEN_MIN_GAS, -3.0)
-    for gas in (-0.9, -1.5, -2.2, -2.85, -3.0):
+    self.assertEqual(REGEN_MIN_GAS, -1.6)
+    for gas in (-0.9, -1.2, -1.5, -1.6):
       self.assertTrue(self._tx(self._acc_command_msg(gas, self.INACTIVE_ACCEL, False)), gas)
-    for gas in (-3.01, -3.5, -4.0):
+    for gas in (-1.61, -2.0, -3.0):
       self.assertFalse(self._tx(self._acc_command_msg(gas, self.INACTIVE_ACCEL, False)), gas)
     self.SAFETY_PARAM_SP = 0                      # without the init flag the deep floor must not exist
     self.setUp()
     self.safety.set_controls_allowed(True)
-    for gas in (-1.2, -3.0):
+    for gas in (-1.2, -1.6):
       self.assertFalse(self._tx(self._acc_command_msg(gas, self.INACTIVE_ACCEL, False)), gas)
 
 

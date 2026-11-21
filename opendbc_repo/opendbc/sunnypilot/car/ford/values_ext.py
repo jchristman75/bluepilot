@@ -70,13 +70,14 @@ class FordSafetyFlagsBP:
 
 
 # Deepest propulsion (regen) request with FordSafetyFlagsBP.REGEN_BLEND set, m/s^2 (AccPrpl_A_Rq / AccPrpl_A_Pred). Must
-# match ford.h (raw 200). Stock Ford ACC (Mach-E, routes 4e6/4f8) only sends down to ~-0.88; driving it manually
-# (routes 568-58e, no pedals) the Mach-E regens at 1.6-2.0 m/s^2 (p90 ~2.1) at 3-45 mph with 42-63 kW into the pack.
-# But in ACC mode the car delivers only ~0.63-0.66x of the request plus ~0.1-0.17 of drag (steady-state fit on 689 s of
-# 582/585/588/58a/58e: delivered = 0.63 * request + 0.17; request -2.0 -> 1.4, never more than ~1.5 at the old -2.2 floor).
-# So the request is calibrated (REGEN_CAL_* in longitudinal_ext.py) and the floor is -3.0, which delivers ~2.1 m/s^2.
-# The live pack limit (regen_floor in longitudinal_ext.py) still cuts it when the pack can't absorb that.
-REGEN_MIN_GAS = -3.0
+# match ford.h (raw 340). Stock Ford ACC (Mach-E, routes 4e6/4f8) only sends down to ~-0.88. In ACC mode the car delivers
+# only ~0.63-0.66x of a propulsion request (+ drag) and it saturates around 1.0-1.4 m/s^2 whatever is asked (routes
+# 59e/5a0/5ab: requests 1.8-3.0 delivered a mean of 1.1-1.4, p90 1.6-1.9; 5ab t=478 got 0.9-1.0 for a plan of 1.1-1.5 and
+# the friction flag flickered), while a request through the brake path (AccBrkTot, flag on) is blended regen-first
+# (decel 2.0-2.1 with 80-90% of the braking power landing in the pack, like a lift-off). So propulsion regen is used only
+# up to a planned decel of ~1.15 (request -1.6, calibrated in longitudinal_ext.py) and everything harder goes through the
+# brake path. The live pack limit (regen_floor in longitudinal_ext.py) still cuts it when the pack can't absorb that.
+REGEN_MIN_GAS = -1.6
 
 
 # Geometry-table index for the steering-angle curvature measurement, packed into
