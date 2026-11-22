@@ -4,7 +4,8 @@ import threading
 
 import openpilot.cereal.messaging as messaging
 from openpilot.system.hardware.chestnut import monitoring
-from openpilot.system.hardware.chestnut.monitoring import should_power_off_gpu
+from openpilot.system.hardware.chestnut.monitoring import (GPU_OFF_MAX_ATTEMPTS, GPU_OFF_RETRY_FRAMES,
+                                                           GPU_OFF_SETTLE_FRAMES, GpuPowerOff)
 
 
 def state(current_ma, valid=True):
@@ -14,13 +15,46 @@ def state(current_ma, valid=True):
   return msg
 
 
-def test_gate():
-  assert should_power_off_gpu(True, False, state(1640))
-  assert should_power_off_gpu(True, False, state(1400))    # wedged link, still powered
-  assert not should_power_off_gpu(False, False, state(1640))  # onroad / just parked
-  assert not should_power_off_gpu(True, True, state(1640))    # already sent this offroad period
-  assert not should_power_off_gpu(True, False, state(50))     # already off
-  assert not should_power_off_gpu(True, False, state(1640, valid=False))
+def feed(gate, n, current_ma, idle=True, valid=True):
+  return [i for i in range(n) if gate.update(idle, state(current_ma, valid))]
+
+
+def test_waits_for_settled_draw():
+  gate = GpuPowerOff()
+  assert feed(gate, GPU_OFF_SETTLE_FRAMES - 1, 1640) == []
+  assert feed(gate, 1, 1640) == [0]
+
+
+def test_not_idle_or_off_or_invalid():
+  assert feed(GpuPowerOff(), 100, 1640, idle=False) == []
+  assert feed(GpuPowerOff(), 100, 50) == []
+  assert feed(GpuPowerOff(), 100, 1640, valid=False) == []
+
+
+def test_wedged_gpu_is_powered_off():
+  assert feed(GpuPowerOff(), GPU_OFF_SETTLE_FRAMES, 1400) == [GPU_OFF_SETTLE_FRAMES - 1]
+
+
+def test_retries_when_ignored_then_gives_up():
+  gate = GpuPowerOff()
+  sends = feed(gate, GPU_OFF_SETTLE_FRAMES + GPU_OFF_RETRY_FRAMES * 10, 1640)
+  assert len(sends) == GPU_OFF_MAX_ATTEMPTS
+  assert sends[1] - sends[0] == GPU_OFF_RETRY_FRAMES
+
+
+def test_later_manual_power_on_left_alone():
+  gate = GpuPowerOff()
+  assert len(feed(gate, GPU_OFF_SETTLE_FRAMES, 1640)) == 1
+  feed(gate, 5, 50)  # the off took effect
+  assert feed(gate, 500, 1640) == []  # e.g. compile_modeld's link_up
+
+
+def test_new_offroad_period_rearms():
+  gate = GpuPowerOff()
+  feed(gate, GPU_OFF_SETTLE_FRAMES, 1640)
+  feed(gate, 5, 50)
+  feed(gate, 5, 1640, idle=False)  # drive
+  assert len(feed(gate, GPU_OFF_SETTLE_FRAMES, 1640)) == 1
 
 
 class FakeHandle:
@@ -44,9 +78,9 @@ class FakeHandle:
     pass
 
 
-def run_thread(monkeypatch, idle):
+def run_thread(monkeypatch, idle, frames=GPU_OFF_SETTLE_FRAMES + 20):
   end_event = threading.Event()
-  handle = FakeHandle(end_event, frames=5)
+  handle = FakeHandle(end_event, frames)
 
   class Ctx:
     def __enter__(self): return self

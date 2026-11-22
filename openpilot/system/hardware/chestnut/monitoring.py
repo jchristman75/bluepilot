@@ -11,17 +11,50 @@ from openpilot.common.swaglog import cloudlog
 # model loader (tinygrad CustomASM24Controller) turns it on, but nothing turned it off again, so on an
 # always-on 12 V feed the GPU and its fans ran at ~1.6 A (~20 W) offroad. Measured 2026-11-22: 1.64 A -> <0.1 A
 # with 0xF3=0, and 0xF3=1 brings the link back to L0 in 0.5 s, which the loader does on its own next drive.
+# A 0xF3=0 that lands while the firmware is still bringing the link up is ignored (2026-11-22: sent 0.3 s after
+# power on, GPU stayed at 1.6 A), so wait for the draw to settle and re-check after each send.
 GPU_OFF_CURRENT_MA = 500  # above this the GPU is powered (idle on ~1.6 A, wedged ~1.4 A, off <0.1 A)
+GPU_OFF_SETTLE_FRAMES = 30  # 3 s of powered readings at 10 Hz before sending
+GPU_OFF_RETRY_FRAMES = 50   # re-send if still powered 5 s later
+GPU_OFF_MAX_ATTEMPTS = 3    # per offroad period, so a later manual power-on (compile) stays on
 
 
-def should_power_off_gpu(idle: bool, already_sent: bool, msg) -> bool:
-  return idle and not already_sent and msg.valid and msg.chestnutState.supplyCurrent > GPU_OFF_CURRENT_MA
+class GpuPowerOff:
+  def __init__(self):
+    self.reset()
+
+  def reset(self):
+    self.powered_frames = 0
+    self.attempts = 0
+    self.since_send = 0
+    self.done = False  # an off took effect: leave any later power-on (manual compile) alone until the next drive
+
+  def update(self, idle: bool, msg) -> bool:
+    """Feed one chestnutState reading. Returns True when 0xF3=0 should be sent now."""
+    if not idle:
+      self.reset()
+      return False
+    if not msg.valid:
+      return False
+    self.since_send += 1
+    if msg.chestnutState.supplyCurrent <= GPU_OFF_CURRENT_MA:
+      self.powered_frames = 0
+      self.done |= self.attempts > 0
+      return False
+    self.powered_frames += 1
+    if self.done or self.attempts >= GPU_OFF_MAX_ATTEMPTS or self.powered_frames < GPU_OFF_SETTLE_FRAMES:
+      return False
+    if self.attempts > 0 and self.since_send < GPU_OFF_RETRY_FRAMES:
+      return False
+    self.attempts += 1
+    self.since_send = 0
+    return True
 
 
-def power_off_gpu(handle, current_ma: int) -> None:
+def power_off_gpu(handle, current_ma: int, attempt: int) -> None:
   try:
     handle.controlWrite(0x40, 0xF3, 0, 0, b'', timeout=10000)
-    cloudlog.event("chestnut gpu powered off while offroad", supply_current=current_ma)
+    cloudlog.event("chestnut gpu powered off while offroad", supply_current=current_ma, attempt=attempt)
   except usb1.USBError:
     cloudlog.exception("chestnut gpu power off failed")
 # End BluePilot
@@ -48,7 +81,7 @@ def chestnut_state_thread(end_event, gpu_idle=None):  # BluePilot: gpu_idle
   sm = messaging.SubMaster(['chestnutGpuState'])
   with usb1.USBContext() as context:
     handle = None
-    gpu_off_sent = False  # BluePilot: once per offroad period, so a later manual power-on (compile) stays on
+    gpu_power_off = GpuPowerOff()  # BluePilot
     try:
       while not end_event.is_set():
         if handle is None:
@@ -68,12 +101,9 @@ def chestnut_state_thread(end_event, gpu_idle=None):  # BluePilot: gpu_idle
             handle = None
           msg.valid &= not sm.seen['chestnutGpuState'] or gpu_valid
           pm.send('chestnutState', msg)
-          # BluePilot: power the GPU off once the car has been parked a while (see should_power_off_gpu)
-          idle = gpu_idle is not None and gpu_idle.is_set()
-          if should_power_off_gpu(idle, gpu_off_sent, msg):
-            power_off_gpu(handle, msg.chestnutState.supplyCurrent)
-            gpu_off_sent = True
-          gpu_off_sent &= idle
+          # BluePilot: power the GPU off once the car has been parked a while (see GpuPowerOff)
+          if gpu_power_off.update(gpu_idle is not None and gpu_idle.is_set(), msg):
+            power_off_gpu(handle, msg.chestnutState.supplyCurrent, gpu_power_off.attempts)
           # End BluePilot
         end_event.wait(1 / SERVICE_LIST['chestnutState'].frequency if handle is not None else 1.)
     finally:
