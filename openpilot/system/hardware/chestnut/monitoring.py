@@ -29,15 +29,17 @@ class GpuPowerOff:
     self.since_send = 0
     self.done = False  # an off took effect: leave any later power-on (manual compile) alone until the next drive
 
-  def update(self, idle: bool, msg) -> bool:
-    """Feed one chestnutState reading. Returns True when 0xF3=0 should be sent now."""
+  def update(self, idle: bool, read_ok: bool, current_ma: int) -> bool:
+    """Feed one Chestnut USB reading. Returns True when 0xF3=0 should be sent now.
+    read_ok is the USB read itself, not chestnutState.valid: that also folds in chestnutGpuState, which goes
+    stale once modeld exits, so after every drive it is False offroad (2026-11-22: GPU left on at 811 mA)."""
     if not idle:
       self.reset()
       return False
-    if not msg.valid:
+    if not read_ok:
       return False
     self.since_send += 1
-    if msg.chestnutState.supplyCurrent <= GPU_OFF_CURRENT_MA:
+    if current_ma <= GPU_OFF_CURRENT_MA:
       self.powered_frames = 0
       self.done |= self.attempts > 0
       return False
@@ -96,13 +98,14 @@ def chestnut_state_thread(end_event, gpu_idle=None):  # BluePilot: gpu_idle
           sm.update(0)
           gpu_valid = sm.alive['chestnutGpuState'] and sm.valid['chestnutGpuState']
           msg = read_chestnut_state(handle, sm['chestnutGpuState'] if gpu_valid else None)
+          read_ok = msg.valid  # BluePilot: USB read result, before the chestnutGpuState check below
           if not msg.valid:
             handle.close()
             handle = None
           msg.valid &= not sm.seen['chestnutGpuState'] or gpu_valid
           pm.send('chestnutState', msg)
           # BluePilot: power the GPU off once the car has been parked a while (see GpuPowerOff)
-          if gpu_power_off.update(gpu_idle is not None and gpu_idle.is_set(), msg):
+          if gpu_power_off.update(gpu_idle is not None and gpu_idle.is_set(), read_ok, msg.chestnutState.supplyCurrent):
             power_off_gpu(handle, msg.chestnutState.supplyCurrent, gpu_power_off.attempts)
           # End BluePilot
         end_event.wait(1 / SERVICE_LIST['chestnutState'].frequency if handle is not None else 1.)

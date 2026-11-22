@@ -2,21 +2,13 @@
 import struct
 import threading
 
-import openpilot.cereal.messaging as messaging
 from openpilot.system.hardware.chestnut import monitoring
 from openpilot.system.hardware.chestnut.monitoring import (GPU_OFF_MAX_ATTEMPTS, GPU_OFF_RETRY_FRAMES,
                                                            GPU_OFF_SETTLE_FRAMES, GpuPowerOff)
 
 
-def state(current_ma, valid=True):
-  msg = messaging.new_message('chestnutState')
-  msg.chestnutState.supplyCurrent = current_ma
-  msg.valid = valid
-  return msg
-
-
 def feed(gate, n, current_ma, idle=True, valid=True):
-  return [i for i in range(n) if gate.update(idle, state(current_ma, valid))]
+  return [i for i in range(n) if gate.update(idle, valid, current_ma)]
 
 
 def test_waits_for_settled_draw():
@@ -78,8 +70,19 @@ class FakeHandle:
     pass
 
 
-def run_thread(monkeypatch, idle, frames=GPU_OFF_SETTLE_FRAMES + 20):
+class StaleGpuStateSM:
+  """chestnutGpuState was published during the drive (modeld) and is stale now -> chestnutState.valid False."""
+  def __init__(self, *a, **k):
+    self.alive, self.valid, self.seen = {'chestnutGpuState': False}, {'chestnutGpuState': False}, {'chestnutGpuState': True}
+
+  def update(self, timeout=0):
+    pass
+
+
+def run_thread(monkeypatch, idle, frames=GPU_OFF_SETTLE_FRAMES + 20, after_drive=False):
   end_event = threading.Event()
+  if after_drive:
+    monkeypatch.setattr(monitoring.messaging, "SubMaster", StaleGpuStateSM)
   handle = FakeHandle(end_event, frames)
 
   class Ctx:
@@ -102,6 +105,11 @@ def test_thread_powers_off_once_when_idle(monkeypatch):
   handle = run_thread(monkeypatch, idle=True)
   assert handle.writes == [(0x40, 0xF3, 0)]
   assert handle.current_ma == 50
+
+
+def test_thread_powers_off_after_a_drive(monkeypatch):
+  handle = run_thread(monkeypatch, idle=True, after_drive=True)
+  assert handle.writes == [(0x40, 0xF3, 0)]
 
 
 def test_thread_leaves_gpu_on_when_not_idle(monkeypatch):
