@@ -30,6 +30,8 @@ from openpilot.system.hardware.power_monitoring import PowerMonitoring
 from openpilot.system.hardware.fan_controller import FanController
 from openpilot.system.hardware.chestnut.monitoring import chestnut_state_thread
 from openpilot.system.hardware.chestnut.status import ChestnutStatus
+from openpilot.system.hardware.chestnut.enum_recovery import ChestnutEnumRecovery  # BluePilot
+from openpilot.common.hardware.usb import cable_connected  # BluePilot
 from openpilot.common.version import terms_version, training_version, get_build_metadata, terms_version_sp
 
 ThermalStatus = log.DeviceState.ThermalStatus
@@ -253,6 +255,7 @@ def hardware_thread(end_event, hw_queue, chestnut_gpu_idle=None) -> None:  # Blu
   fan_controller = FanController(int(1./DT_HW))
   chestnut = Chestnut()
   chestnut_status = ChestnutStatus()
+  chestnut_enum_recovery = ChestnutEnumRecovery()  # BluePilot: VBUS cycle a Chestnut that missed boot enumeration
   branch = get_short_branch()
 
   build_metadata = get_build_metadata()
@@ -341,6 +344,10 @@ def hardware_thread(end_event, hw_queue, chestnut_gpu_idle=None) -> None:  # Blu
 
     set_usb_state(msg.deviceState, last_hw_state.usb_state)
     chestnut.update(started_ts is None, last_hw_state.usb_state)
+    # BluePilot: VBUS cycle a Chestnut that did not enumerate (see chestnut/enum_recovery.py)
+    if COMMA_HARDWARE:
+      chestnut_enum_recovery.update(started_ts is None, last_hw_state.usb_state, cable_connected(), chestnut.flashing)
+    # End BluePilot
     chestnut_state = sm["chestnutState"]
     chestnut_valid = sm.alive["chestnutState"] and sm.valid["chestnutState"]
     chestnut_status.update(started_ts is None or not onroad_conditions["ignition"], branch, last_hw_state.usb_state, chestnut.failed,
@@ -457,7 +464,7 @@ def hardware_thread(end_event, hw_queue, chestnut_gpu_idle=None) -> None:  # Blu
 
     # BluePilot: let the chestnut monitor power the eGPU off once parked (not mid-flash, not right after a drive)
     if chestnut_gpu_idle is not None:
-      if off_ts is not None and time.monotonic() - off_ts > CHESTNUT_GPU_IDLE_TIME and not chestnut.flashing:
+      if off_ts is not None and time.monotonic() - off_ts > CHESTNUT_GPU_IDLE_TIME and not chestnut.flashing and not chestnut_enum_recovery.cycling:
         chestnut_gpu_idle.set()
       else:
         chestnut_gpu_idle.clear()

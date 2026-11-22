@@ -595,9 +595,21 @@ def main():
   parser = argparse.ArgumentParser(description="check and flash the bundled chestnut firmware")
   parser.add_argument("version", nargs="?", help="expected firmware version hash")
   parser.add_argument("--force", action="store_true", help="reflash even when the version matches")
+  # BluePilot: VBUS cycle only, for hardwared's boot enumeration recovery (chestnut/enum_recovery.py)
+  parser.add_argument("--vbus-cycle", action="store_true", help="power-cycle chestnut VBUS and exit")
+  # End BluePilot
   args = parser.parse_args()
   if os.geteuid() != 0:
     raise RuntimeError("flash.py must run as root")
+  # BluePilot: VBUS cycle only
+  if args.vbus_cycle:
+    if not os.path.exists(VBUS_PATH):
+      raise RuntimeError(f"no VBUS control at {VBUS_PATH}")
+    vbus_cycle()
+    path, _, product = find_chestnut()
+    print(f"vbus cycled, chestnut {'at ' + path if path else 'not found'} {product or ''}", flush=True)
+    return
+  # End BluePilot
   flash_chestnut(expected_version=args.version, force=args.force)
 
 
