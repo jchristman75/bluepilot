@@ -40,6 +40,7 @@ TEMP_TAU = 5.   # 5s time constant
 DISCONNECT_TIMEOUT = 5.  # wait 5 seconds before going offroad after disconnect so you get an alert
 PANDA_STATES_TIMEOUT = round(1000 / SERVICE_LIST['pandaStates'].frequency * 1.5)  # 1.5x the expected pandaState frequency
 ONROAD_CYCLE_TIME = 1  # seconds to wait offroad after requesting an onroad cycle
+CHESTNUT_GPU_IDLE_TIME = 60.  # BluePilot: seconds offroad before the eGPU's PCIe power is turned off
 
 class Chestnut:
   # flash before going onroad, modeld ignores chestnut until the product string matches
@@ -200,7 +201,7 @@ def hw_state_thread(end_event, hw_queue):
     time.sleep(DT_HW)
 
 
-def hardware_thread(end_event, hw_queue) -> None:
+def hardware_thread(end_event, hw_queue, chestnut_gpu_idle=None) -> None:  # BluePilot: chestnut_gpu_idle
   system_stats = LinuxSystemStats() if sys.platform == "linux" else None
   pm = messaging.PubMaster(['deviceState'])
   sm = messaging.SubMaster(["peripheralState", "gpsLocationExternal", "selfdriveState", "pandaStates", "chestnutState"], poll="pandaStates")
@@ -454,6 +455,14 @@ def hardware_thread(end_event, hw_queue) -> None:
       if off_ts is None:
         off_ts = time.monotonic()
 
+    # BluePilot: let the chestnut monitor power the eGPU off once parked (not mid-flash, not right after a drive)
+    if chestnut_gpu_idle is not None:
+      if off_ts is not None and time.monotonic() - off_ts > CHESTNUT_GPU_IDLE_TIME and not chestnut.flashing:
+        chestnut_gpu_idle.set()
+      else:
+        chestnut_gpu_idle.clear()
+    # End BluePilot
+
     # Offroad power monitoring
     voltage = None if peripheralState.pandaType == log.PandaState.PandaType.unknown else peripheralState.voltage
 
@@ -540,15 +549,16 @@ def hardware_thread(end_event, hw_queue) -> None:
 def main():
   hw_queue = queue.Queue(maxsize=1)
   end_event = threading.Event()
+  chestnut_gpu_idle = threading.Event()  # BluePilot: eGPU offroad power off
 
   threads = [
     threading.Thread(target=hw_state_thread, args=(end_event, hw_queue)),
-    threading.Thread(target=hardware_thread, args=(end_event, hw_queue)),
+    threading.Thread(target=hardware_thread, args=(end_event, hw_queue, chestnut_gpu_idle)),  # BluePilot: chestnut_gpu_idle
   ]
 
   if COMMA_HARDWARE:
     threads.append(threading.Thread(target=touch_thread, args=(end_event,)))
-    threads.append(threading.Thread(target=chestnut_state_thread, args=(end_event,)))
+    threads.append(threading.Thread(target=chestnut_state_thread, args=(end_event, chestnut_gpu_idle)))  # BluePilot: chestnut_gpu_idle
 
   for t in threads:
     t.start()
