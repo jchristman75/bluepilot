@@ -83,9 +83,8 @@ def apply_ford_curvature_limits_ext(apply_curvature, apply_curvature_last, curre
 
   # Curvature rate limit after driver torque limit (same inputs/order as apply_ford_curvature_limits)
   apply_curvature_before_std = apply_curvature
-  # Testing - BluePilot: std curvature rate limit disabled
-  # apply_curvature = apply_std_steer_angle_limits(apply_curvature_before_std, apply_curvature_last, v_ego_raw,
-  #                                                 steering_angle, lat_active, BP_ANGLE_LIMITS)
+  apply_curvature = apply_std_steer_angle_limits(apply_curvature_before_std, apply_curvature_last, v_ego_raw,
+                                                  steering_angle, lat_active, BP_ANGLE_LIMITS)
 
   # Max one-step envelope for UI: steer_up must use pre-limit curvature (see apply_std_steer_angle_limits)
   steer_up = (apply_curvature_last * apply_curvature_before_std >= 0.0
@@ -93,8 +92,7 @@ def apply_ford_curvature_limits_ext(apply_curvature, apply_curvature_last, curre
   rate_limits = BP_ANGLE_LIMITS.ANGLE_RATE_LIMIT_UP if steer_up else BP_ANGLE_LIMITS.ANGLE_RATE_LIMIT_DOWN
   std_steer_angle_rate_limit = np.interp(v_ego_raw, rate_limits[0], rate_limits[1])
   std_steer_angle_limit = abs(apply_curvature_last) + abs(std_steer_angle_rate_limit)
-  # Testing - BluePilot: rate envelope no longer bounds max_curvature
-  # max_curvature = np.minimum(max_curvature, std_steer_angle_limit)
+  max_curvature = np.minimum(max_curvature, std_steer_angle_limit)
 
   # Ford CAN FD lateral acceleration limit (more torque available than CAN)
   if CP.flags & FordFlags.CANFD:
@@ -398,8 +396,9 @@ class LateralCurvExt:
 
       # Post-reset ramp: gradually ramp from 0 to avoid safety limit trips
       if self.post_reset_ramp_active:
-        # Testing - BluePilot: std curvature rate limit disabled (post-reset ramp passes requested curvature straight through)
-        apply_curvature = requested_curvature
+        apply_curvature = apply_std_steer_angle_limits(
+          requested_curvature, apply_curvature_last,
+          CS.out.vEgoRaw, 0, CC.latActive, BP_ANGLE_LIMITS)
 
         curvature_error = abs(requested_curvature - apply_curvature)
         curvature_threshold = max(abs(requested_curvature) * 0.1, 0.001)
@@ -476,8 +475,7 @@ class LateralCurvExt:
 
       # Rate limit path angle for comfort
       path_angle_roc = interp(abs(CS.out.vEgoRaw), self.LC_path_angle_ROC_bp, self.LC_path_angle_ROC_v)
-      # Testing - BluePilot: path_angle ROC clip disabled
-      # path_angle_low_c = clip(path_angle_low_c, self.path_angle_last - path_angle_roc, self.path_angle_last + path_angle_roc)
+      path_angle_low_c = clip(path_angle_low_c, self.path_angle_last - path_angle_roc, self.path_angle_last + path_angle_roc)
 
       # Reset PID if driver applies consistent steering pressure
       if steeringPressed:
