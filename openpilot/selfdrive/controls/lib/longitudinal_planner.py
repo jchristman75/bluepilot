@@ -47,6 +47,7 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     self.lane_change_gap = None
     self.soft_approach = None
     self.follow_smooth = None
+    self.follow_time = None
     if is_bluepilot():
       from openpilot.bluepilot.selfdrive.controls.lane_change_gap_bp import LaneChangeGapPlanner
       from openpilot.bluepilot.selfdrive.controls.approach_decel_bp import SoftApproachPlanner
@@ -54,6 +55,8 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
       self.soft_approach = SoftApproachPlanner()
       from openpilot.bluepilot.selfdrive.controls.follow_smooth_bp import FollowSmoothPlanner
       self.follow_smooth = FollowSmoothPlanner()
+      from openpilot.bluepilot.selfdrive.controls.follow_time_bp import FollowTimePlanner
+      self.follow_time = FollowTimePlanner()
     # End BluePilot
 
     self.v_desired_filter = FirstOrderFilter(init_v, 2.0, self.dt)
@@ -101,6 +104,9 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
       self.mpc.set_cur_state(self.v_desired_filter.x, self.output_a_target)
     else:
       self.mpc.set_cur_state(v_ego, sm['carState'].aEgo)
+    # BluePilot: adjustable standard follow time (BPFollowTimeStandard)
+    if self.follow_time is not None:
+      self.follow_time.update()
     # BluePilot: follow-time override while changing lanes (None = stock)
     t_follow = self.lane_change_gap.t_follow(sm, sm['selfdriveState'].personality) if self.lane_change_gap is not None else None
     # BluePilot: smoother, slightly closer following (BPSmoothFollow): averaged lead speed/accel, scaled follow time

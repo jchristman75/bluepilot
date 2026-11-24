@@ -356,6 +356,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"BPSoftApproach", {PERSISTENT | BACKUP, BOOL, "1"}},  // BluePilot: highway approach to a far lead uses the time-to-impact decel, not the follow-gap panic (approach_decel_bp.py)
     {"BPSmoothFollow", {PERSISTENT | BACKUP, BOOL, "1"}},  // BluePilot: average the lead's speed/accel and follow a little closer (follow_smooth_bp.py)
     {"BPFollowGapScale", {PERSISTENT | BACKUP, FLOAT, "0.75"}},  // BluePilot: follow time as a fraction of the personality's, 0.6-1.0 (floored at 1.0 s) (follow_smooth_bp.py)
+    {"BPFollowTimeStandard", {PERSISTENT | BACKUP, FLOAT, "1.25"}},  // BluePilot: follow time in seconds for the standard driving personality, 1.0-1.75 (stock 1.45) (follow_time_bp.py)
     {"BPLaneChangeCloseGap", {PERSISTENT | BACKUP, BOOL, "0"}},  // BluePilot: shorter follow gap while signaling out of the lane (lane_change_gap_bp.py)
     {"BPRawRadar", {PERSISTENT | BACKUP, BOOL, "0"}},  // BluePilot: raw Delphi MRR radar for CAN-FD Fords (bluepilot/selfdrive/controls/radar)
     {"BPCarGps", {PERSISTENT | BACKUP, BOOL, "1"}},  // BluePilot: the car's own GPS stands in for a u-blox without a fix (bluepilot/system/car_gps_bp.py)

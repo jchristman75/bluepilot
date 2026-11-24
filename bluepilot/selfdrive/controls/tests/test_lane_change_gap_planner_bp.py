@@ -43,12 +43,12 @@ def test_the_follow_time_drops_to_the_request_only_while_changing_lanes():
   r = scenario(ON)
   assert r['tf_lc'] == pytest.approx(lg.REQUEST_S, abs=0.02)
   tail = [x['t_follow'] for x in r['log'][-40:]]
-  assert tail[-1] == pytest.approx(1.45, abs=0.02)                   # standard personality again afterwards
+  assert tail[-1] == pytest.approx(1.25, abs=0.02)                   # standard personality again afterwards
 
 
 def test_the_car_closes_up_behind_the_lead_during_the_lane_change():
   off, on = scenario(OFF), scenario(ON)
-  assert on['gap_lc'] < off['gap_lc'] - 3.0
+  assert on["gap_lc"] < off["gap_lc"] - 2.0
   assert on['v_lc'] <= V + 2.0                                       # no rush: closing speed stays small
   assert not on['fcw']
 
@@ -75,7 +75,7 @@ def test_the_other_sides_blind_spot_does_not():
 def test_a_braking_lead_aborts_it_and_the_car_brakes_normally():
   off = scenario(OFF, lc_s=6.0, lead_brake=1.0)
   on = scenario(ON, lc_s=6.0, lead_brake=1.0)
-  assert on['tf_lc'] >= 1.35                                         # the reduction was cancelled when the lead braked
+  assert on["tf_lc"] >= 1.2                                          # the reduction was cancelled when the lead braked
   assert on['amin_lc'] >= off['amin_lc'] - 0.3                       # and braking is no weaker than stock
   assert not on['fcw']
 

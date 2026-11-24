@@ -14,7 +14,7 @@ safety logic are untouched):
   2. The lead's distance is averaged too (tau TAU_D), within +-BAND_S seconds of the real one, so the gap the car
      tries to hold floats a little instead of every wobble of the bus moving the boundary the MPC regulates to.
      The distance the MPC sees is never farther than the real one.
-  3. The follow time is scaled (BPFollowGapScale, default 0.75: standard 1.45 s -> 1.09 s) and floored at MIN_T_FOLLOW.
+  3. The follow time is scaled (BPFollowGapScale, default 0.75: standard 1.25 s by default -> 0.94 s) and floored at MIN_T_FOLLOW.
 
 Pure logic here; the planner adapter at the bottom reads the params.
 """

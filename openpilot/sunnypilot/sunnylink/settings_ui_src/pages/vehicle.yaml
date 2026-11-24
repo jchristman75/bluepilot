@@ -284,6 +284,13 @@ sections:
     needs_onroad_cycle: true
     title: '[Longitudinal Tuning] Regen Coasting (Stock-Like Decel)'
     description: Slow with regen like stock Ford ACC, down to -0.9 m/s^2, and use the friction brakes only for firmer braking. Turning it on takes effect after a restart; turning it off is immediate.
+  - key: BPFollowTimeStandard
+    widget: option
+    title: '[Longitudinal Tuning] Standard Follow Time'
+    description: Seconds of following gap on the Standard driving personality (stock is 1.45). Lower follows closer. Smooth Following scales this further, and the car never follows closer than 1.0 s.
+    min: 1.0
+    max: 1.75
+    step: 0.05
   - key: disable_downhill_comp_UI
     widget: toggle
     title: '[Longitudinal Tuning] Disable Downhill Compensation'

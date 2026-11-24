@@ -668,6 +668,18 @@ class BluePilotLayout(Widget):
       icon="chffr_wheel.png"
     )
 
+    self._follow_time_standard = float_control_item(
+      lambda: tr("Standard Follow Time"),
+      lambda: tr("Seconds of following gap on the Standard driving personality (stock is 1.45). Lower follows closer. " +
+                 "Smooth Following scales this further, and the car never follows closer than 1.0 s."),
+      param="BPFollowTimeStandard",
+      min_value=1.0,
+      max_value=1.75,
+      step=0.05,
+      suffix=" s",
+      icon="chffr_wheel.png"
+    )
+
     # Disable downhill compensation toggle
     self._disable_dowhill_comp = toggle_item(
       lambda: tr("Disable Downhill Compensation"),
@@ -831,6 +843,7 @@ class BluePilotLayout(Widget):
         self._regen_blend,
         self._soft_approach,
         self._smooth_follow,
+        self._follow_time_standard,
         self._disable_dowhill_comp,
         self._disable_ford_radar,
         self._raw_radar,

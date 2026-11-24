@@ -3,6 +3,7 @@
 from collections.abc import Callable
 
 from openpilot.selfdrive.ui.bp.mici.widgets.button_bp import BigParamControlBP
+from openpilot.selfdrive.ui.bp.mici.widgets.floatbutton import BigParamFloatControl
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.widgets.scroller import NavScroller
 
@@ -17,6 +18,9 @@ class LongitudinalLayoutMici(NavScroller):
     self.regen_blend = BigParamControlBP("Regen Coasting (Stock-Like Decel)", "BPLongRegenBlend")
     self.soft_approach = BigParamControlBP("Soft Highway Approach", "BPSoftApproach")
     self.smooth_follow = BigParamControlBP("Smooth Following (Closer Gap)", "BPSmoothFollow")
+    self.follow_time_standard = BigParamFloatControl(
+      "Standard Follow Time", "BPFollowTimeStandard", min=1.0, max=1.75, step=0.05,
+    )
     self.disable_downhill_comp = BigParamControlBP("Disable Downhill Compensation", "disable_downhill_comp_UI")
     self.disable_ford_radar = BigParamControlBP("Disable Ford Radar (Vision-Only Leads)", "disable_ford_radar_UI")
     self.raw_radar = BigParamControlBP("Full Radar Tracking (CAN-FD Fords)", "BPRawRadar")
@@ -26,6 +30,7 @@ class LongitudinalLayoutMici(NavScroller):
       self.regen_blend,
       self.soft_approach,
       self.smooth_follow,
+      self.follow_time_standard,
       self.disable_downhill_comp,
       self.disable_ford_radar,
       self.raw_radar,
