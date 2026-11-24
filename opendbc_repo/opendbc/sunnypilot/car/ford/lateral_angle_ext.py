@@ -65,6 +65,9 @@ from opendbc.car.ford.values import CAR, CarControllerParams
 from opendbc.sunnypilot.car.ford.lateral_curv_ext import LateralResult
 from opendbc.sunnypilot.car.ford.human_turn import HumanTurnDetector
 from opendbc.sunnypilot.car.ford.lane_center_trim import LaneCenterTrim
+# BluePilot: the Mach-E PSCM's own path-angle gain curve (replaces the hand-tuned gain map)
+from opendbc.sunnypilot.car.ford.path_angle_gain_bp import gain_curve_for
+# End BluePilot
 from opendbc.sunnypilot.car.ford.highway_smoothing_bp import (GAIN_MAX, GAIN_MIN, PREDICTION_HORIZONS_S,
                                                               HighwaySmoothing)
 from opendbc.sunnypilot.car.ford.values_ext import BP_ANGLE_LIMITS
@@ -72,6 +75,11 @@ from openpilot.selfdrive.modeld.constants import ModelConstants
 
 # Hard-coded per-platform gain defaults.
 # CAN vehicles (Escape MK4, Bronco Sport, Explorer, Maverick, Edge)
+# BluePilot: _USE_MODULE_GAIN_CURVE -- where the car's steering module has a gain curve in path_angle_gain_bp.py
+# (the 2021-22 Mach-E), K comes from that curve and the gain map below, its FordLow/HighSpeedFactor_ang /
+# FordHighSpeedDampening_ang factors and the small-curvature boost are not used. Other cars keep the map.
+_USE_MODULE_GAIN_CURVE = True
+
 _GAIN_CAN         = (1.00, 1.15)
 # CAN-FD body-on-frame trucks (F-150, Lightning, Ranger)
 _GAIN_CANFD_BOF   = (0.95, 0.95)
@@ -384,6 +392,8 @@ class LateralAngleExt:
     # BluePilot: small-curvature gain (see _SMALL_CURV_GAIN_CANFD_SUV); platform value set in
     # update_angle_params.
     self.small_curv_gain = 1.0
+    # BluePilot: the steering module's own gain curve for this car (None: hand-tuned map), set in update_angle_params
+    self.gain_curve = None
     self._wire_slow = None
     self._gain_kappa_slow = None  # low-passed |kappa_cmd| for the curvature_factor lookup (_GAIN_KAPPA_TAU_S)
     self.bp_unwind_clamped = False  # clip-bound unwind clamp actually bit this frame
@@ -439,6 +449,7 @@ class LateralAngleExt:
     self.path_angle_gain_lowC_highV = low
     self.path_angle_gain_highC_highV = high
     self.small_curv_gain = _SMALL_CURV_GAIN_CANFD_SUV if fp in _CANFD_SUV_CARS else 1.0
+    self.gain_curve = gain_curve_for(self.CP) if _USE_MODULE_GAIN_CURVE else None
     if params is not None and hasattr(params, "get"):
       for attr, key, min_value, max_value in (
         ("low_speed_curv_factor", "FordLowSpeedFactor_ang", 0.5, 1.5),
@@ -890,6 +901,11 @@ class LateralAngleExt:
       self.curvature_factor = interp(np.log(max(_k_abs, 1e-9)), np.log(_GAIN_RAMP_KAPPA), [self.low_gain_calc, self.high_gain_calc])
     else:
       self.curvature_factor = interp(_k_abs, _GAIN_RAMP_KAPPA, [self.low_gain_calc, self.high_gain_calc])
+    # BluePilot: the module's own gain curve replaces the map above: K = 1 / (K2(d(v)) * v), no user factors,
+    # no curvature blend, no small-curvature boost (path_angle_gain_bp.py). The lead-lag shaping below stays.
+    if self.gain_curve is not None:
+      self.curvature_factor = self.gain_curve.curvature_factor(v_ego)
+    # End BluePilot
 
     # Steady-state wire command in curvature units (path_angle / v).
     wire_kappa = kappa_cmd * self.curvature_factor
