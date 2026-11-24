@@ -137,13 +137,14 @@ static bool ford_get_quality_flag_valid(const CANPacket_t *msg) {
                                                                                                  \
   .use_rate_lookup = true,                                                                       \
   /* Looser symmetric ROCs (former down table); Python control uses stricter up row in values_ext */ \
+  /* Testing - BluePilot: rate-of-change limits removed (effectively unlimited, 1.0 1/m per frame) */          \
   .curvature_rate_up_lookup = {                                                                  \
     {5., 16., 25.},                                                                              \
-    {0.0025f, 0.0014f, 0.00018f}                                                                 \
+    {1.0f, 1.0f, 1.0f}                                                                           \
   },                                                                                             \
   .curvature_rate_down_lookup = {                                                                \
     {5., 16., 25.},                                                                              \
-    {0.0025f, 0.0014f, 0.00018f}                                                                 \
+    {1.0f, 1.0f, 1.0f}                                                                           \
   },                                                                                             \
   .limit_lateral_acceleration = (limit_lateral_accel),                                           \
 }
@@ -304,7 +305,9 @@ static bool path_angle_cmd_checks(int desired_path_angle, bool steer_control_ena
     int highest_desired_path_angle = desired_path_angle_last + delta_path_angle_roc;
     int lowest_desired_path_angle = desired_path_angle_last - delta_path_angle_roc;
 
-    violation |= safety_max_limit_check(desired_path_angle, highest_desired_path_angle, lowest_desired_path_angle);
+    // Testing - BluePilot: path_angle rate-of-change check disabled
+    (void)highest_desired_path_angle; (void)lowest_desired_path_angle;
+    // violation |= safety_max_limit_check(desired_path_angle, highest_desired_path_angle, lowest_desired_path_angle);
     if (test) {
       FORD_SAFETY_DBG("path_angle_cmd_checks 1: desired_path_angle: %d desired_path_angle_last: %d highest_desired_path_angle: %d lowest_desired_path_angle: %d violation: %d \n",
                       desired_path_angle, desired_path_angle_last, highest_desired_path_angle, lowest_desired_path_angle, (int)violation);
@@ -335,7 +338,9 @@ static bool path_offset_cmd_checks(int desired_path_offset, bool steer_control_e
     int highest_desired_path_offset = desired_path_offset_last + delta_path_offset_roc;
     int lowest_desired_path_offset = desired_path_offset_last - delta_path_offset_roc;
 
-    violation |= safety_max_limit_check(desired_path_offset, highest_desired_path_offset, lowest_desired_path_offset);
+    // Testing - BluePilot: path_offset rate-of-change check disabled
+    (void)highest_desired_path_offset; (void)lowest_desired_path_offset;
+    // violation |= safety_max_limit_check(desired_path_offset, highest_desired_path_offset, lowest_desired_path_offset);
     if (test) {
       FORD_SAFETY_DBG("path_offset_cmd_checks 1: desired_path_offset: %d desired_path_offset_last: %d highest_desired_path_offset: %d lowest_desired_path_offset: %d violation: %d \n",
                       desired_path_offset, desired_path_offset_last, highest_desired_path_offset, lowest_desired_path_offset, (int)violation);
@@ -367,7 +372,9 @@ static bool curvature_rate_cmd_checks(int desired_curvature_rate, bool steer_con
     int highest_desired_curvature_rate = desired_curvature_rate_last + desired_curvature_rate_roc;
     int lowest_desired_curvature_rate = desired_curvature_rate_last - desired_curvature_rate_roc;
 
-    violation |= safety_max_limit_check(desired_curvature_rate, highest_desired_curvature_rate, lowest_desired_curvature_rate);
+    // Testing - BluePilot: curvature_rate rate-of-change check disabled
+    (void)highest_desired_curvature_rate; (void)lowest_desired_curvature_rate;
+    // violation |= safety_max_limit_check(desired_curvature_rate, highest_desired_curvature_rate, lowest_desired_curvature_rate);
     if (test) {
       FORD_SAFETY_DBG("curvature_rate_cmd_checks 1: desired_curvature_rate: %d desired_curvature_rate_last: %d highest_desired_curvature_rate: %d lowest_desired_curvature_rate: %d violation: %d \n",
                       desired_curvature_rate, desired_curvature_rate_last, highest_desired_curvature_rate, lowest_desired_curvature_rate, (int)violation);

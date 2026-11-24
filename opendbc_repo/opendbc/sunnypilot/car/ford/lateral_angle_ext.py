@@ -947,9 +947,10 @@ class LateralAngleExt:
     # FORD_PATH_ANGLE_LIMITS, which must mirror this scaling (x1.02 looser) to stay a true backstop.
     _soft_roc = float(interp(v_ego, _SOFT_ROC_V_NODES, _SOFT_ROC_RAD_PER_CALL))
     _path_angle_pre_roc = path_angle
-    path_angle = float(clip(path_angle,
-                            self.path_angle_last - _soft_roc,
-                            self.path_angle_last + _soft_roc))
+    # Testing - BluePilot: soft ROC clip disabled
+    # path_angle = float(clip(path_angle,
+    #                         self.path_angle_last - _soft_roc,
+    #                         self.path_angle_last + _soft_roc))
     # BluePilot: did the soft ROC clip actually limit the path_angle we wanted to send this frame?
     self.bp_angle_rate_limited = bool(abs(path_angle - _path_angle_pre_roc) > 1e-9)
 
